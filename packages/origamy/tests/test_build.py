@@ -187,3 +187,59 @@ def test_a_collapse_along_no_crease_is_refused() -> None:
     with pytest.raises(RefusedError) as refused:
         paper.collapse(valleys=[Line.through(("1/2", 0), ("1/2", 1))])
     assert refused.value.refused.diagnostics[0].rule == "no-crease"
+
+
+def triangle() -> Paper:
+    """The square folded along its diagonal, its tip at (1, 1)."""
+    paper = Paper.square()
+    paper.valley(Line.through((0, 0), (1, 1)), flap=("1/4", "3/4"))
+    return paper
+
+
+@pytest.mark.parametrize(
+    ("towards", "outside", "tip"),
+    [
+        (("3/4", 0), False, ("3/4", "3/4 - √2/4")),
+        ((0, "3/4"), True, ("3/4 - √2/4", "3/4")),
+    ],
+)
+def test_reverse_folds_turn_the_tip_inside_out(
+    towards: PointLike, *, outside: bool, tip: PointLike
+) -> None:
+    paper = triangle()
+    line = bisect((1, 1), ("3/4", "3/4"), towards)
+    paper.reverse(line, flap=("63/64", "61/64"), outside=outside)
+    assert paper.steps[-1].action == "reverse"
+    assert paper.where((1, 1)) == Point.of(tip)
+
+
+def test_an_inside_reverse_fold_out_through_the_spine_is_refused() -> None:
+    paper = triangle()
+    line = bisect((1, 1), ("3/4", "3/4"), (0, "3/4"))
+    with pytest.raises(RefusedError) as refused:
+        paper.reverse(line, flap=("63/64", "61/64"))
+    assert refused.value.refused.diagnostics[0].rule == "layer-crossing"
+
+
+def test_a_reverse_fold_needs_a_spine() -> None:
+    paper = Paper.square()
+    with pytest.raises(RefusedError) as refused:
+        paper.reverse(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    assert refused.value.refused.diagnostics[0].rule == "no-spine"
+
+
+def test_petal_folds_make_the_bird_base(tmp_path: Path) -> None:
+    script = Path(shutil.copy(EXAMPLES / "bird_base.py", tmp_path))
+    report = build(script)
+    assert report.ok, report.text
+    assert report.steps == 15
+    document = json.loads((tmp_path / "bird_base.fold").read_text(encoding="utf-8"))
+    kinds = document["edges_assignment"]
+    assert (kinds.count("M"), kinds.count("V")) == (16, 4)
+
+
+def test_a_petal_fold_needs_folded_sides() -> None:
+    paper = Paper.square()
+    with pytest.raises(RefusedError) as refused:
+        paper.petal(Line.through((0, "1/2"), (1, "1/2")), flap=("1/2", "1/4"))
+    assert refused.value.refused.diagnostics[0].rule == "no-crease"

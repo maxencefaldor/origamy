@@ -2,7 +2,7 @@
 
 A compiler for origami, built for AI agents.
 
-![A paper cup folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](docs/images/cup.png)
+![The bird base folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](docs/images/bird-base.png)
 
 An AI agent writes an origami model as a Python fold script, and origamy folds it step by step on a simulated sheet.
 Each action either happens or is refused with the facts of why, at the script line that asked for it.
@@ -60,9 +60,21 @@ The [preliminary base](examples/preliminary_base.py) precreases four lines throu
 paper.collapse(valleys=[upright, level], mountains=[falling])
 ```
 
-Reverse, squash and petal folds are collapses too.
 Two queries find the creases to name: `paper.creases(line)` gives the creases lying along a line now, as crease pattern segments, and `paper.origin(point)` gives where a point of the top layer lies on the unfolded paper.
 Before folding, a collapse checks every vertex with Maekawa's and Kawasaki's theorems, and the layer solver checks every stacking.
+
+## Named moves
+
+Named moves compute their creases and collapse in one step, judged like any collapse.
+
+| Move | What it does |
+| --- | --- |
+| `paper.reverse(line, flap)` | Turns the tip of a folded flap inside out, between its layers; `outside=True` wraps it around them |
+| `paper.petal(line, flap)` | Lifts the top layer over a line while its sides fold in along precreased creases |
+
+The [bird base](examples/bird_base.py) collapses a preliminary base, then petal folds each side:
+
+![Every step of the bird base, each next fold dashed](docs/images/bird-base-steps.png)
 
 ## Feedback is facts
 
@@ -84,6 +96,7 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `no-hinge` | error | The paper to move is joined to no other paper along the fold line |
 | `already-folded`, `not-folded` | error | A fold runs along a crease already folded, or an unfold along flat paper |
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
+| `no-spine` | error | A reverse fold meets a layer with no fold to turn inside out |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
 | `layer-crossing` | error | No stacking of the faces keeps paper from passing through paper |
@@ -100,8 +113,8 @@ When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
-The project is in its first phase: exact folds, unfolds, precreases, collapses and turns, with the layer solver, pictures and FOLD export.
-Named moves such as reverse, squash and petal folds, an MCP server and a 3D viewer come next.
+The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures and FOLD export.
+Squash and sink folds, an MCP server and a 3D viewer come next.
 
 ## License
 

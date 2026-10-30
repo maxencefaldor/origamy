@@ -8,7 +8,7 @@ Unfolded, the paper covers the rectangle from (0, 0) to (width, height), its fro
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from origamy import actions
+from origamy import actions, moves
 from origamy.actions import Outcome, Sense
 from origamy.checks import is_referenced, where
 from origamy.errors import OrigamyError
@@ -30,7 +30,7 @@ class Step:
     """One action the paper took, and its state after it."""
 
     action: str
-    """``start``, ``valley``, ``mountain``, ``unfold``, ``precrease``, ``turn-over``."""
+    """The action: ``valley``, ``reverse``, ``collapse`` or another `Paper` method."""
     description: str
     state: State
     moved: frozenset[int] = frozenset()
@@ -163,6 +163,45 @@ class Paper:
             "precrease",
             f"precrease along {line} with a {sense} fold, the paper at {point}",
             lambda state: actions.precrease(state, line, point, layers, sense),
+            line,
+            point,
+        )
+
+    def reverse(
+        self,
+        line: Line,
+        flap: PointLike,
+        *,
+        layers: int | None = None,
+        outside: bool = False,
+    ) -> None:
+        """Reverse fold: turn the tip of a folded flap inside out, across ``line``.
+
+        The tip is the paper at ``flap`` on its side of the line, taken as `valley`
+        takes it. An inside reverse fold turns the tip between the flap's layers; with
+        ``outside``, the tip wraps around them.
+        """
+        point = Point.of(flap)
+        kind = "outside" if outside else "inside"
+        self._act(
+            "reverse",
+            f"{kind} reverse fold along {line}, the paper at {point}",
+            lambda state: moves.reverse(state, line, point, layers, outside=outside),
+            line,
+            point,
+        )
+
+    def petal(self, line: Line, flap: PointLike) -> None:
+        """Petal fold: lift the top layer at ``flap`` over ``line``, sides folding in.
+
+        The creases from the line's ends into the lifted region, and their partners
+        in the layers joined across its sides, must be precreased first.
+        """
+        point = Point.of(flap)
+        self._act(
+            "petal",
+            f"petal fold along {line}, the paper at {point}",
+            lambda state: moves.petal(state, line, point),
             line,
             point,
         )

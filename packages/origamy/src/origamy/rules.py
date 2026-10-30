@@ -92,6 +92,14 @@ RULES = {
             refusal=True,
         ),
         Rule(
+            "no-spine",
+            Level.ERROR,
+            "The paper to reverse meets the line with no fold to reverse.",
+            "A reverse fold creases a layer along its line where no fold of the "
+            "paper that stays ends, so the layer has no spine to turn inside out.",
+            refusal=True,
+        ),
+        Rule(
             "mountain-valley-count",
             Level.ERROR,
             "Mountains and valleys at a vertex do not differ by two.",

@@ -57,7 +57,7 @@ def fold(
     all the paper on the flap's side of the line. Everything joined to the taken layers
     on that side moves with them.
     """
-    cut, moved, hinges = _grab(state, line, flap, layers, unfolding=False)
+    cut, moved, hinges = grab(state, line, flap, layers, unfolding=False)
     return _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
 
 
@@ -66,7 +66,7 @@ def unfold(state: State, line: Line, flap: Point, layers: int | None) -> Outcome
 
     ``layers`` counts as in `fold`. The moved paper turns back the way it came.
     """
-    cut, moved, hinges = _grab(state, line, flap, layers, unfolding=True)
+    cut, moved, hinges = grab(state, line, flap, layers, unfolding=True)
     up = any(cut.is_above(m, s) for m, s, _ in hinges)
     return _turn(cut, line, moved, {}, up=up)
 
@@ -78,7 +78,7 @@ def precrease(
 
     The paper must be able to take the fold, so a refused fold refuses the precrease.
     """
-    cut, moved, hinges = _grab(state, line, flap, layers, unfolding=False)
+    cut, moved, hinges = grab(state, line, flap, layers, unfolding=False)
     _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
     return Outcome(cut, frozenset())
 
@@ -301,10 +301,14 @@ def stack_at(state: State, point: Point) -> list[int]:
     return sorted(under, key=cmp_to_key(order))
 
 
-def _grab(
+def grab(
     state: State, line: Line, flap: Point, layers: int | None, *, unfolding: bool
 ) -> tuple[State, frozenset[int], list[tuple[int, int, Edge]]]:
-    """Split the paper to move from the paper that stays, and find the hinges."""
+    """Split the paper to move from the paper that stays, and find the hinges.
+
+    Returns the state with the moving faces cut along the line, the moving faces as
+    ids in it, and each hinge as the moving face, the face that stays, and their edge.
+    """
     side = line.side(flap)
     if not side:
         msg = f"the flap point {flap} lies on the fold line {line}"
