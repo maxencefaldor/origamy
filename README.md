@@ -50,6 +50,20 @@ wrote square.fold, square.png, square.steps.png
 The picture `square.png` shows the paper at the end, and `square.steps.png` shows every step with the next fold line dashed, as diagrams do.
 The [cup example](examples/cup.py) folds a traditional paper cup with exact constructions.
 
+## Collapse
+
+A collapse folds, unfolds or reverses many creases at once, along creases already in the paper.
+Creases read as on the crease pattern: whole lines, or segments given by their two ends, with mountains and valleys seen from the paper's front.
+The [preliminary base](examples/preliminary_base.py) precreases four lines through the center, then collapses them in one step:
+
+```python
+paper.collapse(valleys=[upright, level], mountains=[falling])
+```
+
+Reverse, squash and petal folds are collapses too.
+Two queries find the creases to name: `paper.creases(line)` gives the creases lying along a line now, as crease pattern segments, and `paper.origin(point)` gives where a point of the top layer lies on the unfolded paper.
+Before folding, a collapse checks every vertex with Maekawa's and Kawasaki's theorems, and the layer solver checks every stacking.
+
 ## Feedback is facts
 
 A refused action stops the build at its line, and the picture shows the paper just before it, with the fold line and the faces involved.
@@ -69,6 +83,9 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `too-few-layers` | error | Fewer layers lie at the flap point than the action takes |
 | `no-hinge` | error | The paper to move is joined to no other paper along the fold line |
 | `already-folded`, `not-folded` | error | A fold runs along a crease already folded, or an unfold along flat paper |
+| `no-crease` | error | A collapse names a line with no crease of the paper along it |
+| `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
+| `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
 | `layer-crossing` | error | No stacking of the faces keeps paper from passing through paper |
 | `layer-order-unknown` | error | The layer solver stopped before finding a stacking |
 | `unreferenced-fold` | warn | No point or line already on the paper locates the fold line |
@@ -76,15 +93,15 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 ## How it works
 
 The state of the paper is its crease pattern, where each face lies, and which face is above wherever two overlap.
-A fold reflects the faces it moves across its line, exactly.
+A fold reflects the faces it moves across its line, exactly, and a collapse places each face by the reflections across the folds between it and a fixed face.
 The layer solver then finds how the faces stack, after the constraints of [Flat-Folder](https://erikdemaine.org/papers/FlatFolder_OSME2024/paper.pdf): taco-taco, taco-tortilla, tortilla-tortilla and transitivity.
 The paper that stays keeps its order, the paper that moves reverses its own, and a valley fold lands it on top or a mountain fold underneath.
 When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
-The project is in its first phase: exact folds, unfolds, precreases and turns, with the layer solver, pictures and FOLD export.
-Collapses, which fold many creases at once as squash and petal folds do, come next.
+The project is in its first phase: exact folds, unfolds, precreases, collapses and turns, with the layer solver, pictures and FOLD export.
+Named moves such as reverse, squash and petal folds, an MCP server and a 3D viewer come next.
 
 ## License
 

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from origamy import Line, Paper, RefusedError, fold_onto, service
+from origamy import Line, Paper, Point, RefusedError, bisect, fold_onto, service
+from origamy.geometry import PointLike
 from origamy.layers import NoStackingError, Problem, solve
 from origamy.state import State
 
@@ -152,3 +153,37 @@ def colors(path: Path) -> set[tuple[int, int, int]]:
 def _paeth(a: int, b: int, c: int) -> int:
     guess = a + b - c
     return min((a, b, c), key=lambda value: abs(guess - value))
+
+
+def reverse_fold(towards: PointLike) -> Paper:
+    """A triangle whose tip at (1, 1) turns inside, its fold line found by bisecting."""
+    paper = Paper.square()
+    spine = Line.through((0, 0), (1, 1))
+    paper.valley(spine, flap=("1/4", "3/4"))
+    line = bisect((1, 1), ("3/4", "3/4"), towards)
+    paper.precrease(line, flap=("31/32", "29/32"))
+    tip = [crease for crease in paper.creases(spine) if Point.of((1, 1)) in crease]
+    paper.collapse(valleys=paper.creases(line), mountains=tip, fixed=("1/2", "1/4"))
+    return paper
+
+
+def test_an_inside_reverse_fold_is_a_collapse() -> None:
+    paper = reverse_fold(("3/4", 0))
+    assert paper.steps[-1].action == "collapse"
+    assert paper.layers(("13/16", "5/8")) == 4
+    assert paper.where((1, 1)) == Point.of(("3/4", "3/4 - √2/4"))
+
+
+def test_a_tip_turned_through_the_spine_is_refused() -> None:
+    with pytest.raises(RefusedError) as refused:
+        reverse_fold((0, "3/4"))
+    diagnostic = refused.value.refused.diagnostics[0]
+    assert diagnostic.rule == "layer-crossing"
+    assert "taco-tortilla" in diagnostic.message
+
+
+def test_a_collapse_along_no_crease_is_refused() -> None:
+    paper = Paper.square()
+    with pytest.raises(RefusedError) as refused:
+        paper.collapse(valleys=[Line.through(("1/2", 0), ("1/2", 1))])
+    assert refused.value.refused.diagnostics[0].rule == "no-crease"

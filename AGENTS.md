@@ -28,7 +28,7 @@ Each module imports only from the modules listed before it:
 1. `state`: the crease pattern, each face's place, and the stacking.
 1. `layers`: the layer solver's constraints, propagation and search.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
-1. `actions`: fold, unfold, precrease and turn over, each a function from one state to the next.
+1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
 1. `draw`, `render`, `exports`: SVG views, PNG pictures through Chromium, and FOLD files.
@@ -75,6 +75,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | valley, mountain | A fold toward the viewer, and away from the viewer |
 | flap point | The point at which an action takes the paper to move |
 | hinge | A crease along the fold line between paper that moves and paper that stays |
+| collapse | An action that folds, unfolds or reverses many creases at once |
 | action, step | What a script asks the paper to do, and an action the paper took |
 | refusal | An action the paper cannot take, with the facts of why |
 | fold script | A Python file whose `fold()` returns a `Paper`; "script" for short |

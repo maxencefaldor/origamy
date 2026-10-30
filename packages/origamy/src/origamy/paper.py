@@ -5,7 +5,7 @@ Coordinates are where the paper lies now, as seen from above: x to the right, y 
 Unfolded, the paper covers the rectangle from (0, 0) to (width, height), its front up.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from origamy import actions
@@ -16,7 +16,7 @@ from origamy.field import Exact, Number
 from origamy.geometry import Line, Point, PointLike
 from origamy.provenance import Source, capture
 from origamy.rules import Diagnostic, RefusalError
-from origamy.state import State
+from origamy.state import Edge, State
 
 DEFAULT_FRONT = "#c8553d"
 """The color of the paper's front: the side up before any fold."""
@@ -39,6 +39,24 @@ class Step:
     flap: Point | None = None
     source: Source | None = None
     diagnostics: tuple[Diagnostic, ...] = ()
+
+
+type Crease = Line | tuple[PointLike, PointLike]
+"""Creases of the crease pattern: all along a line, or along the segment between two
+points."""
+
+
+def _crease(crease: Crease) -> Line | tuple[Point, Point]:
+    if isinstance(crease, Line):
+        return crease
+    start, end = crease
+    return Point.of(start), Point.of(end)
+
+
+def _describe(crease: Line | tuple[Point, Point]) -> str:
+    if isinstance(crease, Line):
+        return str(crease)
+    return f"the segment from {crease[0]} to {crease[1]}"
 
 
 class RefusedError(OrigamyError):
@@ -149,6 +167,54 @@ class Paper:
             point,
         )
 
+    def collapse(
+        self,
+        *,
+        valleys: Iterable[Crease] = (),
+        mountains: Iterable[Crease] = (),
+        flats: Iterable[Crease] = (),
+        fixed: PointLike | None = None,
+    ) -> None:
+        """Fold, unfold or reverse many creases at once, and let the paper follow.
+
+        Each crease is a line of the crease pattern, or a segment of one as its two
+        ends, and takes every crease of the paper along it. Valleys and mountains
+        read as on the crease pattern, from the paper's front; other creases keep
+        their state. The top face at ``fixed`` stays where it lies; by default, the
+        largest face stays.
+        """
+        changes = [
+            (_crease(crease), kind)
+            for creases, kind in ((valleys, "V"), (mountains, "M"), (flats, "F"))
+            for crease in creases
+        ]
+        point = None if fixed is None else Point.of(fixed)
+
+        def act(state: State) -> Outcome:
+            assignments: dict[Edge, str] = {}
+            for crease, kind in changes:
+                edges = actions.along(state, crease)
+                if not edges:
+                    msg = f"no crease of the paper lies along {_describe(crease)}"
+                    raise RefusalError(msg, rule="no-crease")
+                assignments.update(dict.fromkeys(edges, kind))
+            face = actions.largest(state)
+            if point is not None:
+                stack = actions.stack_at(state, point)
+                if not stack:
+                    msg = f"the fixed point {point} lies on no face's inside"
+                    raise RefusalError(msg, rule="flap-off-paper")
+                face = stack[0]
+            return actions.collapse(state, assignments, face)
+
+        counts = {kind: sum(k == kind for _, k in changes) for kind in "VMF"}
+        self._act(
+            "collapse",
+            f"collapse {counts['V']} valleys, {counts['M']} mountains and "
+            f"{counts['F']} flat creases",
+            act,
+        )
+
     def turn_over(self) -> None:
         """Turn the paper over, from left to right."""
         self._act("turn-over", "turn over", actions.turn_over)
@@ -156,6 +222,37 @@ class Paper:
     def layers(self, at: PointLike) -> int:
         """How many layers of paper lie at a point."""
         return len(actions.stack_at(self.state, Point.of(at)))
+
+    def origin(self, at: PointLike, layer: int = 1) -> Point:
+        """Where a point of a layer lies on the unfolded paper, the top layer first."""
+        point = Point.of(at)
+        stack = actions.stack_at(self.state, point)
+        if len(stack) < layer:
+            msg = f"{len(stack)} layers lie at {point}, not {layer}"
+            raise OrigamyError(msg)
+        return self.state.faces[stack[layer - 1]].place.inverse()(point)
+
+    def creases(
+        self, along: Line, *, at: PointLike | None = None, layers: int | None = None
+    ) -> list[tuple[Point, Point]]:
+        """The creases lying along a line now, as segments of the crease pattern.
+
+        With ``at``, only creases of the top ``layers`` layers there count, each layer
+        taken with the paper it continues into across flat creases.
+        """
+        state = self.state
+        faces = set(range(len(state.faces)))
+        if at is not None:
+            stack = actions.stack_at(state, Point.of(at))
+            faces = actions.flat_with(state, stack[: layers or len(stack)])
+        found = []
+        for edge, pair in state.edges.items():
+            if len(pair) != 2 or not faces & set(pair):  # noqa: PLR2004 - a crease
+                continue
+            ends = tuple(state.folded_point(pair[0], v) for v in edge)
+            if along.contains(ends[0]) and along.contains(ends[1]):
+                found.append((state.vertices[edge[0]], state.vertices[edge[1]]))
+        return found
 
     def where(self, point: PointLike) -> Point:
         """Where a point of the unfolded paper lies now, such as a corner."""

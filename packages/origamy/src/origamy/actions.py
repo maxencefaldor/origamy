@@ -10,15 +10,25 @@ mountain fold lands it underneath. An action the paper cannot take raises
 `RefusalError`, with the facts of why.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cmp_to_key
+from functools import cmp_to_key, partial
+from math import atan2, degrees
 
-from origamy.geometry import Isometry, Line, Point, bounds, crosses, inside
+from origamy.geometry import (
+    IDENTITY,
+    Isometry,
+    Line,
+    Point,
+    area,
+    bounds,
+    crosses,
+    inside,
+)
 from origamy.layers import BudgetError, Constraint, NoStackingError, Problem, solve
 from origamy.rules import RefusalError
-from origamy.state import Edge, Face, Pair, State
+from origamy.state import Edge, Face, Pair, State, sides_of
 
 
 class Sense(StrEnum):
@@ -48,9 +58,7 @@ def fold(
     on that side moves with them.
     """
     cut, moved, hinges = _grab(state, line, flap, layers, unfolding=False)
-    up = sense is Sense.VALLEY
-    fixed = [(m, s) if up else (s, m) for m, s, _ in hinges]
-    return _turn(cut, line, moved, fixed, up=up)
+    return _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
 
 
 def unfold(state: State, line: Line, flap: Point, layers: int | None) -> Outcome:
@@ -60,7 +68,7 @@ def unfold(state: State, line: Line, flap: Point, layers: int | None) -> Outcome
     """
     cut, moved, hinges = _grab(state, line, flap, layers, unfolding=True)
     up = any(cut.is_above(m, s) for m, s, _ in hinges)
-    return _turn(cut, line, moved, [], up=up)
+    return _turn(cut, line, moved, {}, up=up)
 
 
 def precrease(
@@ -71,9 +79,205 @@ def precrease(
     The paper must be able to take the fold, so a refused fold refuses the precrease.
     """
     cut, moved, hinges = _grab(state, line, flap, layers, unfolding=False)
-    up = sense is Sense.VALLEY
-    _turn(cut, line, moved, [(m, s) if up else (s, m) for m, s, _ in hinges], up=up)
+    _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
     return Outcome(cut, frozenset())
+
+
+def _hinged(hinges: list[tuple[int, int, Edge]], sense: Sense) -> dict[Pair, str]:
+    """The order a fold sets at each hinge, with its reason."""
+    where = "above" if sense is Sense.VALLEY else "below"
+    return {
+        ((m, s) if sense is Sense.VALLEY else (s, m)): (
+            f"the {sense} fold puts moved face {m} {where} face {s}"
+        )
+        for m, s, _ in hinges
+    }
+
+
+def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
+    """Set creases to ``M``, ``V`` or ``F`` at once, and fold the paper to match.
+
+    Assignments read as on the crease pattern, from the paper's front. Every other
+    crease keeps its assignment. Face ``fixed`` stays where it lies, and each other
+    face lies where the creases between it and ``fixed`` put it.
+    """
+    target = {
+        edge: changes.get(edge, state.assignment(edge))
+        for edge, faces in state.edges.items()
+        if len(faces) == 2  # noqa: PLR2004 - a crease has two sides
+    }
+    _check_vertices(state, target)
+    places = _places(state, target, fixed)
+    faces = tuple(
+        Face(f.corners, place) for f, place in zip(state.faces, places, strict=True)
+    )
+    moved = frozenset(
+        f
+        for f, (old, new) in enumerate(zip(state.faces, faces, strict=True))
+        if old.place != new.place
+    )
+    collapsed = State(state.vertices, faces)
+    required = {
+        (upper, lower): f"face {upper} stays above face {lower}"
+        for upper, lower in state.above
+        if upper not in moved and lower not in moved
+    }
+    for edge, kind in target.items():
+        if kind in "MV":
+            f, g = state.edges[edge]
+            front, back = (g, f) if collapsed.flips(f) else (f, g)
+            # A valley folds the front inward: the face showing its back lies above.
+            upper, lower = (back, front) if kind == "V" else (front, back)
+            name = "valley" if kind == "V" else "mountain"
+            required[upper, lower] = (
+                f"the {name} between faces {f} and {g} puts face {upper} above"
+            )
+    # Faces that moved together keep their order, reversed if the move turned them over.
+    change = [
+        new.place @ old.place.inverse()
+        for old, new in zip(state.faces, faces, strict=True)
+    ]
+    prefer = [
+        (lower, upper) if change[upper].flips else (upper, lower)
+        for upper, lower in state.above
+        if (upper in moved or lower in moved) and change[upper] == change[lower]
+    ]
+    above = _stack(collapsed, required, prefer)
+    return Outcome(State(collapsed.vertices, collapsed.faces, above), moved)
+
+
+def along(state: State, crease: Line | tuple[Point, Point]) -> list[Edge]:
+    """The creases inside the paper along a line or segment of the crease pattern."""
+    if isinstance(crease, Line):
+        line, ends = crease, None
+    else:
+        line, ends = Line.through(*crease), crease
+    found = []
+    for edge, faces in state.edges.items():
+        p, q = (state.vertices[v] for v in edge)
+        if len(faces) != 2 or not (line.contains(p) and line.contains(q)):  # noqa: PLR2004
+            continue
+        if ends is None or (_within(ends, p) and _within(ends, q)):
+            found.append(edge)
+    return found
+
+
+def flat_with(state: State, faces: Iterable[int]) -> set[int]:
+    """The faces given, and every face they continue into across flat creases."""
+    found = set(faces)
+    queue = list(found)
+    while queue:
+        face = queue.pop()
+        for edge in sides_of(state.faces[face].corners):
+            for other in state.edges[edge]:
+                if other not in found and (
+                    state.faces[other].place == state.faces[face].place
+                ):
+                    found.add(other)
+                    queue.append(other)
+    return found
+
+
+def largest(state: State) -> int:
+    """The face of largest area, the first of them when several tie."""
+    areas = [area(polygon) for polygon in state.patterns]
+    return max(range(len(areas)), key=lambda f: (areas[f], -f))
+
+
+def _within(ends: tuple[Point, Point], point: Point) -> bool:
+    start, end = ends
+    return (point - start).dot(point - end).sign() <= 0
+
+
+def _around(state: State) -> dict[int, list[Edge]]:
+    """Each vertex inside the paper, with its creases in counterclockwise order."""
+    border = {v for edge, faces in state.edges.items() if len(faces) == 1 for v in edge}
+    creases: dict[int, list[Edge]] = {}
+    for edge, faces in state.edges.items():
+        for vertex in edge:
+            if vertex not in border and len(faces) == 2:  # noqa: PLR2004 - a crease
+                creases.setdefault(vertex, []).append(edge)
+    for vertex, edges in creases.items():
+        edges.sort(key=cmp_to_key(partial(_compare, state, vertex)))
+    return creases
+
+
+def _compare(state: State, vertex: int, first: Edge, second: Edge) -> int:
+    """Order two creases at a vertex by their direction, counterclockwise from east."""
+    center = state.vertices[vertex]
+    a, b = _away(state, first, vertex) - center, _away(state, second, vertex) - center
+    if (half := _half(a) - _half(b)) != 0:
+        return half
+    return -a.cross(b).sign()
+
+
+def _away(state: State, edge: Edge, vertex: int) -> Point:
+    return state.vertices[edge[0] if edge[1] == vertex else edge[1]]
+
+
+def _half(vector: Point) -> int:
+    return 0 if vector.y.sign() > 0 or (not vector.y and vector.x.sign() > 0) else 1
+
+
+def _check_vertices(state: State, target: Mapping[Edge, str]) -> None:
+    """Refuse an assignment that no flat fold meets at some vertex."""
+    for vertex, edges in _around(state).items():
+        folds = [edge for edge in edges if target[edge] in "MV"]
+        if not folds:
+            continue
+        point = state.vertices[vertex]
+        mountains = sum(target[edge] == "M" for edge in folds)
+        valleys = len(folds) - mountains
+        if abs(mountains - valleys) != 2:  # noqa: PLR2004 - Maekawa's theorem
+            msg = f"{mountains} mountains and {valleys} valleys meet at {point}"
+            raise RefusalError(msg, rule="mountain-valley-count")
+        turn = IDENTITY
+        for edge in folds:
+            turn = (
+                Isometry.reflection(Line.through(*(state.vertices[v] for v in edge)))
+                @ turn
+            )
+        if turn != IDENTITY:
+            odd, even = _alternate_sums(state, vertex, folds)
+            msg = (
+                f"the alternate angles between the folds at {point} sum to "
+                f"{odd:.4g}° and {even:.4g}°"
+            )
+            raise RefusalError(msg, rule="unbalanced-angles")
+
+
+def _alternate_sums(
+    state: State, vertex: int, folds: list[Edge]
+) -> tuple[float, float]:
+    center = state.vertices[vertex].floats()
+    angles = []
+    for edge in folds:
+        x, y = _away(state, edge, vertex).floats()
+        angles.append(degrees(atan2(y - center[1], x - center[0])) % 360)
+    gaps = [(angles[(i + 1) % len(angles)] - a) % 360 for i, a in enumerate(angles)]
+    return sum(gaps[0::2]), sum(gaps[1::2])
+
+
+def _places(state: State, target: Mapping[Edge, str], fixed: int) -> list[Isometry]:
+    """Where each face lies, from the creases between it and the fixed face."""
+    places: dict[int, Isometry] = {fixed: state.faces[fixed].place}
+    queue = [fixed]
+    while queue:
+        face = queue.pop()
+        for edge in sides_of(state.faces[face].corners):
+            neighbors = state.edges[edge]
+            if len(neighbors) != 2:  # noqa: PLR2004 - a crease has two sides
+                continue
+            other = neighbors[0] if neighbors[1] == face else neighbors[1]
+            if other in places:
+                continue
+            place = places[face]
+            if target[edge] in "MV":
+                crease = Line.through(*(state.vertices[v] for v in edge))
+                place = place @ Isometry.reflection(crease)
+            places[other] = place
+            queue.append(other)
+    return [places[f] for f in range(len(state.faces))]
 
 
 def turn_over(state: State) -> Outcome:
@@ -193,7 +397,12 @@ def _joined(state: State, line: Line, side: int, seeds: Iterable[int]) -> set[in
 
 
 def _turn(
-    cut: State, line: Line, moved: frozenset[int], fixed: list[Pair], *, up: bool
+    cut: State,
+    line: Line,
+    moved: frozenset[int],
+    required: dict[Pair, str],
+    *,
+    up: bool,
 ) -> Outcome:
     """Reflect the moved faces across a line and stack the result."""
     reflection = Isometry.reflection(line)
@@ -202,40 +411,39 @@ def _turn(
         for index, f in enumerate(cut.faces)
     )
     for upper, lower in cut.above:
-        if (upper in moved) == (lower in moved):
-            fixed.append((lower, upper) if upper in moved else (upper, lower))
+        if upper not in moved and lower not in moved:
+            required[upper, lower] = f"face {upper} stays above face {lower}"
+        elif upper in moved and lower in moved:
+            required[lower, upper] = (
+                f"moved faces {lower} and {upper} turn over together"
+            )
     turned = State(cut.vertices, faces)
-    problem = Problem(turned)
     prefer = [
         (f, g) if (f in moved) == up else (g, f)
-        for f, g in problem.pairs
+        for f, g in sorted(turned.overlapping)
         if (f in moved) != (g in moved)
     ]
+    above = _stack(turned, required, prefer)
+    return Outcome(State(turned.vertices, turned.faces, above), moved)
+
+
+def _stack(
+    state: State, required: Mapping[Pair, str], prefer: list[Pair]
+) -> frozenset[Pair]:
+    """Solve the stacking, or refuse with the constraints and orders that conflict."""
     try:
-        above = solve(problem, fixed, prefer)
+        return solve(Problem(state), required, prefer)
     except NoStackingError as error:
-        message = _conflict(error, moved)
+        facts = [_constraint(c) for c in dict.fromkeys(error.constraints)]
+        facts += [required[pair] for pair in error.fixed if pair in required]
+        message = "no stacking keeps paper from passing through paper"
+        if facts:
+            message += ": " + "; ".join(facts)
         raise RefusalError(
             message, rule="layer-crossing", faces=_faces(error)
         ) from None
     except BudgetError as error:
         raise RefusalError(str(error), rule="layer-order-unknown") from None
-    return Outcome(State(turned.vertices, turned.faces, above), moved)
-
-
-def _conflict(error: NoStackingError, moved: frozenset[int]) -> str:
-    """State which constraints and which required orders leave no stacking."""
-    facts = [_constraint(c) for c in dict.fromkeys(error.constraints)]
-    for upper, lower in error.fixed:
-        if upper in moved and lower not in moved:
-            facts.append(f"moved face {upper} lands above face {lower}")
-        elif lower in moved and upper not in moved:
-            facts.append(f"moved face {lower} lands below face {upper}")
-        else:
-            facts.append(f"face {upper} stays above face {lower}")
-    if not facts:
-        return "no stacking of the faces keeps paper from passing through paper"
-    return "no stacking keeps paper from passing through paper: " + "; ".join(facts)
 
 
 def _constraint(constraint: Constraint) -> str:

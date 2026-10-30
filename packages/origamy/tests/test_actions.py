@@ -5,7 +5,16 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from origamy.actions import Sense, fold, precrease, stack_at, turn_over, unfold
+from origamy.actions import (
+    Sense,
+    along,
+    collapse,
+    fold,
+    precrease,
+    stack_at,
+    turn_over,
+    unfold,
+)
 from origamy.geometry import Line, Point, area, intersection, overlaps
 from origamy.layers import Problem
 from origamy.rules import RefusalError
@@ -151,3 +160,79 @@ def test_every_fold_leaves_a_valid_state(sequence: list[Fold]) -> None:
             intersection(state.folded[f], state.folded[g]) for f, g in state.overlapping
         ]
         assert all(area(c).sign() > 0 for c in common)
+
+
+def precreased(*lines: Line) -> State:
+    """The square, precreased along lines through its center."""
+    state = SHEET
+    for line in lines:
+        flap = next(
+            P(point)
+            for point in (("7/8", "1/16"), ("1/16", "7/8"), ("15/16", "5/8"))
+            if line.side(P(point))
+            and not any(p == P(point) for polygon in state.patterns for p in polygon)
+        )
+        state = precrease(state, line, flap, None, Sense.VALLEY).state
+    return state
+
+
+RISING = Line.through((0, 0), (1, 1))
+FALLING = Line.through((1, 0), (0, 1))
+
+
+CENTER = P(("1/2", "1/2"))
+
+type Crease = Line | tuple[Point, Point]
+
+
+def creases_along(state: State, *creases: Crease) -> list[tuple[int, int]]:
+    return [edge for crease in creases for edge in along(state, crease)]
+
+
+def test_a_collapse_folds_the_preliminary_base() -> None:
+    state = precreased(RISING, FALLING, SPINE, MIDDLE)
+    changes = dict.fromkeys(creases_along(state, SPINE, MIDDLE), "V")
+    changes |= dict.fromkeys(creases_along(state, FALLING), "M")
+    outcome = collapse(state, changes, stack_at(state, P(("15/16", "5/8")))[0])
+    folded = outcome.state
+    assert len(faces_at(folded, "7/8", "5/8")) == 4
+    assert {folded.assignment(edge) for edge in changes} == {"V", "M"}
+    assert_valid(folded)
+
+
+def test_a_collapse_unfolds_too() -> None:
+    state = book()
+    outcome = collapse(state, dict.fromkeys(along(state, SPINE), "F"), 1)
+    assert not outcome.state.above
+    assert outcome.moved == {0}
+
+
+@pytest.mark.parametrize(
+    ("lines", "valleys", "mountains", "rule"),
+    [
+        (
+            (RISING, FALLING, SPINE, MIDDLE),
+            (RISING, FALLING, SPINE, MIDDLE),
+            (),
+            "mountain-valley-count",
+        ),
+        (
+            (RISING, SPINE, MIDDLE),
+            (SPINE, (CENTER, P((0, 0)))),
+            ((CENTER, P((1, "1/2"))),),
+            "unbalanced-angles",
+        ),
+    ],
+)
+def test_collapse_refusals(
+    lines: tuple[Line, ...],
+    valleys: tuple[Crease, ...],
+    mountains: tuple[Crease, ...],
+    rule: str,
+) -> None:
+    state = precreased(*lines)
+    changes = dict.fromkeys(creases_along(state, *valleys), "V")
+    changes |= dict.fromkeys(creases_along(state, *mountains), "M")
+    with pytest.raises(RefusalError) as refusal:
+        collapse(state, changes, 0)
+    assert refusal.value.diagnostic.rule == rule

@@ -84,6 +84,31 @@ RULES = {
             refusal=True,
         ),
         Rule(
+            "no-crease",
+            Level.ERROR,
+            "A collapse names a line with no crease of the paper along it.",
+            "A collapse sets creases along a line or segment of the crease pattern, "
+            "and no crease inside the paper lies along it.",
+            refusal=True,
+        ),
+        Rule(
+            "mountain-valley-count",
+            Level.ERROR,
+            "Mountains and valleys at a vertex do not differ by two.",
+            "At a vertex inside the paper with folds, the numbers of mountain and "
+            "valley folds do not differ by exactly two (Maekawa's theorem).",
+            refusal=True,
+        ),
+        Rule(
+            "unbalanced-angles",
+            Level.ERROR,
+            "The angles between folds at a vertex do not alternate to 180°.",
+            "At a vertex inside the paper, the reflections across its folds, taken "
+            "in order around it, do not compose to the identity: the alternate "
+            "angles between folds do not each sum to 180° (Kawasaki-Justin theorem).",
+            refusal=True,
+        ),
+        Rule(
             "layer-crossing",
             Level.ERROR,
             "No stacking of the faces keeps paper from passing through paper.",
