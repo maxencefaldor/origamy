@@ -85,13 +85,23 @@ class DiagnosticData(_Data):
     message: str
     faces: tuple[int, ...] = ()
 
+    @classmethod
+    def of(cls, diagnostic: Diagnostic) -> Self:
+        """The data of a diagnostic."""
+        return cls(
+            rule=diagnostic.rule,
+            level=diagnostic.level,
+            message=diagnostic.message,
+            faces=diagnostic.faces,
+        )
+
     def diagnostic(self) -> Diagnostic:
         """The diagnostic this data describes."""
         return Diagnostic(self.rule, self.level, self.message, self.faces)
 
 
 class StepData(_Data):
-    """One action and the state after it, or before it when the action was refused."""
+    """One action and the paper after it, or the paper a refused action began on."""
 
     action: str
     description: str
@@ -103,6 +113,7 @@ class StepData(_Data):
     flap: tuple[NumberData, NumberData] | None = None
     source: Source | None = None
     diagnostics: tuple[DiagnosticData, ...] = ()
+    refusal: DiagnosticData | None = None
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -120,12 +131,8 @@ class StepData(_Data):
             ),
             flap=(step.flap.x.data(), step.flap.y.data()) if step.flap else None,
             source=step.source.relative_to(root) if step.source else None,
-            diagnostics=tuple(
-                DiagnosticData(
-                    rule=d.rule, level=d.level, message=d.message, faces=d.faces
-                )
-                for d in step.diagnostics
-            ),
+            diagnostics=tuple(DiagnosticData.of(d) for d in step.diagnostics),
+            refusal=DiagnosticData.of(step.refusal) if step.refusal else None,
         )
 
     def step(self) -> Step:
@@ -144,6 +151,7 @@ class StepData(_Data):
             _point(self.flap) if self.flap else None,
             self.source,
             tuple(d.diagnostic() for d in self.diagnostics),
+            self.refusal.diagnostic() if self.refusal else None,
         )
 
 
@@ -154,6 +162,14 @@ class PaperData(_Data):
     height: NumberData
     front: str
     back: str
+
+    def size(self) -> tuple[Number, Number]:
+        """The paper's width and height."""
+        return Number.from_data(self.width), Number.from_data(self.height)
+
+    def unit(self) -> Number:
+        """The paper's longer side, the scale pictures draw to."""
+        return max(self.size())
 
 
 class Failure(_Data):
@@ -167,15 +183,14 @@ class Failure(_Data):
 
 
 class BuildResult(_Data):
-    """What a fold script produced: its steps, any refused action, or a failure."""
+    """What a fold script folded: its paper, its steps and any refused action."""
 
-    paper: PaperData | None = None
-    steps: tuple[StepData, ...] = ()
+    paper: PaperData
+    steps: tuple[StepData, ...]
     refused: StepData | None = Field(
         default=None,
-        description="The action the paper could not take, with the state before it.",
+        description="The action the paper could not take, on the paper it began on.",
     )
-    failure: Failure | None = None
     tower: tuple[NumberData, ...] = Field(
         default=(),
         description="The radicands of the build's tower of numbers, level 1 first.",

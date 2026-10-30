@@ -12,6 +12,7 @@ from origamy.actions import (
     Outcome,
     check_hinges,
     collapse,
+    flap_stack,
     flat_with,
     grab,
     stack_at,
@@ -65,9 +66,9 @@ def _halves(
     for upper, lower in state.above:
         if upper in tip and lower in tip:
             over[index[lower]] |= 1 << index[upper]
-    for faces in state.edges.values():
-        if len(faces) == 2 and faces[0] in tip and faces[1] in tip:  # noqa: PLR2004
-            a, b = index[faces[0]], index[faces[1]]
+    for f, g in state.creases.values():
+        if f in tip and g in tip:
+            a, b = index[f], index[g]
             joined[a] |= 1 << b
             joined[b] |= 1 << a
     whole = (1 << len(layers)) - 1
@@ -138,18 +139,19 @@ def petal(state: State, line: Line, flap: Point) -> Outcome:
     lifted region, precreased before, fold the same way, in the layer and in the layer
     joined across each side; the sides between them open flat.
     """
-    stack = stack_at(state, flap)
-    side = line.side(flap)
-    if not stack or not side:
-        rule = "flap-off-paper" if not stack else "flap-on-line"
-        msg = f"the flap point {flap} lies on no face's inside or on the line {line}"
-        raise RefusalError(msg, rule=rule)
+    side, stack = flap_stack(state, line, flap)
     layer = flat_with(state, stack[:1])
     kind = "M" if state.flips(stack[0]) else "V"
-    changes = dict.fromkeys(_creases(state, layer, line, along_line=True), kind)
+    along = _flat_creases(state, layer, line, along_line=True)
+    if not along:
+        msg = f"no flat crease of the layer at {flap} lies along {line}"
+        raise RefusalError(
+            msg, rule="no-crease", faces=tuple(sorted(layer)), state=state
+        )
+    changes = dict.fromkeys(along, kind)
     sides = {
         edge
-        for edge, faces in state.edges.items()
+        for edge, faces in state.creases.items()
         if state.is_folded(edge) and len(set(faces) & layer) == 1
     }
     ends = {v for edge in changes for v in edge} & {v for edge in sides for v in edge}
@@ -158,7 +160,7 @@ def petal(state: State, line: Line, flap: Point) -> Outcome:
         changes |= lift.at(end)
     if "F" not in changes.values():
         msg = f"the layer at {flap} meets {line} at no folded side to open"
-        raise RefusalError(msg, rule="no-crease")
+        raise RefusalError(msg, rule="no-side", faces=tuple(sorted(layer)), state=state)
     still = next(
         f for f in sorted(layer) if any(line.side(p) == -side for p in state.folded[f])
     )
@@ -188,7 +190,7 @@ class _Lift:
                 joined = flat_with(state, set(faces) - self.layer)
                 changes |= {
                     other: self.kind
-                    for other in _creases(state, joined, line, along_line=False)
+                    for other in _flat_creases(state, joined, line, along_line=False)
                     if end in other and _beyond(state, other, end, line, side)
                 }
             elif set(faces) <= self.layer and not state.is_folded(edge):
@@ -196,15 +198,14 @@ class _Lift:
         return changes
 
 
-def _creases(
+def _flat_creases(
     state: State, faces: set[int], line: Line, *, along_line: bool
 ) -> list[Edge]:
     """The flat creases between faces of a set, along a line or off it."""
     return [
         edge
-        for edge, pair in state.edges.items()
-        if len(pair) == 2  # noqa: PLR2004 - a crease has two sides
-        and set(pair) <= faces
+        for edge, pair in state.creases.items()
+        if set(pair) <= faces
         and not state.is_folded(edge)
         and _along(state, edge, line) == along_line
     ]

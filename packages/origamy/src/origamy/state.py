@@ -69,6 +69,20 @@ class State:
         return {edge: tuple(faces) for edge, faces in sides.items()}
 
     @cached_property
+    def creases(self) -> Mapping[Edge, tuple[int, int]]:
+        """The edges inside the paper, each with its two faces."""
+        return {
+            edge: (faces[0], faces[1])
+            for edge, faces in self.edges.items()
+            if len(faces) > 1
+        }
+
+    @cached_property
+    def border(self) -> frozenset[Edge]:
+        """The edges along the paper's own edge."""
+        return frozenset(self.edges.keys() - self.creases.keys())
+
+    @cached_property
     def overlapping(self) -> frozenset[Pair]:
         """Every pair of faces that share area once folded, the lesser id first."""
         folded = self.folded
@@ -89,8 +103,8 @@ class State:
 
     def is_folded(self, edge: Edge) -> bool:
         """Whether a crease is folded: its two faces lie on the same side of it."""
-        faces = self.edges[edge]
-        return len(faces) == 2 and (  # noqa: PLR2004 - a crease has two sides
+        faces = self.creases.get(edge)
+        return faces is not None and (
             self.faces[faces[0]].place != self.faces[faces[1]].place
         )
 
@@ -105,10 +119,9 @@ class State:
         flat, and ``B`` the paper's own edge. A fold is a valley when the face under it
         shows the paper's front: the front then faces inward.
         """
-        faces = self.edges[edge]
-        if len(faces) != 2:  # noqa: PLR2004 - a crease has two sides
+        if edge in self.border:
             return "B"
-        f, g = faces
+        f, g = self.creases[edge]
         if self.faces[f].place == self.faces[g].place:
             return "F"
         lower = g if self.is_above(f, g) else f
@@ -129,15 +142,14 @@ class State:
         index = {p: i for i, p in enumerate(vertices)}
         inserted: dict[Edge, set[int]] = defaultdict(set)
         for face, line in cuts.items():
-            corners = self.faces[face].corners
-            for u, v in zip(corners, corners[1:] + corners[:1], strict=True):
+            for u, v in sides_of(self.faces[face].corners):
                 p, q = vertices[u], vertices[v]
                 if line.side(p) * line.side(q) < 0:
                     point = line.cut(p, q)
                     if point not in index:
                         index[point] = len(vertices)
                         vertices.append(point)
-                    inserted[min(u, v), max(u, v)].add(index[point])
+                    inserted[u, v].add(index[point])
         faces = [
             Face(_insert(face.corners, inserted, vertices), face.place)
             for face in self.faces

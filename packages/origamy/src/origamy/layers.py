@@ -202,10 +202,7 @@ class Problem:
 
 
 def _creases(state: State) -> Iterable[Crease]:
-    for edge, faces in state.edges.items():
-        if len(faces) != 2:  # noqa: PLR2004 - a crease has two sides
-            continue
-        f, g = faces
+    for edge, (f, g) in state.creases.items():
         ends = state.folded_point(f, edge[0]), state.folded_point(f, edge[1])
         line = Line.through(*ends)
         side_f = _side(state, f, line)

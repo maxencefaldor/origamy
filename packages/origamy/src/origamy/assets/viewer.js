@@ -3,12 +3,12 @@
 //
 // Each step holds every face's place before and after it, as 2D isometries. A face
 // whose move turns it over makes a half turn about the move's axis, lifted toward the
-// side it lands on; any other face glides. Layers sit a small gap apart, by level.
+// side it lands on; any other face glides. Layers sit a small gap apart, in stacking order.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const GAP = 0.0015; // height between levels, as a share of the paper's size
+const GAP = 0.0015; // height between layers, as a share of the paper's size
 const DURATION = 1100; // milliseconds a step's motion takes
 const STROKES = {
   M: { color: "#c0392b", dash: "7 3 1.5 3", width: 1.6 },
@@ -146,8 +146,8 @@ function motion(step, face, t, size, together) {
   const corners = step.faces[face].map((v) => step.vertices[v]);
   const before = step.before[face];
   const after = step.places[face];
-  const z0 = step.beforeLevels[face] * GAP * size;
-  const z1 = step.levels[face] * GAP * size;
+  const z0 = step.orderBefore[face] * GAP * size;
+  const z1 = step.order[face] * GAP * size;
   const z = z0 + (z1 - z0) * t;
   const delta = compose(after, inverse(before));
   const starts = corners.map((p) => apply(before, p));
@@ -161,7 +161,7 @@ function motion(step, face, t, size, together) {
     const offset = (tx * n[0] + ty * n[1]) / 2;
     const distances = starts.map(([x, y]) => x * n[0] + y * n[1] - offset);
     const mean = distances.reduce((s, v) => s + v, 0) / distances.length;
-    const up = together ?? step.levels[face] >= step.beforeLevels[face];
+    const up = together ?? step.order[face] >= step.orderBefore[face];
     const sense = together !== null ? 1 : (up ? 1 : -1) * Math.sign(mean || 1);
     const angle = Math.PI * t;
     return starts.map(([x, y], i) => {
@@ -270,7 +270,7 @@ class Stage {
     this.line = null;
     if (step.line) {
       const [[x0, y0], [x1, y1]] = step.line;
-      const top = (Math.max(...step.levels) + 2) * GAP * this.size;
+      const top = (Math.max(...step.order) + 2) * GAP * this.size;
       const geometry = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(x0, y0, top),
         new THREE.Vector3(x1, y1, top),
@@ -287,7 +287,8 @@ class Stage {
 
   place(t) {
     const step = this.step;
-    const together = step.action === "turn-over" ? true : null;
+    // When every face moves, the whole paper turns as one.
+    const together = step.moved.length === step.faces.length ? true : null;
     const eased = t < 1 ? 0.5 - Math.cos(Math.PI * t) / 2 : 1;
     this.faces.forEach((face, index) => {
       const points = motion(step, index, eased, this.size, together);

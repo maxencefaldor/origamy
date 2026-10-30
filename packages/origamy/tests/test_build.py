@@ -7,9 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from origamy import Line, Paper, Point, RefusedError, bisect, fold_onto, service
+from origamy import (
+    Line,
+    Paper,
+    Point,
+    RefusedError,
+    actions,
+    bisect,
+    fold_onto,
+    service,
+)
 from origamy.geometry import PointLike
-from origamy.layers import NoStackingError, Problem, solve
+from origamy.layers import BudgetError, NoStackingError, Problem, solve
 from origamy.state import State
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
@@ -50,7 +59,7 @@ def test_a_refused_action_keeps_the_steps_before_it() -> None:
     with pytest.raises(RefusedError) as refused:
         paper.valley(Line.through((2, 0), (2, 1)), flap=("1/2", "1/2"))
     assert refused.value.paper is paper
-    assert refused.value.refused.diagnostics[0].rule == "no-hinge"
+    assert refused.value.refusal.rule == "no-hinge"
     assert len(paper.steps) == 1
 
 
@@ -145,7 +154,7 @@ def test_an_inside_reverse_fold_is_a_collapse() -> None:
 def test_a_tip_turned_through_the_spine_is_refused() -> None:
     with pytest.raises(RefusedError) as refused:
         reverse_fold((0, "3/4"))
-    diagnostic = refused.value.refused.diagnostics[0]
+    diagnostic = refused.value.refusal
     assert diagnostic.rule == "layer-crossing"
     assert "taco-tortilla" in diagnostic.message
 
@@ -154,7 +163,7 @@ def test_a_collapse_along_no_crease_is_refused() -> None:
     paper = Paper.square()
     with pytest.raises(RefusedError) as refused:
         paper.collapse(valleys=[Line.through(("1/2", 0), ("1/2", 1))])
-    assert refused.value.refused.diagnostics[0].rule == "no-crease"
+    assert refused.value.refusal.rule == "no-crease"
 
 
 def triangle() -> Paper:
@@ -187,8 +196,8 @@ def test_an_inside_reverse_fold_out_through_the_spine_is_refused() -> None:
     with pytest.raises(RefusedError) as refused:
         paper.reverse(line, flap=("63/64", "61/64"))
     step = refused.value.refused
-    assert step.diagnostics[0].rule == "layer-crossing"
-    assert max(step.diagnostics[0].faces) < len(step.state.faces)
+    assert refused.value.refusal.rule == "layer-crossing"
+    assert max(refused.value.refusal.faces) < len(step.state.faces)
 
 
 def test_a_reverse_fold_that_could_open_in_two_places_is_refused() -> None:
@@ -197,7 +206,7 @@ def test_a_reverse_fold_that_could_open_in_two_places_is_refused() -> None:
     paper.mountain(Line.through(("2/3", 0), ("2/3", 1)), flap=("5/6", "1/2"))
     with pytest.raises(RefusedError) as refused:
         paper.reverse(Line.through((0, "3/4"), (1, "3/4")), flap=("1/2", "7/8"))
-    assert refused.value.refused.diagnostics[0].rule == "several-spines"
+    assert refused.value.refusal.rule == "several-spines"
 
 
 def test_a_reverse_fold_needs_a_spine() -> None:
@@ -205,7 +214,7 @@ def test_a_reverse_fold_needs_a_spine() -> None:
     with pytest.raises(RefusedError) as refused:
         paper.reverse(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
     step = refused.value.refused
-    assert step.diagnostics[0].rule == "no-spine"
+    assert refused.value.refusal.rule == "no-spine"
     assert len(step.state.faces) == 2  # the paper as the move cut it
 
 
@@ -223,4 +232,25 @@ def test_a_petal_fold_needs_folded_sides() -> None:
     paper = Paper.square()
     with pytest.raises(RefusedError) as refused:
         paper.petal(Line.through((0, "1/2"), (1, "1/2")), flap=("1/2", "1/4"))
-    assert refused.value.refused.diagnostics[0].rule == "no-crease"
+    assert refused.value.refusal.rule == "no-crease"
+
+
+def test_a_petal_fold_needs_a_folded_side() -> None:
+    paper = Paper.square()
+    middle = Line.through((0, "1/2"), (1, "1/2"))
+    paper.precrease(middle, flap=("1/2", "3/4"))
+    with pytest.raises(RefusedError) as refused:
+        paper.petal(middle, flap=("1/2", "1/4"))
+    assert refused.value.refusal.rule == "no-side"
+
+
+def test_a_search_out_of_budget_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    def exhausted(*_: object, **__: object) -> frozenset[tuple[int, int]]:
+        msg = "the search reached its budget of 0 dead ends"
+        raise BudgetError(msg)
+
+    monkeypatch.setattr(actions, "solve", exhausted)
+    paper = Paper.square()
+    with pytest.raises(RefusedError) as refused:
+        paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    assert refused.value.refusal.rule == "layer-order-unknown"

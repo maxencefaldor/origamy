@@ -14,7 +14,6 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from origamy.draw import Look, folded_box, folded_view, pattern_view, xray_view
-from origamy.field import Number
 from origamy.paper import Step
 from origamy.result import BuildResult
 
@@ -49,21 +48,15 @@ async def render(result: BuildResult, name: str, overview: Path, steps: Path) ->
 
 
 def _overview(result: BuildResult, name: str) -> str:
-    assert result.paper is not None  # noqa: S101 - only results with paper render
-    unit = max(
-        Number.from_data(result.paper.width), Number.from_data(result.paper.height)
-    )
+    unit = result.paper.unit()
     colors = result.paper.front, result.paper.back
     refused = result.refused.step() if result.refused else None
     last = refused or result.steps[-1].step()
     state = last.state
-    marked = refused.diagnostics[0].faces if refused else ()
+    refusal = refused.refusal if refused else None
+    marked = refusal.faces if refusal else ()
     box = folded_box(state)
-    pattern = pattern_view(
-        state,
-        (Number.from_data(result.paper.width), Number.from_data(result.paper.height)),
-        marked,
-    )
+    pattern = pattern_view(state, result.paper.size(), marked)
     folded = folded_view(state, Look(*colors, unit), box, marked)
     xray = xray_view(state, box, unit, marked)
     if refused and refused.line is not None:
@@ -78,9 +71,8 @@ def _overview(result: BuildResult, name: str) -> str:
     count = len(result.steps) - 1
     if refused:
         title = f"{name}: refused after step {count}"
-        note = (
-            f"Step {count + 1}, {refused.description}: {refused.diagnostics[0].message}"
-        )
+        message = f": {refusal.message}" if refusal else ""
+        note = f"Step {count + 1}, {refused.description}{message}"
     else:
         title = f"{name}: {count} steps"
         note = ""
@@ -98,10 +90,7 @@ def _overview(result: BuildResult, name: str) -> str:
 
 
 def _steps(result: BuildResult, name: str) -> str:
-    assert result.paper is not None  # noqa: S101 - only results with paper render
-    unit = max(
-        Number.from_data(result.paper.width), Number.from_data(result.paper.height)
-    )
+    unit = result.paper.unit()
     colors = result.paper.front, result.paper.back
     steps: Sequence[Step] = [data.step() for data in result.steps]
     box = folded_box(*(step.state for step in steps))

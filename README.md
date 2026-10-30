@@ -98,7 +98,7 @@ The skill in [.claude/skills/fold-model](.claude/skills/fold-model/SKILL.md) tea
 
 ## Feedback is facts
 
-A refused action stops the build at its line, and the picture shows the paper just before it, with the fold line and the faces involved.
+A refused action stops the build at its line, and the picture shows the paper the action began on, with the fold line and the faces involved.
 
 ```text
 broken.py: 1 step folded, then step 2 refused
@@ -116,6 +116,7 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `no-hinge` | error | The paper to move is joined to no other paper along the fold line |
 | `already-folded`, `not-folded` | error | A fold turns a crease already folded that way, or an unfold turns flat paper |
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
+| `no-side` | error | The layer a petal fold lifts has no folded side to open |
 | `no-spine`, `several-spines` | error | A reverse fold's tip opens into two halves in no way, or in several equally even ways |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |

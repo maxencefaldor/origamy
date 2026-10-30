@@ -1,7 +1,8 @@
 # Copyright 2026 Maxence Faldor
-"""What the paper can do: fold, unfold and turn over, each from one state to the next.
+"""What the paper can do, each action a function from one state to the next.
 
-A fold turns some paper over a line, onto the paper beside it. The paper it moves is
+The actions are fold, unfold, precrease, collapse and turn over. A fold turns some paper
+over a line, onto the paper beside it. The paper it moves is
 the paper grabbed at a point, with everything joined to it on that side of the line.
 Every face it moves is reflected across the line, and the layer solver finds how the
 faces then stack. The paper that stays keeps its order, and the paper that moves
@@ -110,11 +111,7 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
     crease keeps its assignment. Face ``fixed`` stays where it lies, and each other
     face lies where the creases between it and ``fixed`` put it.
     """
-    target = {
-        edge: changes.get(edge, state.assignment(edge))
-        for edge, faces in state.edges.items()
-        if len(faces) == 2  # noqa: PLR2004 - a crease has two sides
-    }
+    target = {edge: changes.get(edge, state.assignment(edge)) for edge in state.creases}
     _check_vertices(state, target)
     places = _places(state, target, fixed)
     faces = tuple(
@@ -133,7 +130,7 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
     }
     for edge, kind in target.items():
         if kind in "MV":
-            f, g = state.edges[edge]
+            f, g = state.creases[edge]
             front, back = (g, f) if collapsed.flips(f) else (f, g)
             # A valley folds the front inward: the face showing its back lies above.
             upper, lower = (back, front) if kind == "V" else (front, back)
@@ -162,7 +159,7 @@ def _least_motion(
         (turned, partner)
         for edge, kind in target.items()
         if kind in "MV"
-        for turned, partner in permutations(state.edges[edge])
+        for turned, partner in permutations(state.creases[edge])
         if change[turned] != change[partner]
     ]
     kept = [
@@ -202,9 +199,9 @@ def along(state: State, crease: Line | tuple[Point, Point]) -> list[Edge]:
     else:
         line, ends = Line.through(*crease), crease
     found = []
-    for edge, faces in state.edges.items():
+    for edge in state.creases:
         p, q = (state.vertices[v] for v in edge)
-        if len(faces) != 2 or not (line.contains(p) and line.contains(q)):  # noqa: PLR2004
+        if not (line.contains(p) and line.contains(q)):
             continue
         if ends is None or (_within(ends, p) and _within(ends, q)):
             found.append(edge)
@@ -240,11 +237,11 @@ def _within(ends: tuple[Point, Point], point: Point) -> bool:
 
 def _around(state: State) -> dict[int, list[Edge]]:
     """Each vertex inside the paper, with its creases in counterclockwise order."""
-    border = {v for edge, faces in state.edges.items() if len(faces) == 1 for v in edge}
+    border = {v for edge in state.border for v in edge}
     creases: dict[int, list[Edge]] = {}
-    for edge, faces in state.edges.items():
+    for edge in state.creases:
         for vertex in edge:
-            if vertex not in border and len(faces) == 2:  # noqa: PLR2004 - a crease
+            if vertex not in border:
                 creases.setdefault(vertex, []).append(edge)
     for vertex, edges in creases.items():
         edges.sort(key=cmp_to_key(partial(_compare, state, vertex)))
@@ -270,6 +267,10 @@ def _half(vector: Point) -> int:
 
 def _check_vertices(state: State, target: Mapping[Edge, str]) -> None:
     """Refuse an assignment that no flat fold meets at some vertex."""
+
+    def at(vertex: int) -> tuple[int, ...]:
+        return tuple(f for f, face in enumerate(state.faces) if vertex in face.corners)
+
     for vertex, edges in _around(state).items():
         folds = [edge for edge in edges if target[edge] in "MV"]
         if not folds:
@@ -279,7 +280,9 @@ def _check_vertices(state: State, target: Mapping[Edge, str]) -> None:
         valleys = len(folds) - mountains
         if abs(mountains - valleys) != 2:  # noqa: PLR2004 - Maekawa's theorem
             msg = f"{mountains} mountains and {valleys} valleys meet at {point}"
-            raise RefusalError(msg, rule="mountain-valley-count")
+            raise RefusalError(
+                msg, rule="mountain-valley-count", faces=at(vertex), state=state
+            )
         turn = IDENTITY
         for edge in folds:
             turn = (
@@ -292,7 +295,9 @@ def _check_vertices(state: State, target: Mapping[Edge, str]) -> None:
                 f"the alternate angles between the folds at {point} sum to "
                 f"{odd:.4g}° and {even:.4g}°"
             )
-            raise RefusalError(msg, rule="unbalanced-angles")
+            raise RefusalError(
+                msg, rule="unbalanced-angles", faces=at(vertex), state=state
+            )
 
 
 def _alternate_sums(
@@ -314,10 +319,10 @@ def _places(state: State, target: Mapping[Edge, str], fixed: int) -> list[Isomet
     while queue:
         face = queue.pop()
         for edge in sides_of(state.faces[face].corners):
-            neighbors = state.edges[edge]
-            if len(neighbors) != 2:  # noqa: PLR2004 - a crease has two sides
+            if edge not in state.creases:
                 continue
-            other = neighbors[0] if neighbors[1] == face else neighbors[1]
+            f, g = state.creases[edge]
+            other = f if g == face else g
             if other in places:
                 continue
             place = places[face]
@@ -358,19 +363,12 @@ def grab(
     Returns the state with the moving faces cut along the line, the moving faces as
     ids in it, and each hinge as the moving face, the face that stays, and their edge.
     """
-    side = line.side(flap)
-    if not side:
-        msg = f"the flap point {flap} lies on the fold line {line}"
-        raise RefusalError(msg, rule="flap-on-line")
-    stack = stack_at(state, flap)
-    if not stack:
-        msg = f"the flap point {flap} lies on no face's inside"
-        raise RefusalError(msg, rule="flap-off-paper")
+    side, stack = flap_stack(state, line, flap)
     if layers is None and unfolding:
         seeds = _folded_over(state, line, side)
         if not seeds:
             msg = f"no paper is folded along {line} on the side of {flap}"
-            raise RefusalError(msg, rule="not-folded")
+            raise RefusalError(msg, rule="not-folded", state=state)
     elif layers is None:
         seeds = [
             f
@@ -379,14 +377,14 @@ def grab(
         ]
     elif len(stack) < layers:
         msg = f"{len(stack)} layers lie at the flap point {flap}, not {layers}"
-        raise RefusalError(msg, rule="too-few-layers", faces=tuple(stack))
+        raise RefusalError(msg, rule="too-few-layers", faces=tuple(stack), state=state)
     else:
         seeds = stack[:layers]
     moving = _joined(state, line, side, seeds)
     crossed = sorted(f for f in moving if crosses(state.folded[f], line))
     if unfolding and crossed:
         msg = f"the line {line} runs through the inside of faces {_ids(crossed)}"
-        raise RefusalError(msg, rule="not-folded", faces=tuple(crossed))
+        raise RefusalError(msg, rule="not-folded", faces=tuple(crossed), state=state)
     cuts = {f: state.faces[f].place.inverse().line(line) for f in crossed}
     cut, pieces = state.cut(cuts)
     moved = frozenset(
@@ -397,10 +395,9 @@ def grab(
     )
     hinges = [
         (m, s, edge)
-        for edge, faces in cut.edges.items()
-        if len(faces) == 2  # noqa: PLR2004 - a crease has two sides
-        and (faces[0] in moved) != (faces[1] in moved)
-        for m, s in [faces if faces[0] in moved else faces[::-1]]
+        for edge, faces in cut.creases.items()
+        for m, s in permutations(faces)
+        if m in moved and s not in moved
     ]
     if not hinges:
         msg = f"the paper to move meets no other paper along {line}"
@@ -410,6 +407,22 @@ def grab(
         msg = f"faces {_ids(flat)} lie flat along {line}"
         raise RefusalError(msg, rule="not-folded", faces=tuple(flat), state=cut)
     return cut, moved, hinges
+
+
+def flap_stack(state: State, line: Line, flap: Point) -> tuple[int, list[int]]:
+    """The side of a line a flap point names, and the faces at it from the top down.
+
+    A flap point on the line, or on no face's inside, names no paper to move.
+    """
+    side = line.side(flap)
+    if not side:
+        msg = f"the flap point {flap} lies on the line {line}"
+        raise RefusalError(msg, rule="flap-on-line", state=state)
+    stack = stack_at(state, flap)
+    if not stack:
+        msg = f"the flap point {flap} lies on no face's inside"
+        raise RefusalError(msg, rule="flap-off-paper", state=state)
+    return side, stack
 
 
 def check_hinges(
@@ -437,10 +450,9 @@ def check_hinges(
 def _folded_over(state: State, line: Line, side: int) -> list[int]:
     """The upper face of each fold along a line, with its faces on one side of it."""
     seeds = []
-    for (u, v), faces in state.edges.items():
+    for (u, v), (f, g) in state.creases.items():
         if not state.is_folded((u, v)):
             continue
-        f, g = faces
         ends = state.folded_point(f, u), state.folded_point(f, v)
         if (
             line.contains(ends[0])
@@ -457,12 +469,11 @@ def _joined(state: State, line: Line, side: int, seeds: Iterable[int]) -> set[in
     queue = list(moving)
     while queue:
         face = queue.pop()
-        corners = state.faces[face].corners
-        for u, v in zip(corners, corners[1:] + corners[:1], strict=True):
+        for u, v in sides_of(state.faces[face].corners):
             a, b = state.folded_point(face, u), state.folded_point(face, v)
             if max(line.side(a) * side, line.side(b) * side) <= 0:
                 continue  # the edge lies on the line, so the paper bends there
-            for neighbor in state.edges[min(u, v), max(u, v)]:
+            for neighbor in state.edges[u, v]:
                 if neighbor not in moving:
                     moving.add(neighbor)
                     queue.append(neighbor)
@@ -507,8 +518,8 @@ def turn(
         change = [reflection if f in moved else IDENTITY for f in range(len(faces))]
         hinges = [
             (m, s)
-            for pair in cut.edges.values()
-            for m, s in permutations(pair, 2)
+            for pair in cut.creases.values()
+            for m, s in permutations(pair)
             if m in moved and s not in moved
         ]
         prefer = _beside(cut, hinges, change)

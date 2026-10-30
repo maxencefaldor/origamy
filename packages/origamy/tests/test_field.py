@@ -11,18 +11,20 @@ from origamy.field import Number, radicands, tower
 
 rationals = st.fractions(max_denominator=50).filter(lambda q: abs(q) < 1000)
 numbers = st.builds(
-    lambda a, b: Number.of(a) + Number.of(b) * Number.of("√2"), rationals, rationals
+    lambda a, b, c: (
+        Number.of(a) + Number.of(b) * Number.of("√2") + Number.of(c) * Number.of("√3")
+    ),
+    rationals,
+    rationals,
+    rationals,
 )
-
-
-def approx(number: Number) -> float:
-    return float(number)
+"""Numbers two levels up the tower, ``a + b√2 + c√3``."""
 
 
 @given(numbers, numbers)
 def test_arithmetic_matches_floats(x: Number, y: Number) -> None:
-    assert isclose(approx(x + y), approx(x) + approx(y), abs_tol=1e-6)
-    assert isclose(approx(x * y), approx(x) * approx(y), rel_tol=1e-9, abs_tol=1e-6)
+    assert isclose(float(x + y), float(x) + float(y), abs_tol=1e-6)
+    assert isclose(float(x * y), float(x) * float(y), rel_tol=1e-9, abs_tol=1e-6)
     if y:
         assert x / y * y == x
 
@@ -31,8 +33,15 @@ def test_arithmetic_matches_floats(x: Number, y: Number) -> None:
 def test_comparison_is_exact(x: Number, y: Number) -> None:
     assert (x < y) == ((x - y).sign() < 0)
     assert (x == y) == (not (x - y))
-    if abs(approx(x) - approx(y)) > 1e-6:
-        assert (x < y) == (approx(x) < approx(y))
+    if abs(float(x) - float(y)) > 1e-6:
+        assert (x < y) == (float(x) < float(y))
+
+
+@given(numbers)
+def test_an_estimate_lies_within_its_error(x: Number) -> None:
+    estimate = x.estimate()
+    distance = abs(x - Fraction(estimate.value))
+    assert distance <= Fraction(estimate.error)
 
 
 @given(numbers)

@@ -9,6 +9,7 @@ that line, and a reflection takes its entries from the line's own coordinates.
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import override
 
 from origamy.field import ONE, ZERO, Exact, Number, Real
@@ -76,7 +77,7 @@ class Point:
 
     @override
     def __repr__(self) -> str:
-        """Text that reads back as this point."""
+        """Text that reads back as this point, when its radicals are integers."""
         return f"Point.of(({str(self.x)!r}, {str(self.y)!r}))"
 
 
@@ -277,6 +278,11 @@ class Isometry:
 
 IDENTITY = Isometry(ONE, ZERO, ZERO, ONE, ZERO, ZERO)
 HALF = Number.of("1/2")
+
+
+def center(polygon: Sequence[Point]) -> Point:
+    """The mean of a polygon's corners: a point inside it when it is convex."""
+    return sum(polygon[1:], polygon[0]) * Number.of(Fraction(1, len(polygon)))
 
 
 def area(polygon: Sequence[Point]) -> Number:

@@ -9,7 +9,6 @@ move: a face that turns over makes a half turn about its axis, and the rest glid
 
 import base64
 import json
-from fractions import Fraction
 from functools import cache
 from html import escape
 from importlib.resources import files
@@ -17,9 +16,8 @@ from pathlib import Path
 from string import Template
 from typing import Any, Final
 
-from origamy.draw import across, stacking
-from origamy.field import Number
-from origamy.geometry import Isometry, Line, Point, bounds, covers
+from origamy.draw import across, folded_box, stacking
+from origamy.geometry import Isometry, Line, Point, center, covers
 from origamy.paper import Step
 from origamy.result import BuildResult
 from origamy.state import State
@@ -83,7 +81,6 @@ def write_viewer(result: BuildResult, name: str, path: Path) -> Path:
 
 def build_data(result: BuildResult, name: str) -> Data:
     """The build as the viewer reads it: floats, with each step's places before it."""
-    assert result.paper is not None  # noqa: S101 - only results with paper have views
     steps = [data.step() for data in result.steps]
     refused = result.refused.step() if result.refused else None
     views = [
@@ -95,25 +92,20 @@ def build_data(result: BuildResult, name: str) -> Data:
     return {
         "name": name,
         "paper": result.paper.model_dump(),
-        "size": float(
-            max(
-                Number.from_data(result.paper.width),
-                Number.from_data(result.paper.height),
-            )
-        ),
+        "size": float(result.paper.unit()),
         "steps": views,
     }
 
 
 def _step(step: Step, previous: Step | None) -> Data:
     state = step.state
-    levels = _levels(state)
-    before, before_levels = [_floats(f.place) for f in state.faces], levels
+    order = _order(state)
+    before, order_before = [_floats(f.place) for f in state.faces], order
     if previous is not None:
         parents = [_parent(previous.state, polygon) for polygon in state.patterns]
-        old = _levels(previous.state)
+        old = _order(previous.state)
         before = [_floats(previous.state.faces[p].place) for p in parents]
-        before_levels = [old[p] for p in parents]
+        order_before = [old[p] for p in parents]
     source = str(step.source.site) if step.source else None
     return {
         "action": step.action,
@@ -122,9 +114,9 @@ def _step(step: Step, previous: Step | None) -> Data:
         "vertices": [p.floats() for p in state.vertices],
         "faces": [list(f.corners) for f in state.faces],
         "places": [_floats(f.place) for f in state.faces],
-        "levels": levels,
+        "order": order,
         "before": before,
-        "beforeLevels": before_levels,
+        "orderBefore": order_before,
         "edges": [[u, v, state.assignment((u, v))] for u, v in sorted(state.edges)],
         "moved": sorted(step.moved),
         "line": _segment(step.line, state) if step.line else None,
@@ -136,31 +128,28 @@ def _step(step: Step, previous: Step | None) -> Data:
                 "message": d.message,
                 "faces": list(d.faces),
             }
-            for d in step.diagnostics
+            for d in (*([step.refusal] if step.refusal else []), *step.diagnostics)
         ],
     }
 
 
-def _levels(state: State) -> list[int]:
-    order = stacking(state)
-    levels = [0] * len(state.faces)
-    for level, face in enumerate(order):
-        levels[face] = level
-    return levels
+def _order(state: State) -> list[int]:
+    """Each face's place in the stacking, counted from the bottom."""
+    order = [0] * len(state.faces)
+    for index, face in enumerate(stacking(state)):
+        order[face] = index
+    return order
 
 
 def _parent(state: State, polygon: tuple[Point, ...]) -> int:
     """The face of an earlier state that holds a polygon of the crease pattern."""
-    center = sum(polygon[1:], polygon[0]) * Number.of(Fraction(1, len(polygon)))
-    return next(
-        f for f, pattern in enumerate(state.patterns) if covers(pattern, center)
-    )
+    inner = center(polygon)
+    return next(f for f, pattern in enumerate(state.patterns) if covers(pattern, inner))
 
 
 def _segment(line: Line, state: State) -> tuple[tuple[float, float], ...]:
     """The fold line across the folded paper, and as far again beyond it."""
-    x0, y0, x1, y1 = bounds(p for polygon in state.folded for p in polygon)
-    start, end = across(line, (float(x0), float(y0), float(x1), float(y1)))
+    start, end = across(line, folded_box(state))
     middle = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
     return tuple(
         (middle[0] + (p[0] - middle[0]) / 2, middle[1] + (p[1] - middle[1]) / 2)

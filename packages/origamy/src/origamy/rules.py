@@ -40,8 +40,8 @@ RULES = {
             "flap-off-paper",
             Level.ERROR,
             "The flap point lies on no paper's inside.",
-            "The point an action grabs the paper at lies outside every face once "
-            "folded, or on a face's edge.",
+            "The point an action takes the paper at, or the point a collapse holds "
+            "fixed, lies outside every face once folded, or on a face's edge.",
             refusal=True,
         ),
         Rule(
@@ -90,7 +90,8 @@ RULES = {
             Level.ERROR,
             "A collapse names a line with no crease of the paper along it.",
             "A collapse sets creases along a line or segment of the crease pattern, "
-            "and no crease inside the paper lies along it.",
+            "and no crease inside the paper lies along it; for a petal fold, no flat "
+            "crease of the lifted layer lies along its line.",
             refusal=True,
         ),
         Rule(
@@ -108,6 +109,14 @@ RULES = {
             "The tip a reverse fold turns splits into an upper and a lower half, each "
             "one piece of paper joined to the other only by folds, in several ways; "
             "no single way splits the layers at the flap point most evenly.",
+            refusal=True,
+        ),
+        Rule(
+            "no-side",
+            Level.ERROR,
+            "The layer a petal fold lifts has no folded side to open.",
+            "A petal fold lifts a layer whose creases along its line end at no "
+            "folded side of the layer, so no side opens flat as the layer lifts.",
             refusal=True,
         ),
         Rule(
@@ -166,7 +175,7 @@ class Diagnostic:
     level: Level
     message: str
     faces: tuple[int, ...] = ()
-    """The faces the fact is about, as ids in the state before the step."""
+    """The faces the fact is about, as ids in the state of the step that states it."""
 
     @classmethod
     def of(cls, name: str, message: str, faces: tuple[int, ...] = ()) -> Diagnostic:
@@ -178,17 +187,12 @@ class RefusalError(OrigamyError):
     """An action the paper cannot take, with the facts of why."""
 
     def __init__(
-        self,
-        message: str,
-        *,
-        rule: str,
-        faces: tuple[int, ...] = (),
-        state: State | None = None,
+        self, message: str, *, rule: str, state: State, faces: tuple[int, ...] = ()
     ) -> None:
         """State the fact, name its refusal rule, and list the faces it is about.
 
-        ``state`` is the paper as the faces' ids name them, when the action cut the
-        paper before it was refused; by default, the paper before the action.
+        ``state`` is the paper the faces' ids name: the paper before the action, or as
+        the action cut it along its line before the refusal.
         """
         super().__init__(message)
         self.diagnostic = Diagnostic.of(rule, message, faces)

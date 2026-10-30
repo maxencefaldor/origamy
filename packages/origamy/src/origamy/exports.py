@@ -3,7 +3,8 @@
 
 FOLD 1.2 (https://edemaine.github.io/fold/doc/spec.html) stores coordinates as floats.
 The file holds the last crease pattern at the top level, then one folded form per step
-in ``file_frames``. Exact coordinates ride along as ``origamy:vertices_exact``.
+in ``file_frames``. Exact coordinates ride along as ``origamy:vertices_exact``, as
+`Number.data` writes them, with the radicands of their tower in ``origamy:tower``.
 """
 
 from typing import Any
@@ -25,6 +26,7 @@ def to_fold(result: BuildResult, title: str) -> FoldFile:
         "frame_title": title,
         "frame_classes": ["creasePattern"],
         "frame_attributes": ["2D"],
+        "origamy:tower": list(result.tower),
         **_pattern(last),
         "file_frames": [
             {
@@ -42,7 +44,7 @@ def to_fold(result: BuildResult, title: str) -> FoldFile:
 def _pattern(state: State) -> FoldFile:
     return {
         "vertices_coords": [p.floats() for p in state.vertices],
-        "origamy:vertices_exact": [[str(p.x), str(p.y)] for p in state.vertices],
+        "origamy:vertices_exact": [[p.x.data(), p.y.data()] for p in state.vertices],
         **_topology(state),
     }
 

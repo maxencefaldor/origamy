@@ -27,10 +27,15 @@ DEFAULT_BACK = "#f2ede4"
 
 @dataclass(frozen=True, slots=True)
 class Step:
-    """One action the paper took, and its state after it."""
+    """One action and the paper after it; for a refused action, the paper it began on.
+
+    A refused action may have cut the paper along its line before its refusal, so its
+    facts name faces of the cut paper.
+    """
 
     action: str
-    """The action: ``valley``, ``reverse``, ``collapse`` or another `Paper` method."""
+    """The action's name, such as ``valley``, ``reverse`` or ``turn-over``; ``start``
+    names the unfolded paper."""
     description: str
     state: State
     moved: frozenset[int] = frozenset()
@@ -39,14 +44,17 @@ class Step:
     flap: Point | None = None
     source: Source | None = None
     diagnostics: tuple[Diagnostic, ...] = ()
+    """The facts the step states, besides any refusal."""
+    refusal: Diagnostic | None = None
+    """The fact that refused the action, for a refused action."""
 
 
-type Crease = Line | tuple[PointLike, PointLike]
+type CreaseLike = Line | tuple[PointLike, PointLike]
 """Creases of the crease pattern: all along a line, or along the segment between two
 points."""
 
 
-def _crease(crease: Crease) -> Line | tuple[Point, Point]:
+def _crease(crease: CreaseLike) -> Line | tuple[Point, Point]:
     if isinstance(crease, Line):
         return crease
     start, end = crease
@@ -62,12 +70,13 @@ def _describe(crease: Line | tuple[Point, Point]) -> str:
 class RefusedError(OrigamyError):
     """The paper could not take an action, so the script stopped there."""
 
-    def __init__(self, paper: Paper, refused: Step) -> None:
-        """Keep the paper as it was, and the refused action with its diagnostic."""
+    def __init__(self, paper: Paper, refused: Step, refusal: Diagnostic) -> None:
+        """Keep the paper as it was, the refused action, and the fact refusing it."""
         where = f"{refused.source}: " if refused.source else ""
-        super().__init__(f"{where}{refused.diagnostics[0].message}")
+        super().__init__(f"{where}{refusal.message}")
         self.paper = paper
         self.refused = refused
+        self.refusal = refusal
 
 
 class Paper:
@@ -209,9 +218,9 @@ class Paper:
     def collapse(
         self,
         *,
-        valleys: Iterable[Crease] = (),
-        mountains: Iterable[Crease] = (),
-        flats: Iterable[Crease] = (),
+        valleys: Iterable[CreaseLike] = (),
+        mountains: Iterable[CreaseLike] = (),
+        flats: Iterable[CreaseLike] = (),
         fixed: PointLike | None = None,
     ) -> None:
         """Fold, unfold or reverse many creases at once, and let the paper follow.
@@ -235,14 +244,14 @@ class Paper:
                 edges = actions.along(state, crease)
                 if not edges:
                     msg = f"no crease of the paper lies along {_describe(crease)}"
-                    raise RefusalError(msg, rule="no-crease")
+                    raise RefusalError(msg, rule="no-crease", state=state)
                 assignments.update(dict.fromkeys(edges, kind))
             face = actions.largest(state)
             if point is not None:
                 stack = actions.stack_at(state, point)
                 if not stack:
                     msg = f"the fixed point {point} lies on no face's inside"
-                    raise RefusalError(msg, rule="flap-off-paper")
+                    raise RefusalError(msg, rule="flap-off-paper", state=state)
                 face = stack[0]
             return actions.collapse(state, assignments, face)
 
@@ -283,10 +292,10 @@ class Paper:
         faces = set(range(len(state.faces)))
         if at is not None:
             stack = actions.stack_at(state, Point.of(at))
-            faces = actions.flat_with(state, stack[: layers or len(stack)])
+            faces = actions.flat_with(state, stack[:layers])
         found = []
-        for edge, pair in state.edges.items():
-            if len(pair) != 2 or not faces & set(pair):  # noqa: PLR2004 - a crease
+        for edge, pair in state.creases.items():
+            if not faces & set(pair):
                 continue
             ends = tuple(state.folded_point(pair[0], v) for v in edge)
             if along.contains(ends[0]) and along.contains(ends[1]):
@@ -335,14 +344,15 @@ class Paper:
             refused = Step(
                 action,
                 description,
-                error.state or before,
+                error.state,
                 frozenset(),
                 line,
                 flap,
                 source,
-                (error.diagnostic, *diagnostics),
+                tuple(diagnostics),
+                error.diagnostic,
             )
-            raise RefusedError(self, refused) from None
+            raise RefusedError(self, refused, error.diagnostic) from None
         self.steps.append(
             Step(
                 action,

@@ -13,7 +13,7 @@ from html import escape
 from math import ceil, floor, hypot
 
 from origamy.field import Number
-from origamy.geometry import Line, Point, bounds
+from origamy.geometry import Line, Point, bounds, center
 from origamy.state import State
 
 MOUNTAIN = "#c0392b"
@@ -241,9 +241,11 @@ def _mark_faces(
     for face in marked:
         polygon = polygons[face]
         canvas.polygon(polygon, fill="none", stroke=MARK, **{"stroke-width": 2.2})
-        center = sum(polygon[1:], polygon[0]) * Number.of(Fraction(1, len(polygon)))
         canvas.label(
-            center, str(face), fill=MARK, **{"font-size": 12, "font-weight": 700}
+            center(polygon),
+            str(face),
+            fill=MARK,
+            **{"font-size": 12, "font-weight": 700},
         )
 
 

@@ -21,8 +21,8 @@ ENTRY = "fold"
 """The function a fold script defines: it takes no argument and returns a `Paper`."""
 
 
-def run(script: Path) -> BuildResult:
-    """Run a fold script in this process and return what it produced."""
+def run(script: Path) -> BuildResult | Failure:
+    """Run a fold script in this process and return what it folded, or its failure."""
     root = Path.cwd()
     try:
         with _importable(script.parent):
@@ -30,19 +30,17 @@ def run(script: Path) -> BuildResult:
             entry = namespace.get(ENTRY)
             if not callable(entry):
                 message = f"{script} must define {ENTRY}(), returning a Paper"
-                return BuildResult(
-                    failure=Failure(error="ScriptError", message=message)
-                )
+                return Failure(error="ScriptError", message=message)
             paper = entry()
     except RefusedError as error:
         return BuildResult.of(error.paper, root, error.refused)
     except SystemExit as error:
-        return BuildResult(failure=_failure(error, root, f"exited with {error.code!r}"))
+        return _failure(error, root, f"exited with {error.code!r}")
     except BaseException as error:  # noqa: BLE001 - a fold script may raise anything
-        return BuildResult(failure=_failure(error, root, str(error)))
+        return _failure(error, root, str(error))
     if not isinstance(paper, Paper):
         message = f"{ENTRY}() returned {type(paper).__name__}, not a Paper"
-        return BuildResult(failure=Failure(error="ScriptError", message=message))
+        return Failure(error="ScriptError", message=message)
     return BuildResult.of(paper, root)
 
 
