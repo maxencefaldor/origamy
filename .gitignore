@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.rumdl_cache/
+dist/
+
+# What building the examples writes
+examples/*.fold
+examples/*.png
+models/*.fold
+models/*.png

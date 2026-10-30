@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_LOCKED: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: Format, lint, types and Markdown
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync
+      - name: Format
+        run: uv run ruff format --check
+      - name: Lint
+        run: uv run ruff check --output-format=github
+      - name: Types
+        run: uv run ty check
+      - name: Markdown
+        run: uv run rumdl check .
+
+  test:
+    name: Tests on Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14", "3.15"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync
+      - name: Install the browser
+        run: uv run playwright install --with-deps chromium
+      - name: Tests
+        run: uv run pytest
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync
+      - name: Install the browser
+        run: uv run playwright install --with-deps chromium
+      - name: Build every example
+        run: |
+          for script in examples/*.py; do
+            uv run origamy build "$script"
+          done
+      - name: Keep the pictures and FOLD files
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples
+          path: |
+            examples/*.png
+            examples/*.fold
+          if-no-files-found: error

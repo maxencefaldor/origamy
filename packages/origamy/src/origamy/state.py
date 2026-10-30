@@ -1,0 +1,188 @@
+# Copyright 2026 Maxence Faldor
+"""The state of the paper: its crease pattern, where faces lie, and how they stack.
+
+The crease pattern divides the unfolded paper into convex faces. Each face lies where
+its isometry maps it, and wherever two faces overlap, the state says which is above.
+Everything else, such as whether a crease is folded or flat, follows from these three.
+"""
+
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from functools import cached_property
+
+from origamy.geometry import IDENTITY, Isometry, Line, Point, Polygon, overlaps
+
+type Pair = tuple[int, int]
+"""Two faces, the upper first: ``(upper, lower)``."""
+
+type Edge = tuple[int, int]
+"""A side of a face, as its two vertices, the lesser id first."""
+
+
+@dataclass(frozen=True, slots=True)
+class Face:
+    """A convex region of the paper bounded by creases and the paper's edges."""
+
+    corners: tuple[int, ...]
+    """Vertex ids, counterclockwise on the crease pattern."""
+    place: Isometry
+    """Where the face lies: the map from the crease pattern to the folded paper."""
+
+
+@dataclass(frozen=True)
+class State:
+    """The paper at one step: crease pattern, faces' places and their stacking."""
+
+    vertices: tuple[Point, ...]
+    """Where each vertex is on the crease pattern."""
+    faces: tuple[Face, ...]
+    above: frozenset[Pair] = field(default=frozenset())
+    """For each pair of faces that overlap once folded, which one is above."""
+
+    @classmethod
+    def sheet(cls, corners: Iterable[Point]) -> State:
+        """Unfolded paper of a convex shape, its front facing up."""
+        vertices = tuple(corners)
+        return cls(vertices, (Face(tuple(range(len(vertices))), IDENTITY),))
+
+    @cached_property
+    def patterns(self) -> tuple[Polygon, ...]:
+        """Each face's corners on the crease pattern."""
+        return tuple(tuple(self.vertices[i] for i in f.corners) for f in self.faces)
+
+    @cached_property
+    def folded(self) -> tuple[Polygon, ...]:
+        """Each face's corners where it lies, counterclockwise as seen from above."""
+        return tuple(
+            f.place.polygon(polygon)
+            for f, polygon in zip(self.faces, self.patterns, strict=True)
+        )
+
+    @cached_property
+    def edges(self) -> Mapping[Edge, tuple[int, ...]]:
+        """The faces on each edge: two along a crease, one along the paper's edge."""
+        sides: dict[Edge, list[int]] = defaultdict(list)
+        for index, face in enumerate(self.faces):
+            for edge in sides_of(face.corners):
+                sides[edge].append(index)
+        return {edge: tuple(faces) for edge, faces in sides.items()}
+
+    @cached_property
+    def overlapping(self) -> frozenset[Pair]:
+        """Every pair of faces that share area once folded, the lesser id first."""
+        folded = self.folded
+        return frozenset(
+            (f, g)
+            for f in range(len(folded))
+            for g in range(f + 1, len(folded))
+            if overlaps(folded[f], folded[g])
+        )
+
+    def is_above(self, upper: int, lower: int) -> bool:
+        """Whether face ``upper`` lies above face ``lower``, where they overlap."""
+        return (upper, lower) in self.above
+
+    def folded_point(self, face: int, vertex: int) -> Point:
+        """Where a vertex of a face lies once folded."""
+        return self.faces[face].place(self.vertices[vertex])
+
+    def is_folded(self, edge: Edge) -> bool:
+        """Whether a crease is folded: its two faces lie on the same side of it."""
+        faces = self.edges[edge]
+        return len(faces) == 2 and (  # noqa: PLR2004 - a crease has two sides
+            self.faces[faces[0]].place != self.faces[faces[1]].place
+        )
+
+    def flips(self, face: int) -> bool:
+        """Whether a face shows the paper's back."""
+        return self.faces[face].place.flips
+
+    def assignment(self, edge: Edge) -> str:
+        """What an edge is, as FOLD writes it, seen from the paper's front.
+
+        ``M`` and ``V`` are folded mountain and valley creases, ``F`` a crease lying
+        flat, and ``B`` the paper's own edge. A fold is a valley when the face under it
+        shows the paper's front: the front then faces inward.
+        """
+        faces = self.edges[edge]
+        if len(faces) != 2:  # noqa: PLR2004 - a crease has two sides
+            return "B"
+        f, g = faces
+        if self.faces[f].place == self.faces[g].place:
+            return "F"
+        lower = g if self.is_above(f, g) else f
+        return "M" if self.flips(lower) else "V"
+
+    def cut(self, cuts: Mapping[int, Line]) -> tuple[State, dict[int, tuple[int, ...]]]:
+        """Split faces by lines of the crease pattern, without moving any paper.
+
+        Each listed face is split in two by its line, which must cross it. The face
+        keeps its id for the part on the line's positive side; the other part takes a
+        new id.
+        Vertices where a line crosses an edge join every face along that edge. Each part
+        keeps its face's stacking with every face it still overlaps.
+
+        Returns the new state and each old face's ids in it.
+        """
+        vertices = list(self.vertices)
+        index = {p: i for i, p in enumerate(vertices)}
+        inserted: dict[Edge, set[int]] = defaultdict(set)
+        for face, line in cuts.items():
+            corners = self.faces[face].corners
+            for u, v in zip(corners, corners[1:] + corners[:1], strict=True):
+                p, q = vertices[u], vertices[v]
+                if line.side(p) * line.side(q) < 0:
+                    point = line.cut(p, q)
+                    if point not in index:
+                        index[point] = len(vertices)
+                        vertices.append(point)
+                    inserted[min(u, v), max(u, v)].add(index[point])
+        faces = [
+            Face(_insert(face.corners, inserted, vertices), face.place)
+            for face in self.faces
+        ]
+        pieces: dict[int, tuple[int, ...]] = {f: (f,) for f in range(len(faces))}
+        for face, line in cuts.items():
+            corners = faces[face].corners
+            sides = [line.side(vertices[c]) for c in corners]
+            plus = tuple(c for c, s in zip(corners, sides, strict=True) if s >= 0)
+            minus = tuple(c for c, s in zip(corners, sides, strict=True) if s <= 0)
+            # A line through a convex face leaves each side's corners in one run, so
+            # keeping them in order around the face keeps each part counterclockwise.
+            place = faces[face].place
+            faces[face] = Face(plus, place)
+            faces.append(Face(minus, place))
+            pieces[face] = (face, len(faces) - 1)
+        state = State(tuple(vertices), tuple(faces))
+        above = frozenset(
+            (pu, pl)
+            for upper, lower in self.above
+            for pu in pieces[upper]
+            for pl in pieces[lower]
+            if overlaps(state.folded[pu], state.folded[pl])
+        )
+        return State(state.vertices, state.faces, above), pieces
+
+
+def sides_of(corners: tuple[int, ...]) -> list[Edge]:
+    """The edges of a face, in order around it."""
+    return [
+        (min(u, v), max(u, v))
+        for u, v in zip(corners, corners[1:] + corners[:1], strict=True)
+    ]
+
+
+def _insert(
+    corners: tuple[int, ...], inserted: Mapping[Edge, set[int]], vertices: list[Point]
+) -> tuple[int, ...]:
+    result: list[int] = []
+    for u, v in zip(corners, corners[1:] + corners[:1], strict=True):
+        result.append(u)
+        between = inserted.get((min(u, v), max(u, v)))
+        if between is not None:
+            start, direction = vertices[u], vertices[v] - vertices[u]
+            result.extend(
+                sorted(between, key=lambda w: direction.dot(vertices[w] - start))
+            )
+    return tuple(result)
