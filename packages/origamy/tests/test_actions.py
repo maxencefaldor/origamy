@@ -108,7 +108,6 @@ def test_turning_over_reverses_the_stack() -> None:
         (SPINE, (2, 2), None, "flap-off-paper"),
         (SPINE, ("1/4", "1/2"), 3, "too-few-layers"),
         (Line.through((2, 0), (2, 1)), ("1/4", "1/2"), None, "no-hinge"),
-        (SPINE, ("1/4", "1/2"), 1, "already-folded"),
     ],
 )
 def test_refusals(
@@ -117,6 +116,15 @@ def test_refusals(
     with pytest.raises(RefusalError) as refusal:
         fold(book(), line, P(flap), layers, Sense.VALLEY)
     assert refusal.value.diagnostic.rule == rule
+
+
+def test_a_fold_turns_a_fold_back_flat_but_not_further() -> None:
+    flat = fold(book(), SPINE, P(("1/4", "1/2")), 1, Sense.VALLEY).state
+    assert len(faces_at(flat, "3/4", "1/2")) == 1
+    assert not flat.above
+    with pytest.raises(RefusalError) as refusal:
+        fold(book(), SPINE, P(("1/4", "1/2")), 1, Sense.MOUNTAIN)
+    assert refusal.value.diagnostic.rule == "already-folded"
 
 
 def test_unfolding_flat_paper_is_refused() -> None:

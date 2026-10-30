@@ -2,11 +2,12 @@
 """Exact plane geometry: points, lines, isometries and convex polygons.
 
 Every coordinate is a `Number`, so every test here is exact: a point is on a line or it
-is not. Folding the paper along a line reflects it across that line, and a reflection
-across a line with coordinates of the form a + b√2 has entries of that form too.
+is not. Each test tries float estimates first and computes exactly only when their
+error bounds leave the answer open. Folding the paper along a line reflects it across
+that line, and a reflection takes its entries from the line's own coordinates.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import override
 
@@ -144,11 +145,18 @@ class Line:
 
     def side(self, p: Point) -> int:
         """Return 1 or -1 for the side of the line ``p`` is on, or 0 when on it."""
-        return self.value(p).sign()
+        normal = self.normal
+        estimate = (
+            normal.x.estimate() * p.x.estimate()
+            + normal.y.estimate() * p.y.estimate()
+            - self.offset.estimate()
+        )
+        side = estimate.sign()
+        return self.value(p).sign() if side is None else side
 
     def contains(self, p: Point) -> bool:
         """Whether ``p`` is on the line."""
-        return not self.value(p)
+        return not self.side(p)
 
     def reflect(self, p: Point) -> Point:
         """The mirror image of ``p`` across the line."""
@@ -279,89 +287,99 @@ def area(polygon: Sequence[Point]) -> Number:
     return total * HALF
 
 
+def orientation(p: Point, q: Point, r: Point) -> int:
+    """Return 1, -1 or 0 as ``r`` lies left of, right of or on the line ``pq``."""
+    estimate = (q.x.estimate() - p.x.estimate()) * (r.y.estimate() - p.y.estimate()) - (
+        q.y.estimate() - p.y.estimate()
+    ) * (r.x.estimate() - p.x.estimate())
+    side = estimate.sign()
+    return (q - p).cross(r - p).sign() if side is None else side
+
+
+def sides(polygon: Sequence[Point]) -> list[tuple[Point, Point]]:
+    """The sides of a polygon, each from a corner to the next."""
+    return list(zip(polygon, [*polygon[1:], polygon[0]], strict=True))
+
+
 def clip(polygon: Polygon, line: Line, keep: int) -> Polygon:
     """The part of a convex polygon on one side of a line, on the line included.
 
     ``keep`` is the side to keep, 1 or -1, as `Line.side` returns it. The result is
     empty, or a polygon with no repeated corner; it may have no area.
     """
-    sides = [line.side(p) for p in polygon]
-    result: list[Point] = []
-    for i, p in enumerate(polygon):
-        j = (i + 1) % len(polygon)
-        if sides[i] * keep >= 0:
-            result.append(p)
-        if sides[i] * sides[j] < 0:
-            result.append(line.cut(p, polygon[j]))
-    return _distinct(result)
+    return _clipped(polygon, [line.side(p) * keep for p in polygon], line.value)
 
 
 def intersection(first: Polygon, second: Polygon) -> Polygon:
     """The intersection of two convex polygons, possibly empty or without area."""
+    if all(covers(second, p) for p in first):
+        return first
+    if all(covers(first, p) for p in second):
+        return second
     result = first
-    center = sum(second[1:], second[0]) * Number.of(f"1/{len(second)}")
-    for i, p in enumerate(second):
+    for p, q in sides(second):
         if not result:
             break
-        line = Line.through(p, second[(i + 1) % len(second)])
-        result = clip(result, line, line.side(center))
+        result = _clipped(
+            result,
+            [orientation(p, q, r) for r in result],
+            lambda r, p=p, q=q: (q - p).cross(r - p),
+        )
     return result
 
 
 def overlaps(first: Polygon, second: Polygon) -> bool:
-    """Whether two convex polygons share some area."""
-    if not _boxes_meet(first, second):
-        return False
-    common = intersection(first, second)
-    return area(common).sign() > 0 if common else False
+    """Whether two convex polygons of positive area share some area.
+
+    They do unless a side of one has all of the other on or beyond it.
+    """
+    return (
+        _boxes_meet(first, second)
+        and not _apart(first, second)
+        and not _apart(second, first)
+    )
 
 
 def inside(polygon: Polygon, point: Point) -> bool:
     """Whether a point lies strictly inside a convex polygon."""
-    for i, p in enumerate(polygon):
-        q = polygon[(i + 1) % len(polygon)]
-        if (q - p).cross(point - p).sign() <= 0:
-            return False
-    return True
+    return all(orientation(p, q, point) > 0 for p, q in sides(polygon))
 
 
 def covers(polygon: Polygon, point: Point) -> bool:
     """Whether a point lies inside a convex polygon or on its boundary."""
-    return all(
-        (polygon[(i + 1) % len(polygon)] - p).cross(point - p).sign() >= 0
-        for i, p in enumerate(polygon)
-    )
+    return all(orientation(p, q, point) >= 0 for p, q in sides(polygon))
 
 
 def crosses(polygon: Polygon, line: Line) -> bool:
     """Whether a line passes through the inside of a convex polygon."""
-    sides = {line.side(p) for p in polygon}
-    return 1 in sides and -1 in sides
+    found = {line.side(p) for p in polygon}
+    return 1 in found and -1 in found
 
 
 def through_inside(polygon: Polygon, p: Point, q: Point) -> bool:
-    """Whether the segment from ``p`` to ``q`` runs through a polygon's inside."""
-    line = Line.through(p, q)
-    if not crosses(polygon, line):
-        return False
-    chord = [c for c in clip(clip(polygon, line, 1), line, -1) if line.contains(c)]
-    if len(chord) < 2:  # noqa: PLR2004 - a chord has two ends
-        return False
-    direction = q - p
-    ends = sorted(direction.dot(c - p) for c in chord)
-    low, high = ends[0], ends[-1]
-    length = direction.dot(direction)
-    return max(low, ZERO) < min(high, length)
+    """Whether the segment from ``p`` to ``q`` runs through a polygon's inside.
+
+    It does when its line has corners on both sides, and no side of the polygon has
+    both of its ends on or beyond it.
+    """
+    found = {orientation(p, q, corner) for corner in polygon}
+    return (
+        1 in found
+        and -1 in found
+        and not any(
+            orientation(a, b, p) <= 0 and orientation(a, b, q) <= 0
+            for a, b in sides(polygon)
+        )
+    )
 
 
 def collinear_overlap(first: tuple[Point, Point], second: tuple[Point, Point]) -> bool:
     """Whether two segments on one line share a stretch of positive length."""
     p, q = first
-    line = Line.through(p, q)
-    if not (line.contains(second[0]) and line.contains(second[1])):
+    if orientation(p, q, second[0]) or orientation(p, q, second[1]):
         return False
     direction = q - p
-    a = sorted((ZERO, direction.dot(direction)))
+    a = (ZERO, direction.dot(direction))
     b = sorted(direction.dot(r - p) for r in second)
     return max(a[0], b[0]) < min(a[1], b[1])
 
@@ -378,6 +396,30 @@ def _boxes_meet(first: Polygon, second: Polygon) -> bool:
     ax0, ay0, ax1, ay1 = bounds(first)
     bx0, by0, bx1, by1 = bounds(second)
     return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
+def _apart(polygon: Polygon, other: Polygon) -> bool:
+    """Whether a side of a convex polygon has all of another on or beyond it."""
+    return any(all(orientation(p, q, r) <= 0 for r in other) for p, q in sides(polygon))
+
+
+def _clipped(
+    polygon: Polygon, sides_of: list[int], value: Callable[[Point], Number]
+) -> Polygon:
+    """The corners of a convex polygon on the kept side, and where its sides cross.
+
+    ``sides_of`` gives each corner's side, positive where kept; ``value`` is zero on
+    the cutting line and changes sign across it.
+    """
+    result: list[Point] = []
+    for i, p in enumerate(polygon):
+        j = (i + 1) % len(polygon)
+        if sides_of[i] >= 0:
+            result.append(p)
+        if sides_of[i] * sides_of[j] < 0:
+            vp, vq = value(p), value(polygon[j])
+            result.append(p + (polygon[j] - p) * (vp / (vp - vq)))
+    return _distinct(result)
 
 
 def _distinct(points: list[Point]) -> Polygon:

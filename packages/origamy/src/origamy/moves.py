@@ -1,17 +1,25 @@
 # Copyright 2026 Maxence Faldor
-"""Named moves of origami, each a precrease and a collapse in one step.
+"""Named moves of origami, each one action that sets many creases at once.
 
-A named move is a shorthand for creases a script could set itself: it computes the
-creases and their assignments, then collapses. The checks and the layer solver judge the
-result as they judge any collapse.
+A named move is a shorthand for creases a script could set itself. A reverse fold turns
+a tip inside out between its layers; a petal fold collapses creases made before. The
+checks and the layer solver judge the result as they judge any action.
 """
 
 from dataclasses import dataclass
 
-from origamy.actions import Outcome, collapse, flat_with, grab, stack_at
+from origamy.actions import (
+    Outcome,
+    check_hinges,
+    collapse,
+    flat_with,
+    grab,
+    stack_at,
+    turn,
+)
 from origamy.geometry import Line, Point
 from origamy.rules import RefusalError
-from origamy.state import Edge, State
+from origamy.state import Edge, State, sides_of
 
 
 def reverse(
@@ -20,26 +28,105 @@ def reverse(
     """Reverse fold: turn the tip of a folded flap inside out, across ``line``.
 
     The tip is the paper at ``flap`` on its side of the line, taken as `fold` takes it.
-    Each fold inside the tip reverses. Each new crease along the line takes the
-    assignment of the fold it meets there, its spine, so the tip turns between the
-    layers; an outside reverse fold takes the opposite assignment, so the tip wraps
+    The tip opens into an upper and a lower half, joined by its spine; where it could
+    open in several places, it opens where it splits the layers at ``flap`` most evenly.
+    Each half turns over as one, the upper half staying above the lower. An inside
+    reverse fold tucks each half's tip between the halves; an outside one wraps it
     around them.
     """
     cut, tip, hinges = grab(state, line, flap, layers, unfolding=False)
-    changes: dict[Edge, str] = {
-        edge: _opposite(cut.assignment(edge))
-        for edge, faces in cut.edges.items()
-        if set(faces) <= tip and cut.is_folded(edge)
-    }
-    for moving, _, edge in hinges:
-        spine = _spine(cut, edge, tip)
-        if spine is None:
-            corner = cut.vertices[edge[0]]
-            msg = f"no fold of face {moving} meets the line {line} at {corner}"
-            raise RefusalError(msg, rule="no-spine", faces=(moving,), state=cut)
-        kind = cut.assignment(spine)
-        changes[edge] = _opposite(kind) if outside else kind
-    return collapse(cut, changes, hinges[0][1])
+    check_hinges(cut, line, hinges, up=None)
+    upper, lower = _halves(cut, tip, flap)
+    kind = "outside" if outside else "inside"
+    required = {}
+    for moving, staying, _ in hinges:
+        over = (moving in upper) == outside
+        pair = (moving, staying) if over else (staying, moving)
+        where = "over" if over else "under"
+        required[pair] = (
+            f"the {kind} reverse fold turns face {moving} {where} {staying}"
+        )
+    return turn(cut, line, (upper, lower), required, up=None)
+
+
+def _halves(
+    state: State, tip: frozenset[int], flap: Point
+) -> tuple[frozenset[int], frozenset[int]]:
+    """Split a tip where it opens: an upper and a lower half, joined only by folds.
+
+    Each half is one piece of paper through its own creases, and lies above the other
+    or below it wherever they overlap. The folds between the halves are the tip's spine.
+    Of several such splits, the one that splits the layers at ``flap`` most evenly wins.
+    """
+    layers = _pieces(state, tip)
+    index = {face: i for i, piece in enumerate(layers) for face in piece}
+    over = [0] * len(layers)
+    joined = [0] * len(layers)
+    for upper, lower in state.above:
+        if upper in tip and lower in tip:
+            over[index[lower]] |= 1 << index[upper]
+    for faces in state.edges.values():
+        if len(faces) == 2 and faces[0] in tip and faces[1] in tip:  # noqa: PLR2004
+            a, b = index[faces[0]], index[faces[1]]
+            joined[a] |= 1 << b
+            joined[b] |= 1 << a
+    whole = (1 << len(layers)) - 1
+    splits = [
+        mask
+        for mask in range(1, whole)
+        if not any(over[i] & ~mask for i in _bits(mask))
+        and _whole(mask, joined)
+        and _whole(whole & ~mask, joined)
+    ]
+    stack = [index[face] for face in stack_at(state, flap) if face in tip]
+
+    def unevenness(mask: int) -> int:
+        above = sum(mask >> i & 1 for i in stack)
+        return abs(2 * above - len(stack))
+
+    best = sorted(splits, key=unevenness)[:2]
+    if not best or (len(best) > 1 and unevenness(best[0]) == unevenness(best[1])):
+        rule = "several-spines" if best else "no-spine"
+        ways = f"in {len(splits)} equally even ways" if best else "in no way"
+        msg = f"the paper to reverse at {flap} opens into two halves {ways}"
+        raise RefusalError(msg, rule=rule, faces=tuple(sorted(tip)), state=state)
+    top = frozenset(face for i in _bits(best[0]) for face in layers[i])
+    return top, tip - top
+
+
+def _pieces(state: State, faces: frozenset[int]) -> list[frozenset[int]]:
+    """The faces split into pieces of paper, each joined through its flat creases."""
+    pieces: list[frozenset[int]] = []
+    left = set(faces)
+    while left:
+        queue = [left.pop()]
+        piece = set(queue)
+        while queue:
+            face = queue.pop()
+            for edge in sides_of(state.faces[face].corners):
+                for other in state.edges[edge]:
+                    if other in left and not state.is_folded(edge):
+                        left.discard(other)
+                        piece.add(other)
+                        queue.append(other)
+        pieces.append(frozenset(piece))
+    return pieces
+
+
+def _bits(mask: int) -> list[int]:
+    return [i for i in range(mask.bit_length()) if mask >> i & 1]
+
+
+def _whole(mask: int, joined: list[int]) -> bool:
+    """Whether the pieces of a mask form one piece of paper through their creases."""
+    reached = frontier = mask & -mask
+    while frontier:
+        grown = 0
+        for i in _bits(frontier):
+            grown |= joined[i]
+        frontier = grown & mask & ~reached
+        reached |= frontier
+    return reached == mask
 
 
 def petal(state: State, line: Line, flap: Point) -> Outcome:
@@ -133,31 +220,3 @@ def _beyond(state: State, edge: Edge, end: int, line: Line, side: int) -> bool:
     face = state.edges[edge][0]
     other = edge[0] if edge[1] == end else edge[1]
     return line.side(state.folded_point(face, other)) == side
-
-
-def _spine(state: State, hinge: Edge, tip: frozenset[int]) -> Edge | None:
-    """A fold outside the tip that ends where a hinge does, in line with a tip fold."""
-    found = None
-    for vertex in hinge:
-        folds = [
-            edge
-            for edge, faces in state.edges.items()
-            if vertex in edge and edge != hinge and state.is_folded(edge)
-        ]
-        tips = [edge for edge in folds if set(state.edges[edge]) <= tip]
-        for edge in folds:
-            if set(state.edges[edge]) & tip:
-                continue
-            if any(_in_line(state, edge, other) for other in tips):
-                return edge
-            found = found or edge
-    return found
-
-
-def _in_line(state: State, first: Edge, second: Edge) -> bool:
-    line = Line.through(*(state.vertices[v] for v in first))
-    return all(line.contains(state.vertices[v]) for v in second)
-
-
-def _opposite(kind: str) -> str:
-    return {"M": "V", "V": "M"}[kind]

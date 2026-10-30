@@ -77,7 +77,7 @@ Named moves compute their creases and collapse in one step, judged like any coll
 
 | Move | What it does |
 | --- | --- |
-| `paper.reverse(line, flap)` | Turns the tip of a folded flap inside out, between its layers; `outside=True` wraps it around them |
+| `paper.reverse(line, flap)` | Turns the tip of a folded flap inside out between its two halves; `outside=True` wraps it around them |
 | `paper.petal(line, flap)` | Lifts the top layer over a line while its sides fold in along precreased creases |
 
 The [bird base](examples/bird_base.py) collapses a preliminary base, then petal folds each side:
@@ -114,9 +114,9 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `flap-off-paper`, `flap-on-line` | error | The flap point names no paper to move |
 | `too-few-layers` | error | Fewer layers lie at the flap point than the action takes |
 | `no-hinge` | error | The paper to move is joined to no other paper along the fold line |
-| `already-folded`, `not-folded` | error | A fold runs along a crease already folded, or an unfold along flat paper |
+| `already-folded`, `not-folded` | error | A fold turns a crease already folded that way, or an unfold turns flat paper |
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
-| `no-spine` | error | A reverse fold meets a layer with no fold to turn inside out |
+| `no-spine`, `several-spines` | error | A reverse fold's tip opens into two halves in no way, or in several equally even ways |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
 | `layer-crossing` | error | No stacking of the faces keeps paper from passing through paper |
@@ -126,14 +126,18 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 ## How it works
 
 The state of the paper is its crease pattern, where each face lies, and which face is above wherever two overlap.
-A fold reflects the faces it moves across its line, exactly, and a collapse places each face by the reflections across the folds between it and a fixed face.
+Coordinates are exact numbers in a tower of square roots, so every crease a construction finds is exact.
+Float estimates with error bounds decide most signs fast, and exact arithmetic decides the rest.
+A fold reflects the faces it moves across its line, and a collapse places each face by the reflections across the folds between it and a fixed face.
 The layer solver then finds how the faces stack, after the constraints of [Flat-Folder](https://erikdemaine.org/papers/FlatFolder_OSME2024/paper.pdf): taco-taco, taco-tortilla, tortilla-tortilla and transitivity.
 The paper that stays keeps its order, the paper that moves reverses its own, and a valley fold lands it on top or a mountain fold underneath.
+A collapse moves the paper as little through itself as it can: each face that turns about a fold lands beside the face across it.
 When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
 The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
+The [crane](examples/crane.py) folds end to end, from the square to the head.
 Squash and sink folds, and 3D shaping in the viewer, come next.
 
 ## License

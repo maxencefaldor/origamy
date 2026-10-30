@@ -4,7 +4,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from origamy.constructions import bisect, fold_onto, meet, midpoint, perpendicular
-from origamy.field import SQRT2, Number
+from origamy.field import Number
 from origamy.geometry import (
     Isometry,
     Line,
@@ -91,12 +91,12 @@ def test_constructions() -> None:
     assert meet(diagonal, Line.through((0, 1), (1, 0))) == Point.of(("1/2", "1/2"))
     assert perpendicular(diagonal, (1, 0)) == Line.through((1, 0), (0, 1))
     eighth = bisect((1, 0), (0, 0), (1, 1))
-    assert eighth.contains(Point(Number.of(1), SQRT2 - 1))
+    assert eighth.contains(Point.of((1, "√2 - 1")))
 
 
 def test_halving_any_angle_is_exact() -> None:
     line = bisect((1, 0), (0, 0), (1, 2))
     image = Isometry.reflection(line)(Point.of((1, 0)))
     assert image == Point.of((1, 2)) * (1 / Number.of(5).sqrt())
-    eleventh = bisect((1, 0), (0, 0), Point(Number.of(1), SQRT2 - 1))
+    eleventh = bisect((1, 0), (0, 0), (1, "√2 - 1"))
     assert not eleventh.normal.x.rational or not eleventh.normal.y.rational

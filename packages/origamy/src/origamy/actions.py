@@ -10,10 +10,11 @@ mountain fold lands it underneath. An action the paper cannot take raises
 `RefusalError`, with the facts of why.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cmp_to_key, partial
+from itertools import permutations
 from math import atan2, degrees
 
 from origamy.geometry import (
@@ -40,6 +41,10 @@ class Sense(StrEnum):
     """Away from the viewer: the moved paper lands underneath."""
 
 
+type Hinge = tuple[int, int, Edge]
+"""A crease on a fold line: the face that moves, the face that stays, and their edge."""
+
+
 @dataclass(frozen=True, slots=True)
 class Outcome:
     """The state after an action, and the faces it moved, as ids in that state."""
@@ -58,7 +63,9 @@ def fold(
     on that side moves with them.
     """
     cut, moved, hinges = grab(state, line, flap, layers, unfolding=False)
-    return _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
+    up = sense is Sense.VALLEY
+    check_hinges(cut, line, hinges, up=up)
+    return turn(cut, line, [moved], _hinged(hinges, sense), up=up)
 
 
 def unfold(state: State, line: Line, flap: Point, layers: int | None) -> Outcome:
@@ -68,7 +75,7 @@ def unfold(state: State, line: Line, flap: Point, layers: int | None) -> Outcome
     """
     cut, moved, hinges = grab(state, line, flap, layers, unfolding=True)
     up = any(cut.is_above(m, s) for m, s, _ in hinges)
-    return _turn(cut, line, moved, {}, up=up)
+    return turn(cut, line, [moved], {}, up=up)
 
 
 def precrease(
@@ -79,11 +86,13 @@ def precrease(
     The paper must be able to take the fold, so a refused fold refuses the precrease.
     """
     cut, moved, hinges = grab(state, line, flap, layers, unfolding=False)
-    _turn(cut, line, moved, _hinged(hinges, sense), up=sense is Sense.VALLEY)
+    up = sense is Sense.VALLEY
+    check_hinges(cut, line, hinges, up=up)
+    turn(cut, line, [moved], _hinged(hinges, sense), up=up)
     return Outcome(cut, frozenset())
 
 
-def _hinged(hinges: list[tuple[int, int, Edge]], sense: Sense) -> dict[Pair, str]:
+def _hinged(hinges: Iterable[Hinge], sense: Sense) -> dict[Pair, str]:
     """The order a fold sets at each hinge, with its reason."""
     where = "above" if sense is Sense.VALLEY else "below"
     return {
@@ -132,18 +141,58 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
             required[upper, lower] = (
                 f"the {name} between faces {f} and {g} puts face {upper} above"
             )
-    # Faces that moved together keep their order, reversed if the move turned them over.
     change = [
         new.place @ old.place.inverse()
         for old, new in zip(state.faces, faces, strict=True)
     ]
-    prefer = [
-        (lower, upper) if change[upper].flips else (upper, lower)
-        for upper, lower in state.above
-        if (upper in moved or lower in moved) and change[upper] == change[lower]
-    ]
-    above = _stack(collapsed, required, prefer, state)
+    above = _stack(collapsed, required, _least_motion(state, target, change), state)
     return Outcome(State(collapsed.vertices, collapsed.faces, above), moved)
+
+
+def _least_motion(
+    state: State, target: Mapping[Edge, str], change: Sequence[Isometry]
+) -> list[Pair]:
+    """The orders that move the paper least through itself, for the solver to try first.
+
+    Each face that turns about a fold lands beside the face across it. Faces that
+    overlapped keep their order, reversed where they moved together and the move turned
+    them over.
+    """
+    turns = [
+        (turned, partner)
+        for edge, kind in target.items()
+        if kind in "MV"
+        for turned, partner in permutations(state.edges[edge])
+        if change[turned] != change[partner]
+    ]
+    kept = [
+        (lower, upper)
+        if change[upper] == change[lower] and change[upper].flips
+        else (upper, lower)
+        for upper, lower in state.above
+        if change[upper] != IDENTITY or change[lower] != IDENTITY
+    ]
+    return _beside(state, turns, change) + kept
+
+
+def _beside(
+    state: State, turns: Iterable[tuple[int, int]], change: Sequence[Isometry]
+) -> list[Pair]:
+    """The orders that land each turned face beside the face across its fold.
+
+    With the paper that moved as that face did, and that the turned face did not overlap
+    before, the turned face takes that face's order.
+    """
+    overlapped = {frozenset(pair) for pair in state.above}
+    return [
+        (turned, other) if upper == partner else (other, turned)
+        for turned, partner in turns
+        for upper, lower in state.above
+        if partner in (upper, lower)
+        for other in [lower if upper == partner else upper]
+        if change[other] == change[partner]
+        and frozenset((turned, other)) not in overlapped
+    ]
 
 
 def along(state: State, crease: Line | tuple[Point, Point]) -> list[Edge]:
@@ -303,7 +352,7 @@ def stack_at(state: State, point: Point) -> list[int]:
 
 def grab(
     state: State, line: Line, flap: Point, layers: int | None, *, unfolding: bool
-) -> tuple[State, frozenset[int], list[tuple[int, int, Edge]]]:
+) -> tuple[State, frozenset[int], list[Hinge]]:
     """Split the paper to move from the paper that stays, and find the hinges.
 
     Returns the state with the moving faces cut along the line, the moving faces as
@@ -356,13 +405,33 @@ def grab(
     if not hinges:
         msg = f"the paper to move meets no other paper along {line}"
         raise RefusalError(msg, rule="no-hinge", faces=tuple(sorted(moved)), state=cut)
-    wrong = sorted({m for m, _, edge in hinges if cut.is_folded(edge) != unfolding})
-    if wrong:
-        rule = "not-folded" if unfolding else "already-folded"
-        state_of = "flat" if unfolding else "already folded"
-        msg = f"faces {_ids(wrong)} lie {state_of} along {line}"
-        raise RefusalError(msg, rule=rule, faces=tuple(wrong), state=cut)
+    flat = sorted({m for m, _, edge in hinges if not cut.is_folded(edge)})
+    if unfolding and flat:
+        msg = f"faces {_ids(flat)} lie flat along {line}"
+        raise RefusalError(msg, rule="not-folded", faces=tuple(flat), state=cut)
     return cut, moved, hinges
+
+
+def check_hinges(
+    cut: State, line: Line, hinges: Iterable[Hinge], *, up: bool | None
+) -> None:
+    """Refuse to turn paper about a crease already folded the way it would turn.
+
+    Turning paper up unfolds a fold whose moving face lies above the face that stays,
+    and turning it down unfolds one whose moving face lies below. With ``up`` None, as
+    for a reverse fold, the move unfolds no fold.
+    """
+    wrong = sorted(
+        {
+            m
+            for m, s, edge in hinges
+            if cut.is_folded(edge) and (up is None or cut.is_above(s, m) == up)
+        }
+    )
+    if wrong:
+        where = {True: " under", False: " over", None: ""}[up]
+        msg = f"faces {_ids(wrong)} already lie folded{where} along {line}"
+        raise RefusalError(msg, rule="already-folded", faces=tuple(wrong), state=cut)
 
 
 def _folded_over(state: State, line: Line, side: int) -> list[int]:
@@ -400,15 +469,23 @@ def _joined(state: State, line: Line, side: int, seeds: Iterable[int]) -> set[in
     return moving
 
 
-def _turn(
+def turn(
     cut: State,
     line: Line,
-    moved: frozenset[int],
+    blocks: Sequence[frozenset[int]],
     required: dict[Pair, str],
     *,
-    up: bool,
+    up: bool | None,
 ) -> Outcome:
-    """Reflect the moved faces across a line and stack the result."""
+    """Reflect the moved faces across a line and stack the result.
+
+    Each block of moved faces turns over as one, so its order reverses; blocks keep
+    their order with each other, and the paper that stays keeps its own. The moved paper
+    lands on top when ``up`` is true and underneath when it is false. When ``up`` is
+    None, each moved face lands beside the face it is hinged to.
+    """
+    moved = frozenset[int]().union(*blocks)
+    block = {face: index for index, faces in enumerate(blocks) for face in faces}
     reflection = Isometry.reflection(line)
     faces = tuple(
         Face(f.corners, reflection @ f.place) if index in moved else f
@@ -417,16 +494,30 @@ def _turn(
     for upper, lower in cut.above:
         if upper not in moved and lower not in moved:
             required[upper, lower] = f"face {upper} stays above face {lower}"
-        elif upper in moved and lower in moved:
+        elif block.get(upper) == block.get(lower):
             required[lower, upper] = (
                 f"moved faces {lower} and {upper} turn over together"
             )
+        elif upper in moved and lower in moved:
+            required[upper, lower] = (
+                f"moved face {upper} stays above moved face {lower}"
+            )
     turned = State(cut.vertices, faces)
-    prefer = [
-        (f, g) if (f in moved) == up else (g, f)
-        for f, g in sorted(turned.overlapping)
-        if (f in moved) != (g in moved)
-    ]
+    if up is None:
+        change = [reflection if f in moved else IDENTITY for f in range(len(faces))]
+        hinges = [
+            (m, s)
+            for pair in cut.edges.values()
+            for m, s in permutations(pair, 2)
+            if m in moved and s not in moved
+        ]
+        prefer = _beside(cut, hinges, change)
+    else:
+        prefer = [
+            (f, g) if (f in moved) == up else (g, f)
+            for f, g in sorted(turned.overlapping)
+            if (f in moved) != (g in moved)
+        ]
     above = _stack(turned, required, prefer, cut)
     return Outcome(State(turned.vertices, turned.faces, above), moved)
 

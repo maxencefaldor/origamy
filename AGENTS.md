@@ -45,8 +45,9 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
   A rule is switched off only in `pyproject.toml`, as narrowly as it can be, with its reason beside it.
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
 - **Concurrency:** asyncio only.
-- **Exactness:** no floats in the kernel.
-  Every coordinate is a `Number`; floats appear only in pictures, the viewer and FOLD files.
+- **Exactness:** every coordinate is a `Number`, and every decision is exact.
+  A float estimate carries an error bound and decides a sign only where the bound leaves it clear.
+  Floats otherwise appear only in what people read: pictures, the viewer, FOLD files and the angles a message states.
   A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact; a build carries its tower in its data.
 - **Store once:** a state stores its vertices, faces with their places, and the stacking.
   Whether a crease is folded, and its mountain or valley assignment, derive from them.

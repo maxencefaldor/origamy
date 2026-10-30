@@ -16,7 +16,7 @@ from pydantic_settings import CliPositionalArg
 
 from origamy.errors import OrigamyError
 from origamy.exports import to_fold
-from origamy.field import tower
+from origamy.field import Number, tower
 from origamy.provenance import Source
 from origamy.render import render
 from origamy.result import BuildResult, DiagnosticData, Failure
@@ -167,7 +167,7 @@ async def build(request: BuildRequest) -> BuildReport:
             source=result.refused.source,
             diagnostic=result.refused.diagnostics[0],
         )
-    with tower(result.tower):
+    with tower(Number.from_data(radicand) for radicand in result.tower):
         stem = script.with_suffix("")
         fold_file = stem.with_suffix(".fold")
         fold_file.write_text(

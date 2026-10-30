@@ -191,6 +191,15 @@ def test_an_inside_reverse_fold_out_through_the_spine_is_refused() -> None:
     assert max(step.diagnostics[0].faces) < len(step.state.faces)
 
 
+def test_a_reverse_fold_that_could_open_in_two_places_is_refused() -> None:
+    paper = Paper.square()
+    paper.valley(Line.through(("1/3", 0), ("1/3", 1)), flap=("1/6", "1/2"))
+    paper.mountain(Line.through(("2/3", 0), ("2/3", 1)), flap=("5/6", "1/2"))
+    with pytest.raises(RefusedError) as refused:
+        paper.reverse(Line.through((0, "3/4"), (1, "3/4")), flap=("1/2", "7/8"))
+    assert refused.value.refused.diagnostics[0].rule == "several-spines"
+
+
 def test_a_reverse_fold_needs_a_spine() -> None:
     paper = Paper.square()
     with pytest.raises(RefusedError) as refused:

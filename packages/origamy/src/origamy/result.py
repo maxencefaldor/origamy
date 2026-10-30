@@ -2,28 +2,24 @@
 """What a build produced, as data: every step's exact state, its facts and its line.
 
 The runner writes a `BuildResult` as JSON from the script's own process; the service
-reads it back to report, draw and export. Numbers travel as exact text, such as
-``"1 - √2/2"``, so a state reads back exactly as the script left it.
+reads it back to report, draw and export. Numbers travel as exact data, with the
+tower of square roots they live in, so a state reads back exactly as the script left it.
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field
 
-from origamy.field import Number, radicands
+from origamy.field import Number, NumberData, radicands
 from origamy.geometry import Isometry, Line, Point
 from origamy.paper import Paper, Step
 from origamy.provenance import Frame, Source
 from origamy.rules import Diagnostic, Level
 from origamy.state import Face, State
 
-type Exact = JsonValue
-"""A number as data, as `Number.data` writes it."""
 
-
-def _point(data: Sequence[JsonValue]) -> Point:
+def _point(data: tuple[NumberData, NumberData]) -> Point:
     x, y = data
     return Point(Number.from_data(x), Number.from_data(y))
 
@@ -35,15 +31,16 @@ class _Data(BaseModel):
 class StateData(_Data):
     """A state of the paper: crease pattern, places and stacking."""
 
-    vertices: tuple[tuple[Exact, Exact], ...] = Field(
+    vertices: tuple[tuple[NumberData, NumberData], ...] = Field(
         description="Each vertex on the crease pattern, as exact x and y."
     )
     faces: tuple[tuple[int, ...], ...] = Field(
         description="Each face's vertex ids, counterclockwise on the crease pattern."
     )
-    places: tuple[tuple[Exact, Exact, Exact, Exact, Exact, Exact], ...] = Field(
-        description="Each face's isometry: xx, xy, yx, yy, tx, ty."
-    )
+    places: tuple[
+        tuple[NumberData, NumberData, NumberData, NumberData, NumberData, NumberData],
+        ...,
+    ] = Field(description="Each face's isometry: xx, xy, yx, yy, tx, ty.")
     above: tuple[tuple[int, int], ...] = Field(
         description="Each pair of overlapping faces, the upper first."
     )
@@ -100,10 +97,10 @@ class StepData(_Data):
     description: str
     state: StateData
     moved: tuple[int, ...] = ()
-    line: tuple[Exact, Exact, Exact] | None = Field(
+    line: tuple[NumberData, NumberData, NumberData] | None = Field(
         default=None, description="The fold line: normal x, normal y and offset."
     )
-    flap: tuple[Exact, Exact] | None = None
+    flap: tuple[NumberData, NumberData] | None = None
     source: Source | None = None
     diagnostics: tuple[DiagnosticData, ...] = ()
 
@@ -153,8 +150,8 @@ class StepData(_Data):
 class PaperData(_Data):
     """The paper's size and colors."""
 
-    width: Exact
-    height: Exact
+    width: NumberData
+    height: NumberData
     front: str
     back: str
 
@@ -179,8 +176,8 @@ class BuildResult(_Data):
         description="The action the paper could not take, with the state before it.",
     )
     failure: Failure | None = None
-    tower: tuple[JsonValue, ...] = Field(
-        default=("2",),
+    tower: tuple[NumberData, ...] = Field(
+        default=(),
         description="The radicands of the build's tower of numbers, level 1 first.",
     )
 

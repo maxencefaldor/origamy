@@ -2,12 +2,21 @@
 """Fixtures shared by the tests."""
 
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
+from origamy.field import tower
+
 type Colors = Callable[[Path], set[tuple[int, int, int]]]
+
+
+@pytest.fixture(autouse=True)
+def own_tower() -> Iterator[None]:
+    """Give each test its own tower of numbers, from the rationals, as a build has."""
+    with tower(()):
+        yield
 
 
 @pytest.fixture

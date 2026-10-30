@@ -71,9 +71,10 @@ RULES = {
         Rule(
             "already-folded",
             Level.ERROR,
-            "The fold line runs along a crease already folded there.",
-            "A fold moves paper about a crease on its line whose two faces already lie "
-            "on one side of it.",
+            "The fold line runs along a crease already folded the way it turns.",
+            "A fold turns paper about a crease on its line that is already folded that "
+            "way: the moving face lies under the face that stays for a valley fold, or "
+            "over it for a mountain fold. A reverse fold turns no folded crease.",
             refusal=True,
         ),
         Rule(
@@ -95,9 +96,18 @@ RULES = {
         Rule(
             "no-spine",
             Level.ERROR,
-            "The paper to reverse meets the line with no fold to reverse.",
-            "A reverse fold creases a layer along its line where no fold of the "
-            "paper that stays ends, so the layer has no spine to turn inside out.",
+            "The paper to reverse has no spine to turn inside out.",
+            "The tip a reverse fold turns splits into no upper and lower half, each "
+            "one piece of paper, that lie one above the other and join only by folds.",
+            refusal=True,
+        ),
+        Rule(
+            "several-spines",
+            Level.ERROR,
+            "The paper to reverse could turn inside out about more than one spine.",
+            "The tip a reverse fold turns splits into an upper and a lower half, each "
+            "one piece of paper joined to the other only by folds, in several ways; "
+            "no single way splits the layers at the flap point most evenly.",
             refusal=True,
         ),
         Rule(

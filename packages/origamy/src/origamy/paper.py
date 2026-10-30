@@ -326,7 +326,7 @@ class Paper:
         source = capture()
         before = self.state
         diagnostics: list[Diagnostic] = []
-        if line is not None and action != "unfold" and not is_referenced(before, line):
+        if line is not None and not is_referenced(before, line):
             message = f"no point or line on the paper locates the fold line {line}"
             diagnostics.append(Diagnostic.of("unreferenced-fold", message))
         try:
