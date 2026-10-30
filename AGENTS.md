@@ -24,7 +24,7 @@ The package, `packages/origamy/src/origamy`, is ordered.
 Each module imports only from the modules listed before it:
 
 1. `errors`: the errors front ends show as messages.
-1. `field`, `geometry`, `constructions`: exact numbers a + b√2, points, lines, isometries and convex polygons, and the Huzita-Justin constructions.
+1. `field`, `geometry`, `constructions`: exact numbers in a tower of square roots, points, lines, isometries and convex polygons, and the Huzita-Justin constructions.
 1. `state`: the crease pattern, each face's place, and the stacking.
 1. `layers`: the layer solver's constraints, propagation and search.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
@@ -46,7 +46,8 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
 - **Concurrency:** asyncio only.
 - **Exactness:** no floats in the kernel.
-  Every coordinate is a `Number`; floats appear only in pictures and FOLD files.
+  Every coordinate is a `Number`; floats appear only in pictures, the viewer and FOLD files.
+  A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact; a build carries its tower in its data.
 - **Store once:** a state stores its vertices, faces with their places, and the stacking.
   Whether a crease is folded, and its mountain or valley assignment, derive from them.
 - **Feedback is facts:** origamy states what is true about an action and never says how to fix it.

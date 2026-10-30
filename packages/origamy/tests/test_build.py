@@ -186,14 +186,18 @@ def test_an_inside_reverse_fold_out_through_the_spine_is_refused() -> None:
     line = bisect((1, 1), ("3/4", "3/4"), (0, "3/4"))
     with pytest.raises(RefusedError) as refused:
         paper.reverse(line, flap=("63/64", "61/64"))
-    assert refused.value.refused.diagnostics[0].rule == "layer-crossing"
+    step = refused.value.refused
+    assert step.diagnostics[0].rule == "layer-crossing"
+    assert max(step.diagnostics[0].faces) < len(step.state.faces)
 
 
 def test_a_reverse_fold_needs_a_spine() -> None:
     paper = Paper.square()
     with pytest.raises(RefusedError) as refused:
         paper.reverse(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
-    assert refused.value.refused.diagnostics[0].rule == "no-spine"
+    step = refused.value.refused
+    assert step.diagnostics[0].rule == "no-spine"
+    assert len(step.state.faces) == 2  # the paper as the move cut it
 
 
 def test_petal_folds_make_the_bird_base(tmp_path: Path) -> None:

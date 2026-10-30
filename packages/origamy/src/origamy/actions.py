@@ -142,7 +142,7 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
         for upper, lower in state.above
         if (upper in moved or lower in moved) and change[upper] == change[lower]
     ]
-    above = _stack(collapsed, required, prefer)
+    above = _stack(collapsed, required, prefer, state)
     return Outcome(State(collapsed.vertices, collapsed.faces, above), moved)
 
 
@@ -355,13 +355,13 @@ def grab(
     ]
     if not hinges:
         msg = f"the paper to move meets no other paper along {line}"
-        raise RefusalError(msg, rule="no-hinge", faces=tuple(sorted(moved)))
+        raise RefusalError(msg, rule="no-hinge", faces=tuple(sorted(moved)), state=cut)
     wrong = sorted({m for m, _, edge in hinges if cut.is_folded(edge) != unfolding})
     if wrong:
         rule = "not-folded" if unfolding else "already-folded"
         state_of = "flat" if unfolding else "already folded"
         msg = f"faces {_ids(wrong)} lie {state_of} along {line}"
-        raise RefusalError(msg, rule=rule, faces=tuple(wrong))
+        raise RefusalError(msg, rule=rule, faces=tuple(wrong), state=cut)
     return cut, moved, hinges
 
 
@@ -427,14 +427,17 @@ def _turn(
         for f, g in sorted(turned.overlapping)
         if (f in moved) != (g in moved)
     ]
-    above = _stack(turned, required, prefer)
+    above = _stack(turned, required, prefer, cut)
     return Outcome(State(turned.vertices, turned.faces, above), moved)
 
 
 def _stack(
-    state: State, required: Mapping[Pair, str], prefer: list[Pair]
+    state: State, required: Mapping[Pair, str], prefer: list[Pair], before: State
 ) -> frozenset[Pair]:
-    """Solve the stacking, or refuse with the constraints and orders that conflict."""
+    """Solve the stacking, or refuse with the constraints and orders that conflict.
+
+    ``before`` is the paper just before the move, with the same faces.
+    """
     try:
         return solve(Problem(state), required, prefer)
     except NoStackingError as error:
@@ -444,10 +447,11 @@ def _stack(
         if facts:
             message += ": " + "; ".join(facts)
         raise RefusalError(
-            message, rule="layer-crossing", faces=_faces(error)
+            message, rule="layer-crossing", faces=_faces(error), state=before
         ) from None
     except BudgetError as error:
-        raise RefusalError(str(error), rule="layer-order-unknown") from None
+        message = str(error)
+        raise RefusalError(message, rule="layer-order-unknown", state=before) from None
 
 
 def _constraint(constraint: Constraint) -> str:

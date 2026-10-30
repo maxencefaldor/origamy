@@ -1,20 +1,21 @@
 # Copyright 2026 Maxence Faldor
 from fractions import Fraction
-from math import isclose, sqrt
+from math import isclose
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from origamy.errors import OutsideFieldError
 from origamy.field import SQRT2, Number
 
 rationals = st.fractions(max_denominator=50).filter(lambda q: abs(q) < 1000)
-numbers = st.builds(Number, rationals, rationals)
+numbers = st.builds(
+    lambda a, b: Number.of(a) + Number.of(b) * SQRT2, rationals, rationals
+)
 
 
 def approx(number: Number) -> float:
-    return float(number.a) + float(number.b) * sqrt(2)
+    return float(number)
 
 
 @given(numbers, numbers)
@@ -44,13 +45,17 @@ def test_square_root_of_a_square(x: Number) -> None:
     assert (x * x).sqrt() == abs(x)
 
 
-def test_square_roots_outside_the_field() -> None:
+def test_square_roots_add_levels_only_when_needed() -> None:
     assert Number.of(2).sqrt() == SQRT2
     assert Number.of("1/2").sqrt() == SQRT2 / 2
-    with pytest.raises(OutsideFieldError):
-        Number.of(3).sqrt()
-    with pytest.raises(OutsideFieldError):
-        Number.of("4 - 2√2").sqrt()
+    assert Number.of("3 - 2√2").sqrt() == SQRT2 - 1
+    root = (2 + SQRT2).sqrt()
+    assert root**2 == 2 + SQRT2
+    assert root.level > 1
+    assert (root * root).sqrt() == root
+    assert (2 - SQRT2).sqrt() * root == SQRT2
+    with pytest.raises(ValueError, match="negative"):
+        Number.of(-1).sqrt()
 
 
 def test_exact_values_only() -> None:
@@ -58,7 +63,7 @@ def test_exact_values_only() -> None:
         Number.of(0.5)  # ty: ignore[invalid-argument-type] - the float is the subject
     with pytest.raises(TypeError, match="bool"):
         Number.of(True)  # noqa: FBT003 - the bool is the subject
-    with pytest.raises(ValueError, match="form"):
+    with pytest.raises(ValueError, match="not a number"):
         Number.of("1 2")
 
 

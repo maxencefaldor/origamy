@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from origamy.errors import OrigamyError
+from origamy.state import State
 
 
 class Level(StrEnum):
@@ -166,10 +167,22 @@ class Diagnostic:
 class RefusalError(OrigamyError):
     """An action the paper cannot take, with the facts of why."""
 
-    def __init__(self, message: str, *, rule: str, faces: tuple[int, ...] = ()) -> None:
-        """State the fact, name its refusal rule, and list the faces it is about."""
+    def __init__(
+        self,
+        message: str,
+        *,
+        rule: str,
+        faces: tuple[int, ...] = (),
+        state: State | None = None,
+    ) -> None:
+        """State the fact, name its refusal rule, and list the faces it is about.
+
+        ``state`` is the paper as the faces' ids name them, when the action cut the
+        paper before it was refused; by default, the paper before the action.
+        """
         super().__init__(message)
         self.diagnostic = Diagnostic.of(rule, message, faces)
+        self.state = state
 
 
 def rule(name: str) -> Rule:

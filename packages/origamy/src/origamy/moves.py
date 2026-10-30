@@ -36,7 +36,7 @@ def reverse(
         if spine is None:
             corner = cut.vertices[edge[0]]
             msg = f"no fold of face {moving} meets the line {line} at {corner}"
-            raise RefusalError(msg, rule="no-spine", faces=(moving,))
+            raise RefusalError(msg, rule="no-spine", faces=(moving,), state=cut)
         kind = cut.assignment(spine)
         changes[edge] = _opposite(kind) if outside else kind
     return collapse(cut, changes, hinges[0][1])

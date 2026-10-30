@@ -97,13 +97,13 @@ class Canvas:
             long = k % 2 == 0
             self._tick(x, bottom, x, bottom + (7 if long else 4))
             if long:
-                self._text(x, bottom + 16, _fraction(Fraction(k, 8) * unit.a))
+                self._text(x, bottom + 16, str(unit * Fraction(k, 8)))
         for k in range(ceil(y0 / step - 1e-9), floor(y1 / step + 1e-9) + 1):
             _, y = self.xy((x0, k * step))
             long = k % 2 == 0
             self._tick(left, y, left - (7 if long else 4), y)
             if long:
-                self._text(left - 10, y, _fraction(Fraction(k, 8) * unit.a), "end")
+                self._text(left - 10, y, str(unit * Fraction(k, 8)), "end")
 
     def _tick(self, x1: float, y1: float, x2: float, y2: float) -> None:
         self.parts.append(
@@ -241,7 +241,7 @@ def _mark_faces(
     for face in marked:
         polygon = polygons[face]
         canvas.polygon(polygon, fill="none", stroke=MARK, **{"stroke-width": 2.2})
-        center = sum(polygon[1:], polygon[0]) * Number(Fraction(1, len(polygon)))
+        center = sum(polygon[1:], polygon[0]) * Number.of(Fraction(1, len(polygon)))
         canvas.label(
             center, str(face), fill=MARK, **{"font-size": 12, "font-weight": 700}
         )
@@ -249,7 +249,3 @@ def _mark_faces(
 
 def _style(style: dict[str, str | float]) -> str:
     return " ".join(f'{key}="{value}"' for key, value in style.items())
-
-
-def _fraction(value: Fraction) -> str:
-    return str(value)

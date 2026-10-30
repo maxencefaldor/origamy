@@ -6,7 +6,7 @@ These functions build the same lines exactly, so a script says how it finds each
 `Line.through` is the first axiom; the rest are here.
 """
 
-from origamy.errors import OrigamyError, OutsideFieldError
+from origamy.errors import OrigamyError
 from origamy.field import Number
 from origamy.geometry import HALF, Line, Point, PointLike
 
@@ -61,9 +61,7 @@ def bisect(a: PointLike, vertex: PointLike, b: PointLike) -> Line:
     """The fold line that halves the angle from ``a`` through ``vertex`` to ``b``.
 
     The line puts the ray toward ``a`` onto the ray toward ``b`` (axiom 3). Its
-    direction has the form a + b√2 only when the ratio of the rays' lengths has it too.
-    Halving an angle of a 22.5° design works; halving some other angles raises
-    `OutsideFieldError`.
+    direction takes the rays' lengths, square roots that stay exact.
 
     >>> print(bisect((1, 0), (0, 0), (0, 1)))
     x - y = 0
@@ -75,14 +73,7 @@ def bisect(a: PointLike, vertex: PointLike, b: PointLike) -> Line:
     if not (u.x or u.y) or not (v.x or v.y):
         msg = f"an angle needs two points apart from its vertex {vertex}"
         raise OrigamyError(msg)
-    try:
-        lu, lv = _length(u), _length(v)
-    except OutsideFieldError as error:
-        msg = (
-            f"halving the angle {a}, {vertex}, {b} leaves the numbers a + b√2: {error}"
-        )
-        raise OutsideFieldError(msg) from None
-    direction = u * lv + v * lu
+    direction = u * _length(v) + v * _length(u)
     if not (direction.x or direction.y):
         return perpendicular(Line.through(vertex, a), vertex)
     return Line.at(vertex, direction)

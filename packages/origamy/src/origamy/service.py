@@ -16,6 +16,7 @@ from pydantic_settings import CliPositionalArg
 
 from origamy.errors import OrigamyError
 from origamy.exports import to_fold
+from origamy.field import tower
 from origamy.provenance import Source
 from origamy.render import render
 from origamy.result import BuildResult, DiagnosticData, Failure
@@ -166,20 +167,22 @@ async def build(request: BuildRequest) -> BuildReport:
             source=result.refused.source,
             diagnostic=result.refused.diagnostics[0],
         )
-    stem = script.with_suffix("")
-    fold_file = stem.with_suffix(".fold")
-    fold_file.write_text(
-        json.dumps(to_fold(result, script.stem), ensure_ascii=False), encoding="utf-8"
-    )
-    files = [fold_file]
-    if request.pictures:
-        overview = stem.with_suffix(".png")
-        steps = stem.with_name(f"{stem.name}.steps.png")
-        await render(result, script.stem, overview, steps)
-        viewer = await asyncio.to_thread(
-            write_viewer, result, script.stem, stem.with_suffix(".html")
+    with tower(result.tower):
+        stem = script.with_suffix("")
+        fold_file = stem.with_suffix(".fold")
+        fold_file.write_text(
+            json.dumps(to_fold(result, script.stem), ensure_ascii=False),
+            encoding="utf-8",
         )
-        files += [overview, steps, viewer]
+        files = [fold_file]
+        if request.pictures:
+            overview = stem.with_suffix(".png")
+            steps = stem.with_name(f"{stem.name}.steps.png")
+            await render(result, script.stem, overview, steps)
+            viewer = await asyncio.to_thread(
+                write_viewer, result, script.stem, stem.with_suffix(".html")
+            )
+            files += [overview, steps, viewer]
     return report.model_copy(
         update={
             "steps": len(result.steps) - 1,

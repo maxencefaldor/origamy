@@ -335,7 +335,7 @@ class Paper:
             refused = Step(
                 action,
                 description,
-                before,
+                error.state or before,
                 frozenset(),
                 line,
                 flap,

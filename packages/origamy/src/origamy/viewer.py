@@ -96,7 +96,10 @@ def build_data(result: BuildResult, name: str) -> Data:
         "name": name,
         "paper": result.paper.model_dump(),
         "size": float(
-            max(Number.of(result.paper.width), Number.of(result.paper.height))
+            max(
+                Number.from_data(result.paper.width),
+                Number.from_data(result.paper.height),
+            )
         ),
         "steps": views,
     }
@@ -148,7 +151,7 @@ def _levels(state: State) -> list[int]:
 
 def _parent(state: State, polygon: tuple[Point, ...]) -> int:
     """The face of an earlier state that holds a polygon of the crease pattern."""
-    center = sum(polygon[1:], polygon[0]) * Number(Fraction(1, len(polygon)))
+    center = sum(polygon[1:], polygon[0]) * Number.of(Fraction(1, len(polygon)))
     return next(
         f for f, pattern in enumerate(state.patterns) if covers(pattern, center)
     )

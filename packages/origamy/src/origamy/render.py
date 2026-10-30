@@ -50,7 +50,9 @@ async def render(result: BuildResult, name: str, overview: Path, steps: Path) ->
 
 def _overview(result: BuildResult, name: str) -> str:
     assert result.paper is not None  # noqa: S101 - only results with paper render
-    unit = max(Number.of(result.paper.width), Number.of(result.paper.height))
+    unit = max(
+        Number.from_data(result.paper.width), Number.from_data(result.paper.height)
+    )
     colors = result.paper.front, result.paper.back
     refused = result.refused.step() if result.refused else None
     last = refused or result.steps[-1].step()
@@ -58,7 +60,9 @@ def _overview(result: BuildResult, name: str) -> str:
     marked = refused.diagnostics[0].faces if refused else ()
     box = folded_box(state)
     pattern = pattern_view(
-        state, (Number.of(result.paper.width), Number.of(result.paper.height)), marked
+        state,
+        (Number.from_data(result.paper.width), Number.from_data(result.paper.height)),
+        marked,
     )
     folded = folded_view(state, Look(*colors, unit), box, marked)
     xray = xray_view(state, box, unit, marked)
@@ -95,7 +99,9 @@ def _overview(result: BuildResult, name: str) -> str:
 
 def _steps(result: BuildResult, name: str) -> str:
     assert result.paper is not None  # noqa: S101 - only results with paper render
-    unit = max(Number.of(result.paper.width), Number.of(result.paper.height))
+    unit = max(
+        Number.from_data(result.paper.width), Number.from_data(result.paper.height)
+    )
     colors = result.paper.front, result.paper.back
     steps: Sequence[Step] = [data.step() for data in result.steps]
     box = folded_box(*(step.state for step in steps))

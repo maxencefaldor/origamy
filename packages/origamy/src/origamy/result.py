@@ -6,20 +6,26 @@ reads it back to report, draw and export. Numbers travel as exact text, such as
 ``"1 - √2/2"``, so a state reads back exactly as the script left it.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from origamy.field import Number
+from origamy.field import Number, radicands
 from origamy.geometry import Isometry, Line, Point
 from origamy.paper import Paper, Step
 from origamy.provenance import Frame, Source
 from origamy.rules import Diagnostic, Level
 from origamy.state import Face, State
 
-type Exact = str
-"""A number as text, in the form `Number.of` reads."""
+type Exact = JsonValue
+"""A number as data, as `Number.data` writes it."""
+
+
+def _point(data: Sequence[JsonValue]) -> Point:
+    x, y = data
+    return Point(Number.from_data(x), Number.from_data(y))
 
 
 class _Data(BaseModel):
@@ -46,16 +52,16 @@ class StateData(_Data):
     def of(cls, state: State) -> Self:
         """The data of a state."""
         return cls(
-            vertices=tuple((str(p.x), str(p.y)) for p in state.vertices),
+            vertices=tuple((p.x.data(), p.y.data()) for p in state.vertices),
             faces=tuple(f.corners for f in state.faces),
             places=tuple(
                 (
-                    str(f.place.xx),
-                    str(f.place.xy),
-                    str(f.place.yx),
-                    str(f.place.yy),
-                    str(f.place.tx),
-                    str(f.place.ty),
+                    f.place.xx.data(),
+                    f.place.xy.data(),
+                    f.place.yx.data(),
+                    f.place.yy.data(),
+                    f.place.tx.data(),
+                    f.place.ty.data(),
                 )
                 for f in state.faces
             ),
@@ -65,9 +71,9 @@ class StateData(_Data):
     def state(self) -> State:
         """The state this data describes, exactly."""
         return State(
-            tuple(Point.of(v) for v in self.vertices),
+            tuple(_point(v) for v in self.vertices),
             tuple(
-                Face(corners, Isometry(*(Number.of(x) for x in place)))
+                Face(corners, Isometry(*(Number.from_data(x) for x in place)))
                 for corners, place in zip(self.faces, self.places, strict=True)
             ),
             frozenset(self.above),
@@ -111,11 +117,11 @@ class StepData(_Data):
             state=StateData.of(step.state),
             moved=tuple(sorted(step.moved)),
             line=(
-                (str(line.normal.x), str(line.normal.y), str(line.offset))
+                (line.normal.x.data(), line.normal.y.data(), line.offset.data())
                 if line
                 else None
             ),
-            flap=(str(step.flap.x), str(step.flap.y)) if step.flap else None,
+            flap=(step.flap.x.data(), step.flap.y.data()) if step.flap else None,
             source=step.source.relative_to(root) if step.source else None,
             diagnostics=tuple(
                 DiagnosticData(
@@ -128,7 +134,7 @@ class StepData(_Data):
     def step(self) -> Step:
         """The step this data describes."""
         line = (
-            Line.make(Point.of(self.line[:2]), Number.of(self.line[2]))
+            Line.make(_point(self.line[:2]), Number.from_data(self.line[2]))
             if self.line
             else None
         )
@@ -138,7 +144,7 @@ class StepData(_Data):
             self.state.state(),
             frozenset(self.moved),
             line,
-            Point.of(self.flap) if self.flap else None,
+            _point(self.flap) if self.flap else None,
             self.source,
             tuple(d.diagnostic() for d in self.diagnostics),
         )
@@ -173,17 +179,22 @@ class BuildResult(_Data):
         description="The action the paper could not take, with the state before it.",
     )
     failure: Failure | None = None
+    tower: tuple[JsonValue, ...] = Field(
+        default=("2",),
+        description="The radicands of the build's tower of numbers, level 1 first.",
+    )
 
     @classmethod
     def of(cls, paper: Paper, root: Path, refused: Step | None = None) -> Self:
         """The result of a script that folded ``paper``, paths relative to ``root``."""
         return cls(
             paper=PaperData(
-                width=str(paper.width),
-                height=str(paper.height),
+                width=paper.width.data(),
+                height=paper.height.data(),
                 front=paper.front,
                 back=paper.back,
             ),
             steps=tuple(StepData.of(step, root) for step in paper.steps),
             refused=StepData.of(refused, root) if refused else None,
+            tower=tuple(radicand.data() for radicand in radicands()),
         )

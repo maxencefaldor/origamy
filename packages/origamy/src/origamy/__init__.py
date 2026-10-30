@@ -6,7 +6,7 @@ Each action either happens or is refused with the facts of why, at its script li
 """
 
 from origamy.constructions import bisect, fold_onto, meet, midpoint, perpendicular
-from origamy.errors import OrigamyError, OutsideFieldError
+from origamy.errors import OrigamyError
 from origamy.field import SQRT2, Number
 from origamy.geometry import Line, Point
 from origamy.paper import Paper, RefusedError
@@ -16,7 +16,6 @@ __all__ = [
     "Line",
     "Number",
     "OrigamyError",
-    "OutsideFieldError",
     "Paper",
     "Point",
     "RefusedError",

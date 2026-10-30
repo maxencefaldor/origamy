@@ -10,7 +10,7 @@ Every build draws the crease pattern, the folded paper and an x-ray of its layer
 
 The tool is a simulator and a compiler at once.
 No list of legal moves exists: the agent proposes any fold, and origamy says exactly what happens.
-Coordinates are exact numbers of the form a + b√2, so every check is exact, down to the 22.5° angles of the bird base.
+Coordinates are exact numbers built from the rationals by square roots, so every check is exact: the 22.5° angles of the bird base, the 11.25° creases of a crane, and any angle bisected.
 
 ## Install
 
