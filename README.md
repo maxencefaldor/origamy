@@ -94,6 +94,7 @@ claude mcp add origamy -- uv run --directory /path/to/origamy origamy-mcp
 ```
 
 The tool `fold_model` runs a fold script and answers with the report and both pictures, and `explain_rule` gives a rule's exact condition.
+The skill in [.claude/skills/fold-model](.claude/skills/fold-model/SKILL.md) teaches the loop, the coordinates and the actions, and no designs.
 
 ## Feedback is facts
 
@@ -133,7 +134,7 @@ When no stacking exists, origamy names the constraints that conflict.
 ## Status
 
 The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
-Squash and sink folds, a skill, and 3D shaping in the viewer come next.
+Squash and sink folds, and 3D shaping in the viewer, come next.
 
 ## License
 
