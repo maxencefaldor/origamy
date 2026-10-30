@@ -35,6 +35,8 @@ Each module imports only from the modules listed before it:
 1. `draw`, `render`, `exports`: SVG views, PNG pictures through Chromium, and FOLD files.
 1. `service`, `cli`: every command defined once, and the command line that adapts it.
 
+The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each service command, with the same arguments.
+
 ## Conventions
 
 - **Tools:** the standard, official tool in each category: uv, ruff, ty, rumdl, pytest with Hypothesis, pydantic and pydantic-settings, and Playwright.

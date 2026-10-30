@@ -1,0 +1,31 @@
+[project]
+name = "origamy-mcp"
+version = "0.0.0"
+description = "The MCP server for origamy, a compiler for origami, built for AI agents."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Maxence Faldor" }]
+keywords = ["origami", "ai-agents", "compiler", "mcp", "mcp-server", "model-context-protocol"]
+requires-python = ">=3.14"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+dependencies = ["origamy==0.0.0", "mcp>=2.3"]
+
+[project.urls]
+Source = "https://github.com/maxencefaldor/origamy"
+Issues = "https://github.com/maxencefaldor/origamy/issues"
+
+[project.scripts]
+origamy-mcp = "origamy_mcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14"]
+build-backend = "uv_build"

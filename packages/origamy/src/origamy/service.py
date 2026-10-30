@@ -194,11 +194,43 @@ class ExplainRequest(_Model):
     )
 
 
-def explain(request: ExplainRequest) -> str:
-    """Each rule's name, level and exact condition, as text."""
+class RuleInfo(_Model):
+    """One rule: its name, level and exact condition."""
+
+    name: str
+    level: Level
+    refusal: bool = Field(description="Whether the rule stops the action it states.")
+    summary: str
+    condition: str
+
+
+class ExplainResult(_Model):
+    """The rules asked for."""
+
+    rules: tuple[RuleInfo, ...]
+
+    @property
+    def text(self) -> str:
+        """Each rule's name, level and exact condition, as text."""
+        return "\n\n".join(
+            f"{r.name} ({r.level}{', refuses the action' if r.refusal else ''})\n"
+            f"  {r.summary}\n  {r.condition}"
+            for r in self.rules
+        )
+
+
+async def explain(request: ExplainRequest) -> ExplainResult:
+    """Each rule's name, level and exact condition."""
     rules = list(RULES.values()) if request.rule is None else [rule(request.rule)]
-    return "\n\n".join(
-        f"{r.name} ({r.level}{', refuses the action' if r.refusal else ''})\n"
-        f"  {r.summary}\n  {r.condition}"
-        for r in rules
+    return ExplainResult(
+        rules=tuple(
+            RuleInfo(
+                name=r.name,
+                level=r.level,
+                refusal=r.refusal,
+                summary=r.summary,
+                condition=r.condition,
+            )
+            for r in rules
+        )
     )

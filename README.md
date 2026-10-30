@@ -76,6 +76,17 @@ The [bird base](examples/bird_base.py) collapses a preliminary base, then petal 
 
 ![Every step of the bird base, each next fold dashed](docs/images/bird-base-steps.png)
 
+## Connect an agent
+
+The package `origamy-mcp` serves origamy over the Model Context Protocol, so any agent harness can fold.
+From a clone of this repository, Claude Code adds it with one command:
+
+```sh
+claude mcp add origamy -- uv run --directory /path/to/origamy origamy-mcp
+```
+
+The tool `fold_model` runs a fold script and answers with the report and both pictures, and `explain_rule` gives a rule's exact condition.
+
 ## Feedback is facts
 
 A refused action stops the build at its line, and the picture shows the paper just before it, with the fold line and the faces involved.
@@ -114,7 +125,7 @@ When no stacking exists, origamy names the constraints that conflict.
 ## Status
 
 The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures and FOLD export.
-Squash and sink folds, an MCP server and a 3D viewer come next.
+Squash and sink folds, a skill and a 3D viewer come next.
 
 ## License
 

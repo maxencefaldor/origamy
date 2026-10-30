@@ -3,12 +3,14 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 origamy = { workspace = true }
+origamy-mcp = { workspace = true }
 
 # uv.lock pins every version; `uv lock --upgrade` moves them all to the newest releases.
 [dependency-groups]
 dev = [
   "hypothesis",
   "origamy",
+  "origamy-mcp",
   "pytest",
   "pytest-github-actions-annotate-failures",
   "rumdl",
@@ -19,7 +21,7 @@ dev = [
 [tool.ruff]
 # The workspace root has no [project] table, so ruff cannot read requires-python here.
 target-version = "py314"
-src = ["packages/origamy/src"]
+src = ["packages/origamy/src", "packages/origamy-mcp/src"]
 
 [tool.ruff.lint]
 select = ["ALL"]

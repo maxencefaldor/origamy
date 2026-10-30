@@ -94,7 +94,7 @@ def test_build_reports_a_failing_script(tmp_path: Path) -> None:
 
 
 def test_explain_lists_every_rule() -> None:
-    text = service.explain(service.ExplainRequest())
+    text = asyncio.run(service.explain(service.ExplainRequest())).text
     assert "layer-crossing (error, refuses the action)" in text
     assert "unreferenced-fold (warn)" in text
 

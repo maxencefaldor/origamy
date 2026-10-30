@@ -49,7 +49,7 @@ class ExplainCommand(service.ExplainRequest):
 
     def cli_cmd(self) -> None:
         """Run the command."""
-        print(service.explain(self))
+        print(asyncio.run(service.explain(self)).text)
 
 
 class Origamy(BaseSettings):
