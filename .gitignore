@@ -13,3 +13,7 @@ examples/*.png
 models/*.fold
 models/*.html
 models/*.png
+
+# The docs site zensical builds, and the gallery's 3D viewers docs/gallery.py writes
+site/
+docs/gallery/*.html

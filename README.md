@@ -105,7 +105,7 @@ A refused action stops the build at its line, and the picture shows the paper th
 
 ```text
 broken.py: 1 step folded, then step 2 refused
-warn[unreferenced-fold] step 2, valley: broken.py:7 in fold(): no point or line on the paper locates the fold line x = 2
+warn[unreferenced-fold] step 2, valley fold along x = 2, the paper at (1/4, 1/2): broken.py:7 in fold(): no point or line on the paper locates the fold line x = 2
 error[no-hinge] step 2, valley fold along x = 2, the paper at (1/4, 1/2): broken.py:7 in fold(): the paper to move meets no other paper along x = 2
   faces: 0, 1
 ```

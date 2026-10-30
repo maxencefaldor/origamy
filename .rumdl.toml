@@ -39,3 +39,11 @@ command = ["ruff", "check", "--output-format=concise", "--ignore", "CPY001,D,F82
 [code-block-tools.languages.python]
 lint = ["ruff-excerpt"]
 format = ["ruff:format"]
+
+# origamy's docs are a Zensical site, which reads MkDocs Markdown: admonitions, content tabs and
+# grid cards, built from <div> blocks.
+[global]
+flavor = "mkdocs"
+
+[MD033]
+allowed-elements = ["div"]

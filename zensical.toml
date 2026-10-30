@@ -1,0 +1,118 @@
+[project]
+site_name = "origamy"
+site_description = "A compiler for origami, built for AI agents."
+site_author = "Maxence Faldor"
+site_url = "https://maxencefaldor.github.io/origamy/"
+repo_url = "https://github.com/maxencefaldor/origamy"
+repo_name = "maxencefaldor/origamy"
+exclude_docs = """
+*.py
+__pycache__/
+"""
+copyright = "Copyright 2026 Maxence Faldor"
+extra_css = ["assets/origamy.css"]
+nav = [
+  { "Home" = "index.md" },
+  { "Get started" = "get-started.md" },
+  { "Guide" = [
+    "guide/index.md",
+    { "Coordinates" = "guide/coordinates.md" },
+    { "Fold scripts" = "guide/scripts.md" },
+    { "Actions" = "guide/actions.md" },
+    { "Collapses" = "guide/collapses.md" },
+    { "Feedback" = "guide/feedback.md" },
+    { "Pictures" = "guide/pictures.md" },
+    { "Exports" = "guide/exports.md" },
+  ] },
+  { "Agents" = [
+    "agents/index.md",
+    { "Connect an agent" = "agents/connect.md" },
+    { "Why a compiler" = "agents/why-a-compiler.md" },
+  ] },
+  { "Gallery" = "gallery.md" },
+  { "Reference" = [
+    "reference/index.md",
+    { "Command line" = "reference/cli.md" },
+    { "Rules" = "reference/rules.md" },
+    { "Python API" = [
+      { "Paper" = "reference/paper.md" },
+      { "Constructions" = "reference/constructions.md" },
+      { "Geometry" = "reference/geometry.md" },
+      { "Numbers" = "reference/field.md" },
+    ] },
+  ] },
+  { "Contributing" = "contributing.md" },
+]
+
+[project.theme]
+logo = "assets/logo.svg"
+favicon = "assets/logo.svg"
+features = [
+  "content.code.copy",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+# Listing extensions replaces Zensical's defaults, which leave out snippets: the docs use only these.
+[project.markdown_extensions]
+attr_list = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.snippets.check_paths = true
+pymdownx.superfences.custom_fences = [{ name = "mermaid", class = "mermaid" }]
+pymdownx.tabbed.alternate_style = true
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+# The docstrings hold bare doctests, which the extension fences as Python sessions.
+extensions = ["docs/doctests.py"]
+show_source = false
+show_root_heading = true
+show_root_full_path = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+members_order = "source"
+separate_signature = true
+show_signature_annotations = true
+signature_crossrefs = true
+merge_init_into_class = true
+show_bases = false
+filters = ["!^_"]

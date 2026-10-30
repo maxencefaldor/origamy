@@ -13,6 +13,9 @@ uv run ruff format                  # format
 uv run ruff check                   # lint, with every rule enabled
 uv run ty check                     # types
 uv run rumdl check .                # Markdown
+uv run python docs/reference.py     # the generated reference pages
+uv run python docs/gallery.py       # the gallery's viewers; --thumbnails redraws its cards
+uv run --group docs zensical serve  # the docs site, at http://localhost:8000
 ```
 
 A change is done when all five checks pass.

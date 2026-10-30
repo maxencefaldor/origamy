@@ -1,0 +1,456 @@
+/* origamy's docs: the paper's two colors, one text column on every page, and cards folded like paper. */
+
+@import url("https://fonts.googleapis.com/css2?family=Rubik:wght@500;600;700&display=swap");
+
+/*
+ * The front and the back take the default colors of origamy's paper, so the docs match the pictures.
+ * The valley blue and the mountain red are the colors of creases in the crease pattern.
+ */
+:root {
+  --origamy-front: #c8553d;
+  --origamy-back: #f2ede4;
+  --origamy-valley: #2c6fbb;
+  --origamy-mountain: #c0392b;
+  --origamy-panel: #ffffff;
+  --origamy-line: #d8d2c8;
+  --origamy-line-strong: #8f877b;
+  --origamy-crease: rgb(200 85 61 / 9%);
+  --origamy-back-shade: #ddd3c2;
+  --origamy-terminal: #1b1a18;
+  --origamy-terminal-ink: #ece7de;
+
+  /* A card's top edge is a strip of the front, and its top right corner folds down to show the back. */
+  --origamy-band: 6px;
+  --origamy-fold: 22px;
+  --origamy-fold-lifted: 30px;
+}
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--origamy-front);
+  --md-primary-fg-color--light: #d6735e;
+  --md-primary-fg-color--dark: #a8432e;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgb(255 255 255 / 70%);
+
+  /* Links take a darker shade of the front, which reads on white at a contrast above 4.5. */
+  --md-typeset-a-color: #a8432e;
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--origamy-valley);
+  --md-accent-fg-color--transparent: rgb(44 111 187 / 10%);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgb(255 255 255 / 70%);
+}
+
+/* The dark scheme lightens the front and the valley blue of text and links, which would lack contrast on slate. */
+[data-md-color-scheme="slate"] {
+  --origamy-line: #3f3c38;
+  --origamy-line-strong: #78716a;
+  --origamy-crease: rgb(242 237 228 / 6%);
+  --origamy-back-shade: var(--origamy-back);
+  --md-typeset-a-color: #f0907a;
+}
+
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: #7fb0ea;
+  --md-accent-fg-color--transparent: rgb(127 176 234 / 12%);
+}
+
+/*
+ * Every page keeps the space of both sidebars, even a page that hides them,
+ * so the text column has the same width and position on every page.
+ */
+@media screen and (min-width: 60em) {
+  .md-sidebar--secondary[hidden] {
+    display: block;
+    visibility: hidden;
+  }
+
+  .md-content > .md-content__inner {
+    margin-right: 1.2rem;
+  }
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary[hidden] {
+    display: block;
+    visibility: hidden;
+  }
+
+  .md-content > .md-content__inner {
+    margin-left: 1.2rem;
+  }
+}
+
+/*
+ * A strip tops the header: the front, then the back, meeting at a slant like paper folded over its edge.
+ * The back takes a shade that shows on a white header. A plain line separates the header from the page.
+ */
+.md-header::before {
+  content: "";
+  display: block;
+  height: 4px;
+  background: linear-gradient(
+    100deg,
+    var(--origamy-front) 0 70%,
+    var(--origamy-back-shade) calc(70% + 1px) 100%
+  );
+}
+
+.md-header,
+.md-header--shadow {
+  box-shadow: 0 1px 0 var(--origamy-line);
+}
+
+/* The tab of the current section sits on the line, underlined in the link color. */
+.md-tabs__item--active {
+  border-bottom: 2px solid var(--md-typeset-a-color);
+}
+
+/* Headings */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: Rubik, var(--md-text-font-family), sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+}
+
+/*
+ * A section's sidebar opens with the section's name, after a folded square, linked to its overview page.
+ * The theme hides that name when tabs show; a single page, such as Get started, needs no name.
+ */
+@media screen and (min-width: 76.25em) {
+  .md-nav--lifted > .md-nav__list > .md-nav__item--active.md-nav__item--nested > .md-nav__link {
+    display: flex;
+    margin-bottom: 0.4rem;
+  }
+
+  .md-nav--lifted > .md-nav__list > .md-nav__item--active.md-nav__item--nested > .md-nav__link > a {
+    gap: 0.5rem;
+    align-items: center;
+    font-family: Rubik, var(--md-text-font-family), sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--md-default-fg-color);
+  }
+
+  /* A square folded on its diagonal: the front below the crease, the back above it. */
+  .md-nav--lifted > .md-nav__list > .md-nav__item--active.md-nav__item--nested > .md-nav__link > a::before {
+    content: "";
+    flex: none;
+    width: 0.7rem;
+    height: 0.7rem;
+    background: linear-gradient(
+      135deg,
+      var(--origamy-back) 0 50%,
+      var(--origamy-front) calc(50% + 0.5px) 100%
+    );
+    box-shadow: inset 0 0 0 1px var(--origamy-line-strong);
+  }
+
+  .md-nav--lifted
+    > .md-nav__list
+    > .md-nav__item--active.md-nav__item--nested
+    > .md-nav__link
+    > a.md-nav__link--active {
+    color: var(--md-typeset-a-color);
+  }
+}
+
+/* A group inside a section, such as the Python API, reads as a small label above its pages. */
+.md-nav__item--section .md-nav__item--section > .md-nav__link {
+  margin-top: 0.8rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Images in prose sit on a white panel, which keeps them calm in dark mode. */
+.md-typeset p > img,
+.md-typeset .tabbed-block img {
+  background: var(--origamy-panel);
+  border: 1px solid var(--origamy-line);
+  border-radius: 0.4rem;
+}
+
+/* Reports read like a terminal, in both color schemes. */
+.md-typeset .language-text.highlight pre > code {
+  background: var(--origamy-terminal);
+  color: var(--origamy-terminal-ink);
+}
+
+.md-typeset .language-text.highlight .md-clipboard {
+  color: rgb(236 231 222 / 45%);
+}
+
+/* Diagrams sit centered in the column and use the page's colors: plain boxes, gray lines and the text color. */
+.md-typeset .mermaid {
+  display: flex;
+  justify-content: center;
+}
+
+:root > * {
+  --md-mermaid-font-family: var(--md-text-font-family), sans-serif;
+  --md-mermaid-node-bg-color: var(--md-default-bg-color);
+  --md-mermaid-node-fg-color: var(--origamy-line-strong);
+  --md-mermaid-edge-color: var(--origamy-line-strong);
+  --md-mermaid-label-bg-color: var(--md-default-bg-color);
+  --md-mermaid-label-fg-color: var(--md-default-fg-color);
+}
+
+/* The home page's hero: the name, the pitch and the bird base, on a faint crease pattern of squares and diagonals. */
+.origamy-hero {
+  margin: 0 0 2rem;
+  padding: 2rem 2rem 2.2rem;
+  border: 1px solid var(--origamy-line);
+  border-radius: 0.4rem;
+  background:
+    repeating-linear-gradient(45deg, var(--origamy-crease) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(-45deg, var(--origamy-crease) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(0deg, var(--origamy-crease) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, var(--origamy-crease) 0 1px, transparent 1px 48px),
+    var(--md-code-bg-color);
+}
+
+.md-typeset .origamy-hero h1 {
+  margin: 0 0 0.25rem;
+  font-size: 3rem;
+  line-height: 1;
+  color: var(--origamy-front);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .origamy-hero h1 {
+  color: #f0907a;
+}
+
+.md-typeset .origamy-tagline {
+  margin-top: 0.5rem;
+  font-family: Rubik, var(--md-text-font-family), sans-serif;
+  font-size: 1.2rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset .origamy-hero .md-button {
+  margin: 0.2rem 0.5rem 0 0;
+}
+
+/* A secondary button is outlined in the text color, so it reads as a button and not as a disabled one. */
+.md-typeset .md-button:not(.md-button--primary) {
+  color: var(--md-default-fg-color);
+  background: var(--md-default-bg-color);
+  box-shadow: inset 0 0 0 1px var(--origamy-line-strong);
+}
+
+.md-typeset .md-button:not(.md-button--primary):is(:hover, :focus) {
+  box-shadow: inset 0 0 0 1px var(--md-default-fg-color);
+}
+
+.md-typeset .origamy-hero-image {
+  display: block;
+  width: 100%;
+  margin-top: 1.6rem;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .origamy-hero {
+    padding: 1.4rem 1rem 1.6rem;
+  }
+
+  .md-typeset .origamy-hero h1 {
+    font-size: 2.4rem;
+  }
+
+  .md-typeset .origamy-tagline {
+    font-size: 1.05rem;
+  }
+}
+
+/*
+ * Cards are sheets of paper: a strip of the front along the top, and a top right corner folded down to show
+ * the back. On hover a card lifts, its edge darkens and its corner folds further.
+ */
+.md-typeset .grid.cards:is(.origamy-cards, .origamy-links) {
+  gap: 1rem 0.8rem;
+  margin-top: 1.2rem;
+}
+
+.md-typeset .grid.cards:is(.origamy-cards, .origamy-links) > ul > li {
+  position: relative;
+  border: 1px solid var(--origamy-line);
+  border-top: var(--origamy-band) solid var(--origamy-front);
+  border-radius: 0.2rem;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+/*
+ * The folded corner is a layer over the card's outer corner, past the strip and the side border.
+ * The page's color hides the corner that folded away, a crease line runs along the fold, and the back shows below it.
+ */
+.md-typeset .grid.cards:is(.origamy-cards, .origamy-links) > ul > li::after {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--origamy-band));
+  right: -1px;
+  z-index: 1;
+  width: var(--origamy-fold);
+  height: var(--origamy-fold);
+  background: linear-gradient(
+    225deg,
+    var(--md-default-bg-color) 0 50%,
+    var(--origamy-line-strong) 50% calc(50% + 1px),
+    var(--origamy-back) calc(50% + 1px) 100%
+  );
+  border-bottom-left-radius: 0.15rem;
+  box-shadow: -1px 1px 2px rgb(0 0 0 / 8%);
+  transition:
+    width 0.15s ease,
+    height 0.15s ease;
+  pointer-events: none;
+}
+
+.md-typeset .grid.cards:is(.origamy-cards, .origamy-links) > ul > li:is(:hover, :focus-within) {
+  border-color: var(--origamy-line-strong);
+  border-top-color: var(--origamy-front);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 12%);
+  transform: translateY(-3px);
+}
+
+.md-typeset .grid.cards:is(.origamy-cards, .origamy-links) > ul > li:is(:hover, :focus-within)::after {
+  width: var(--origamy-fold-lifted);
+  height: var(--origamy-fold-lifted);
+}
+
+/* The title links the whole card. */
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(2),
+.md-typeset .grid.cards.origamy-links > ul > li > p:first-child {
+  font-family: Rubik, var(--md-text-font-family), sans-serif;
+  font-size: 1.05em;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(2) a,
+.md-typeset .grid.cards.origamy-links > ul > li > p:first-child a {
+  color: var(--md-default-fg-color);
+  text-decoration: none;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(2) a::after,
+.md-typeset .grid.cards.origamy-links > ul > li > p:first-child a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * A card with an image is a row: the image's 4:3 frame on the left sets the card's height, and the text, kept
+ * short enough to fit, centers on the right. Text that runs taller stretches the frame, so the image's panel
+ * still reaches the card's bottom. The rows stack in one column, so any number of cards lines up; on a phone
+ * the image goes on top.
+ */
+.md-typeset .grid.cards.origamy-cards {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-rows: 1fr auto auto auto 1fr;
+  padding: 0;
+}
+
+/* The gallery gives each model half its card. */
+.md-typeset .grid.cards.origamy-gallery > ul > li {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p {
+  grid-column: 2;
+  margin: 0 1rem;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:first-child {
+  display: flex;
+  grid-row: 1 / -1;
+  grid-column: 1;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--origamy-panel);
+  border-right: 1px solid var(--origamy-line);
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:first-child img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(2) {
+  grid-row: 2;
+  margin-top: 1rem;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(3) {
+  grid-row: 3;
+  margin-top: 0.4rem;
+}
+
+.md-typeset .grid.cards.origamy-cards > ul > li > p:last-child {
+  margin-bottom: 1rem;
+}
+
+/* Links after the text, such as a gallery card's "Open in 3D", stay clickable above the card's link. */
+.md-typeset .grid.cards.origamy-cards > ul > li > p:nth-child(4) {
+  position: relative;
+  z-index: 1;
+  grid-row: 4;
+  margin-top: 0.6rem;
+  font-size: 0.9em;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .grid.cards.origamy-cards > ul > li {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .md-typeset .grid.cards.origamy-cards > ul > li > p,
+  .md-typeset .grid.cards.origamy-cards > ul > li > p:first-child {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .md-typeset .grid.cards.origamy-cards > ul > li > p:first-child {
+    border-right: 0;
+    border-bottom: 1px solid var(--origamy-line);
+  }
+}
+
+/* Text cards that lead to other pages, two by two; on a phone, one per row. */
+.md-typeset .grid.cards.origamy-links {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .grid.cards.origamy-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
