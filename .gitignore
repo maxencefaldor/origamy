@@ -8,6 +8,8 @@ dist/
 
 # What building the examples writes
 examples/*.fold
+examples/*.html
 examples/*.png
 models/*.fold
+models/*.html
 models/*.png

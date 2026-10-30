@@ -1,0 +1,2 @@
+# three.js is vendored unmodified; keep it out of language statistics.
+packages/origamy/src/origamy/assets/three/** linguist-vendored

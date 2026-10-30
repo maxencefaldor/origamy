@@ -20,6 +20,7 @@ from origamy.provenance import Source
 from origamy.render import render
 from origamy.result import BuildResult, DiagnosticData, Failure
 from origamy.rules import RULES, Level, rule
+from origamy.viewer import write_viewer
 
 
 class _Model(BaseModel):
@@ -175,7 +176,10 @@ async def build(request: BuildRequest) -> BuildReport:
         overview = stem.with_suffix(".png")
         steps = stem.with_name(f"{stem.name}.steps.png")
         await render(result, script.stem, overview, steps)
-        files += [overview, steps]
+        viewer = await asyncio.to_thread(
+            write_viewer, result, script.stem, stem.with_suffix(".html")
+        )
+        files += [overview, steps, viewer]
     return report.model_copy(
         update={
             "steps": len(result.steps) - 1,

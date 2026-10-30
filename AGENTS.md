@@ -32,7 +32,7 @@ Each module imports only from the modules listed before it:
 1. `moves`: named moves, such as reverse and petal folds, each computing its creases and collapsing.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
-1. `draw`, `render`, `exports`: SVG views, PNG pictures through Chromium, and FOLD files.
+1. `draw`, `render`, `exports`, `viewer`: SVG views, PNG pictures through Chromium, FOLD files, and the standalone 3D viewer.
 1. `service`, `cli`: every command defined once, and the command line that adapts it.
 
 The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each service command, with the same arguments.
@@ -58,6 +58,8 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
   A rule that makes an action impossible refuses it and is always an error.
 - **Fold scripts run in their own process** (`origamy.runner`), never in the command line.
 - **Pictures are first-class feedback:** every build draws the crease pattern, the folded paper and an x-ray, and every step.
+- **The viewer** is `assets/viewer.js` and `assets/viewer.css`, written into one HTML page with the build as data.
+  It loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
 - **Tests:** every rule gets a case that states it.
   Geometry and folding get property tests.
   Pictures get a test that checks real pixels.

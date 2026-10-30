@@ -44,11 +44,19 @@ Build it with `uv run origamy build square.py`:
 
 ```text
 square.py: 2 steps folded
-wrote square.fold, square.png, square.steps.png
+wrote square.fold, square.png, square.steps.png, square.html
 ```
 
 The picture `square.png` shows the paper at the end, and `square.steps.png` shows every step with the next fold line dashed, as diagrams do.
 The [cup example](examples/cup.py) folds a traditional paper cup with exact constructions.
+
+## Viewer
+
+Every build also writes a standalone page, such as `square.html`, that replays the fold in 3D.
+It shows the crease pattern beside the folded paper, animates each step, and lets people orbit, view from above or below, and see through the layers.
+Hovering a face lights it in both views, and each step names its script line and its facts.
+
+![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](docs/images/viewer.png)
 
 ## Collapse
 
@@ -124,8 +132,8 @@ When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
-The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures and FOLD export.
-Squash and sink folds, a skill and a 3D viewer come next.
+The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
+Squash and sink folds, a skill, and 3D shaping in the viewer come next.
 
 ## License
 

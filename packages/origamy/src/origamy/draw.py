@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from graphlib import CycleError, TopologicalSorter
 from html import escape
-from math import ceil, floor
+from math import ceil, floor, hypot
 
 from origamy.field import Number
 from origamy.geometry import Line, Point, bounds
@@ -79,24 +79,12 @@ class Canvas:
 
     def line(self, line: Line, **style: str | float) -> None:
         """Add a line across the whole view."""
-        x0, y0, x1, y1 = self.box
-        pad = max(x1 - x0, y1 - y0)
-        corners = [
-            Point.of((Fraction(x), Fraction(y)))
-            for x, y in (
-                (x0 - pad, y0 - pad),
-                (x1 + pad, y0 - pad),
-                (x1 + pad, y1 + pad),
-                (x0 - pad, y1 + pad),
-            )
-        ]
-        ends = [
-            line.cut(p, q)
-            for p, q in zip(corners, corners[1:] + corners[:1], strict=True)
-            if line.side(p) * line.side(q) < 0
-        ]
-        if len(ends) >= 2:  # noqa: PLR2004 - a line crosses a box twice
-            self.segment(ends[0], ends[1], **style)
+        start, end = across(line, self.box)
+        (ax, ay), (bx, by) = self.xy(start), self.xy(end)
+        self.parts.append(
+            f'<line x1="{ax:.2f}" y1="{ay:.2f}" x2="{bx:.2f}" y2="{by:.2f}" '
+            f"{_style(style)}/>"
+        )
 
     def rulers(self, unit: Number) -> None:
         """Add ticks along the bottom and the left, every eighth of ``unit``."""
@@ -138,6 +126,21 @@ class Canvas:
             + "".join(self.parts)
             + "</svg></figure>"
         )
+
+
+def across(
+    line: Line, box: tuple[float, float, float, float]
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Two points of a line on either side of a box, far enough to cross all of it."""
+    x0, y0, x1, y1 = box
+    nx, ny = float(line.normal.x), float(line.normal.y)
+    norm = hypot(nx, ny)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    shift = (nx * cx + ny * cy - float(line.offset)) / norm / norm
+    px, py = cx - nx * shift, cy - ny * shift
+    reach = 2 * max(x1 - x0, y1 - y0, 1e-9)
+    dx, dy = -ny / norm * reach, nx / norm * reach
+    return (px - dx, py - dy), (px + dx, py + dy)
 
 
 def stacking(state: State) -> list[int]:
