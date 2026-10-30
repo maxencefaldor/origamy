@@ -2,7 +2,7 @@
 
 A compiler for origami, built for AI agents.
 
-![The bird base folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](docs/images/bird-base.png)
+![The crane folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](docs/images/crane.png)
 
 An AI agent writes an origami model as a Python fold script, and origamy folds it step by step on a simulated sheet.
 Each action either happens or is refused with the facts of why, at the script line that asked for it.
@@ -11,6 +11,9 @@ Every build draws the crease pattern, the folded paper and an x-ray of its layer
 The tool is a simulator and a compiler at once.
 No list of legal moves exists: the agent proposes any fold, and origamy says exactly what happens.
 Coordinates are exact numbers built from the rationals by square roots, so every check is exact: the 22.5° angles of the bird base, the 11.25° creases of a crane, and any angle bisected.
+
+The [documentation](https://maxencefaldor.github.io/origamy/) teaches the fold scripts, the actions and the rules.
+The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each example in the 3D viewer: classics such as the crane and the paper plane, bases, and original models.
 
 ## Install
 
