@@ -102,8 +102,6 @@ pymdownx.tabbed.alternate_style = true
 inventories = ["https://docs.python.org/3/objects.inv"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
-# The docstrings hold bare doctests, which the extension fences as Python sessions.
-extensions = ["docs/doctests.py"]
 show_source = false
 show_root_heading = true
 show_root_full_path = false

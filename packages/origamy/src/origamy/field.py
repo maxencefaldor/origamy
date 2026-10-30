@@ -85,14 +85,15 @@ class Estimate:
 class Number:
     """A real number of the tower: a rational, or ``a + b√d`` at some level.
 
-    >>> half = Number.of("1/2")
-    >>> root = Number.of("√2")
-    >>> half * root
-    Number.of('√2/2')
-    >>> (half * root) ** 2 == half
-    True
-    >>> print((2 + root).sqrt() ** 2)
-    2 + √2
+    Examples:
+        >>> half = Number.of("1/2")
+        >>> root = Number.of("√2")
+        >>> half * root
+        Number.of('√2/2')
+        >>> (half * root) ** 2 == half
+        True
+        >>> print((2 + root).sqrt() ** 2)
+        2 + √2
     """
 
     __slots__ = ("_estimate", "denominator", "numerators")
@@ -175,8 +176,9 @@ class Number:
     def sqrt(self) -> Number:
         """The square root, adding a level to the tower when no level holds it.
 
-        >>> print(Number.of(8).sqrt())
-        2√2
+        Examples:
+            >>> print(Number.of(8).sqrt())
+            2√2
         """
         sign = self.sign()
         if sign < 0:

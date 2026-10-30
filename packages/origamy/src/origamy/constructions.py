@@ -14,8 +14,9 @@ from origamy.geometry import HALF, Line, Point, PointLike
 def midpoint(p: PointLike, q: PointLike) -> Point:
     """The point halfway between two points.
 
-    >>> print(midpoint((0, 0), (1, "1/2")))
-    (1/2, 1/4)
+    Examples:
+        >>> print(midpoint((0, 0), (1, "1/2")))
+        (1/2, 1/4)
     """
     p, q = Point.of(p), Point.of(q)
     return (p + q) * HALF
@@ -24,8 +25,9 @@ def midpoint(p: PointLike, q: PointLike) -> Point:
 def meet(first: Line, second: Line) -> Point:
     """The point where two lines cross.
 
-    >>> print(meet(Line.through((0, 0), (1, 1)), Line.through((0, 1), (1, 0))))
-    (1/2, 1/2)
+    Examples:
+        >>> print(meet(Line.through((0, 0), (1, 1)), Line.through((0, 1), (1, 0))))
+        (1/2, 1/2)
     """
     point = first.meet(second)
     if point is None:
@@ -37,8 +39,9 @@ def meet(first: Line, second: Line) -> Point:
 def fold_onto(p: PointLike, q: PointLike) -> Line:
     """The fold line that puts point ``p`` onto point ``q`` (axiom 2).
 
-    >>> print(fold_onto((0, 0), (1, 0)))
-    x = 1/2
+    Examples:
+        >>> print(fold_onto((0, 0), (1, 0)))
+        x = 1/2
     """
     p, q = Point.of(p), Point.of(q)
     if p == q:
@@ -50,8 +53,9 @@ def fold_onto(p: PointLike, q: PointLike) -> Line:
 def perpendicular(line: Line, through: PointLike) -> Line:
     """The fold line through a point that folds a line onto itself (axiom 4).
 
-    >>> print(perpendicular(Line.through((0, 0), (1, 0)), (1, 1)))
-    x = 1
+    Examples:
+        >>> print(perpendicular(Line.through((0, 0), (1, 0)), (1, 1)))
+        x = 1
     """
     through = Point.of(through)
     return Line.make(line.direction, line.direction.dot(through))
@@ -63,10 +67,11 @@ def bisect(a: PointLike, vertex: PointLike, b: PointLike) -> Line:
     The line puts the ray toward ``a`` onto the ray toward ``b`` (axiom 3). Its
     direction takes the rays' lengths, square roots that stay exact.
 
-    >>> print(bisect((1, 0), (0, 0), (0, 1)))
-    x - y = 0
-    >>> print(bisect((1, 0), (0, 0), (1, 1)))
-    x - (1 + √2)y = 0
+    Examples:
+        >>> print(bisect((1, 0), (0, 0), (0, 1)))
+        x - y = 0
+        >>> print(bisect((1, 0), (0, 0), (1, 1)))
+        x - (1 + √2)y = 0
     """
     a, vertex, b = Point.of(a), Point.of(vertex), Point.of(b)
     u, v = a - vertex, b - vertex

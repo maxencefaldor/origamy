@@ -82,11 +82,12 @@ class RefusedError(OrigamyError):
 class Paper:
     """A sheet of paper that a fold script folds, step by step.
 
-    >>> from origamy import Line
-    >>> paper = Paper.square()
-    >>> paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
-    >>> paper.layers(("1/4", "1/2"))
-    2
+    Examples:
+        >>> from origamy import Line
+        >>> paper = Paper.square()
+        >>> paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+        >>> paper.layers(("1/4", "1/2"))
+        2
     """
 
     def __init__(

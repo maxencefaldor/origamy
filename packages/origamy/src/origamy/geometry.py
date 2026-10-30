@@ -25,8 +25,9 @@ type Polygon = tuple[Point, ...]
 class Point:
     """A point of the plane, or the vector to it from the origin.
 
-    >>> Point.of(("1/2", 0)) + Point.of((0, "√2"))
-    Point.of(('1/2', '√2'))
+    Examples:
+        >>> Point.of(("1/2", 0)) + Point.of((0, "√2"))
+        Point.of(('1/2', '√2'))
     """
 
     x: Number
@@ -88,10 +89,11 @@ class Line:
     The normal is scaled so that its first nonzero coordinate is 1, so two descriptions
     of one line compare equal.
 
-    >>> Line.through((0, 0), (1, 1)) == Line.through((2, 2), (-1, -1))
-    True
-    >>> print(Line.through((0, 0), (1, 1)))
-    x - y = 0
+    Examples:
+        >>> Line.through((0, 0), (1, 1)) == Line.through((2, 2), (-1, -1))
+        True
+        >>> print(Line.through((0, 0), (1, 1)))
+        x - y = 0
     """
 
     normal: Point
