@@ -42,16 +42,23 @@ def fold() -> Paper:
     flap = midpoint(neck, midpoint(top, bottom))
     paper.reverse(head, flap=flap, layers=paper.layers(flap))
 
-    # Fold each wing down, square to the body through the paper's center.
-    for wing_tip, edge in (
-        ((0, 0), ("√2/4 - 1/4", "1/4")),
-        ((1, 1), ("3/4", "5/4 - √2/4")),
-    ):
-        wing, center = paper.where(wing_tip), paper.where(("1/2", "1/2"))
-        line = perpendicular(Line.through(wing, paper.where((0, "1/2"))), center)
-        paper.valley(line, flap=midpoint(center, paper.where(edge)), layers=1)
+    # Fold each wing down at the shoulders, then spread it level. Last, hold the bird
+    # up by its shoulders, its neck and tail rising.
+    wings = (((0, 0), ("1/8", "1/16")), ((1, 1), ("7/8", "15/16")))
+    for tip, inside in wings:
+        paper.valley(shoulders(paper, tip), flap=paper.where(inside), layers=1)
         paper.turn_over()
+    for tip, inside in wings:
+        paper.shape(shoulders(paper, tip), flap=paper.where(inside), angle=90, layers=1)
+        paper.turn_over()
+    paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
     return paper
+
+
+def shoulders(paper: Paper, tip: tuple[int, int]) -> Line:
+    """Where a wing folds down: square to the line from its tip, through the center."""
+    axis = Line.through(paper.where(tip), paper.where((0, "1/2")))
+    return perpendicular(axis, paper.where(("1/2", "1/2")))
 
 
 def bird_base(paper: Paper) -> None:

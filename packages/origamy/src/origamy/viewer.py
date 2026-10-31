@@ -18,10 +18,11 @@ from pathlib import Path
 from string import Template
 from typing import Any, Final
 
-from origamy.draw import across, folded_box, stacking
+from origamy.draw import Eye, across, folded_box, heights
 from origamy.geometry import Isometry, Line
 from origamy.paper import Step
 from origamy.result import BuildResult
+from origamy.space import Shaped
 from origamy.state import State
 
 THREE_VERSION: Final = "0.186.1"
@@ -91,24 +92,26 @@ def build_data(result: BuildResult, name: str) -> Data:
     ]
     if refused is not None:
         views.append({**_step(refused, None), "refused": True})
+    shaped = [Shaped(s.state, s.form) for s in (*steps, refused) if s and s.form]
     return {
         "name": name,
         "paper": result.paper.model_dump(),
         "size": float(result.paper.unit()),
+        "eye": Eye.facing(shaped[-1]).toward if shaped else None,
         "steps": views,
     }
 
 
 def _step(step: Step, previous: Step | None) -> Data:
     state = step.state
-    order = _order(state)
-    before, order_before = [_floats(f.place) for f in state.faces], order
+    height = heights(state)
+    before, height_before = [_floats(f.place) for f in state.faces], height
     form_before = step.form
     if previous is not None:
         parents = previous.state.parents(state)
-        old = _order(previous.state)
+        old = heights(previous.state)
         before = [_floats(previous.state.faces[p].place) for p in parents]
-        order_before = [old[p] for p in parents]
+        height_before = [old[p] for p in parents]
         form_before = previous.form and previous.form.carried(previous.state, state)
     turn = step.turn
     source = str(step.source.site) if step.source else None
@@ -119,9 +122,9 @@ def _step(step: Step, previous: Step | None) -> Data:
         "vertices": [p.floats() for p in state.vertices],
         "faces": [list(f.corners) for f in state.faces],
         "places": [_floats(f.place) for f in state.faces],
-        "order": order,
+        "height": height,
         "before": before,
-        "orderBefore": order_before,
+        "heightBefore": height_before,
         "motions": step.form.motions if step.form else None,
         "motionsBefore": form_before.motions if form_before else None,
         "turn": (
@@ -143,14 +146,6 @@ def _step(step: Step, previous: Step | None) -> Data:
             for d in (*([step.refusal] if step.refusal else []), *step.diagnostics)
         ],
     }
-
-
-def _order(state: State) -> list[int]:
-    """Each face's place in the stacking, counted from the bottom."""
-    order = [0] * len(state.faces)
-    for index, face in enumerate(stacking(state)):
-        order[face] = index
-    return order
 
 
 def _segment(line: Line, state: State) -> tuple[tuple[float, float], ...]:

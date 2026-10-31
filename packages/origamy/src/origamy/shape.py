@@ -4,7 +4,8 @@
 Folding presses every crease flat; shaping then opens some of them part of the way,
 as hands spread a crane's wings or level a plane's. A shape step turns the paper at a
 flap point about a line, by an angle. The step finds the paper to turn as a fold does,
-in the paper as it lies flat, and turns it as one rigid piece about its hinge.
+in the paper as it lies flat, and turns it as one rigid piece about its hinge. A tilt
+turns the whole paper, as hands hold a finished model up to show it.
 """
 
 from fractions import Fraction
@@ -14,7 +15,17 @@ from origamy import actions
 from origamy.actions import Outcome, grab
 from origamy.geometry import Line, Point, bounds, center
 from origamy.rules import RefusalError
-from origamy.space import Form, Motion, Shaped, Turn, apply, compose, rotate, same
+from origamy.space import (
+    STILL,
+    Form,
+    Motion,
+    Shaped,
+    Turn,
+    apply,
+    compose,
+    rotate,
+    same,
+)
 from origamy.state import Edge, State
 
 _LEAN = 1e-9
@@ -66,6 +77,25 @@ def shape(
     return Outcome(cut, moved, Form(turned), turn)
 
 
+def tilt(paper: Shaped, line: Line, flap: Point, angle: Fraction) -> Outcome:
+    """Turn the whole paper about ``line`` by ``angle`` degrees, ``flap``'s side up.
+
+    The line lies on the table, where the paper lay flat before shaping turned any of
+    it, and the flap point names the side that rises when the angle is positive.
+    """
+    side = line.side(flap)
+    if not side:
+        msg = f"the flap point {flap} lies on the line {line}"
+        raise RefusalError(msg, rule="flap-on-line", state=paper.state)
+    state = paper.state
+    form = paper.form or Form.flat(len(state.faces))
+    corners = [p for polygon in state.folded for p in polygon]
+    turn = _turn(line, side, STILL, radians(angle), corners)
+    rotation = turn.motion()
+    tilted = Form(tuple(compose(motion, rotation) for motion in form.motions))
+    return Outcome(state, frozenset(range(len(state.faces))), tilted, turn)
+
+
 def turn_over(paper: Shaped) -> Outcome:
     """Turn the paper over, keeping its form in space.
 
@@ -103,18 +133,22 @@ def fold_angles(state: State, form: Form) -> dict[Edge, float]:
 
 
 def _turn(
-    line: Line, side: int, hinge: Motion, angle: float, ends: list[Point]
+    line: Line, side: int, hinge: Motion, angle: float, reach: list[Point]
 ) -> Turn:
-    """The turn about a hinge that lifts the side ``side`` of a line up by ``angle``.
+    """The turn about a line that lifts its side ``side`` up by ``angle`` radians.
 
-    The turn's point is the middle of the hinge, which ``ends`` spans along the line.
+    The line lies where ``hinge`` takes it, and the turn's point is the middle of the
+    stretch of the line that the points ``reach`` span.
     """
     nx, ny = float(line.normal.x) * side, float(line.normal.y) * side
     length = sqrt(nx * nx + ny * ny)
     ux, uy = ny / length, -nx / length
-    along = sorted(ends, key=lambda p: float(p.x) * ux + float(p.y) * uy)
-    first, last = along[0].floats(), along[-1].floats()
-    middle = ((first[0] + last[0]) / 2, (first[1] + last[1]) / 2, 0.0)
+    origin = line.point.floats()
+    along = [
+        (x - origin[0]) * ux + (y - origin[1]) * uy for x, y in map(Point.floats, reach)
+    ]
+    share = (min(along) + max(along)) / 2
+    middle = (origin[0] + share * ux, origin[1] + share * uy, 0.0)
     return Turn(apply(hinge, middle), rotate(hinge, (ux, uy, 0.0)), angle)
 
 

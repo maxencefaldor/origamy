@@ -20,6 +20,7 @@ nav = [
     { "Fold scripts" = "guide/scripts.md" },
     { "Actions" = "guide/actions.md" },
     { "Collapses" = "guide/collapses.md" },
+    { "Shaping" = "guide/shaping.md" },
     { "Feedback" = "guide/feedback.md" },
     { "Pictures" = "guide/pictures.md" },
     { "Exports" = "guide/exports.md" },

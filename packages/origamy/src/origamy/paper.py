@@ -299,6 +299,24 @@ class Paper:
             point,
         )
 
+    def tilt(self, line: Line, flap: PointLike, *, angle: Exact) -> None:
+        """Turn the whole paper about ``line`` by ``angle`` degrees, in space.
+
+        A tilt holds a finished model up to show it: the side of the line where
+        ``flap`` lies rises when the angle is positive. The line lies on the table, in
+        the coordinates of the paper as it lies flat, which shaping leaves unchanged
+        for paper it has not turned. A tilted paper takes no more folds.
+        """
+        point = Point.of(flap)
+        turn = Fraction(Number.of(angle).fraction())
+        self._act(
+            "tilt",
+            f"tilt: turn the paper about {line}, the side of {point} up by {turn}°",
+            lambda paper: shaping.tilt(paper, line, point, turn),
+            line,
+            point,
+        )
+
     def turn_over(self) -> None:
         """Turn the paper over, from left to right."""
         self._act("turn-over", "turn over", shaping.turn_over)

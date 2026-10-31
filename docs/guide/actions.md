@@ -1,6 +1,6 @@
 # Actions
 
-Each action asks the paper to fold, unfold or turn over, and the paper takes it or refuses it.
+Each action asks the paper to fold, unfold, turn over or take shape, and the paper takes it or refuses it.
 
 | Action | Does |
 | --- | --- |
@@ -10,6 +10,7 @@ Each action asks the paper to fold, unfold or turn over, and the paper takes it 
 | `precrease(line, flap, layers=None, mountain=False)` | Folds and unfolds, leaving creases along `line` in the paper it takes |
 | `turn_over()` | Turns the paper over, from left to right |
 | `collapse(...)`, `reverse(...)`, `petal(...)` | Folds many creases at once (see [Collapses](collapses.md)) |
+| `shape(...)`, `tilt(...)` | Turns folded paper out of the plane (see [Shaping](shaping.md)) |
 
 ## Folds
 

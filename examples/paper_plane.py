@@ -36,7 +36,7 @@ def fold() -> Paper:
     # tail corner and the keel's foot.
     paper.turn_over()
     for crease, flap, layers in (
-        (("1/4"), ("3/8", "1/8"), 3),
+        ("1/4", ("3/8", "1/8"), 3),
         ("3/4", ("7/8", "1/8"), 1),
     ):
         line = Line.through(paper.where((crease, 0)), paper.where((crease, "1/2")))

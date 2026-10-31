@@ -21,7 +21,7 @@ for corners in (
     paper.turn_over()
 ```
 
-The [crane](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py) calls a function `bird_base(paper)` first, then narrows the legs and folds the neck, head and wings.
+The [crane](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py) calls a function `bird_base(paper)` first, then narrows the legs, folds the neck, head and wings, and spreads the wings.
 
 ## Running apart
 

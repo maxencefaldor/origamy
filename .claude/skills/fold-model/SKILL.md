@@ -39,5 +39,7 @@ def fold() -> Paper:
 - A fold takes the paper at its flap point and everything joined to it on that side of the line.
   `layers=n` takes the top n layers there instead of all the paper on that side.
 - The actions are `valley`, `mountain`, `unfold`, `precrease`, `collapse`, `reverse`, `petal` and `turn_over`.
+- Shaping comes last: `shape(line, flap, angle=90, layers=n)` opens a fold part of the way, and `tilt(line, flap, angle=90)` holds the whole model up.
+  Shaped paper takes no more folds, so finish folding first.
 - The queries are `where` (unfolded point to where it lies now), `origin` (back), `creases` (crease pattern segments along a line) and `layers` (layers at a point).
 - `uv run origamy explain` gives every rule's exact condition.

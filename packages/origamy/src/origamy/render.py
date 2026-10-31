@@ -14,6 +14,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from origamy.draw import (
+    Eye,
     Look,
     axis,
     folded_box,
@@ -75,13 +76,13 @@ def _overview(result: BuildResult, name: str) -> str:
     marked = refusal.faces if refusal else ()
     box = folded_box(state)
     pattern = pattern_view(state, result.paper.size(), marked)
-    look = Look(*colors, unit)
     if last.form is None:
-        folded = folded_view(state, look, box, marked)
+        folded = folded_view(state, Look(*colors, unit), box, marked)
         flat = [folded]
     else:
         shaped = Shaped(state, last.form)
-        folded = shaped_view(shaped, look, shaped_box(shaped, unit=unit), marked)
+        look = Look(*colors, unit, Eye.facing(shaped))
+        folded = shaped_view(shaped, look, shaped_box(shaped, look=look), marked)
         flat = []
     xray = xray_view(state, box, unit, marked)
     if refused and refused.line is not None:
@@ -122,11 +123,13 @@ def _steps(result: BuildResult, name: str) -> str:
     unit = result.paper.unit()
     colors = result.paper.front, result.paper.back
     steps: Sequence[Step] = [data.step() for data in result.steps]
-    look = Look(*colors, unit)
     flat = [step.state for step in steps if step.form is None]
     shaped = [Shaped(step.state, step.form) for step in steps if step.form]
+    look = (
+        Look(*colors, unit, Eye.facing(shaped[-1])) if shaped else Look(*colors, unit)
+    )
     box = folded_box(*flat)
-    space = shaped_box(*shaped, unit=unit) if shaped else box
+    space = shaped_box(*shaped, look=look) if shaped else box
     cells = []
     # As in diagrams, each picture shows the paper after one step and the next fold.
     following = [*steps[1:], *([result.refused.step()] if result.refused else [])]
@@ -141,7 +144,7 @@ def _steps(result: BuildResult, name: str) -> str:
             turn = after.turn if after is not None and after.line is not None else None
             if turn is not None:
                 reach = max(space[2] - space[0], space[3] - space[1])
-                canvas.segment(*axis(turn, reach), **_NEXT)
+                canvas.segment(*axis(turn, reach, look.eye), **_NEXT)
         where = (
             f" ({step.source.site.file}:{step.source.site.line})" if step.source else ""
         )

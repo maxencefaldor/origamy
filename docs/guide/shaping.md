@@ -1,0 +1,70 @@
+# Shaping
+
+Folding presses every crease flat.
+Shaping then opens folds part of the way, as hands spread a crane's wings or level a plane's.
+Shaped paper leaves the table: the pictures, the viewer and the FOLD file show it in space.
+
+| Action | Does |
+| --- | --- |
+| `shape(line, flap, angle, layers=None)` | Turns the paper at `flap` about `line` by `angle` degrees, as one rigid piece |
+| `tilt(line, flap, angle)` | Turns the whole paper about `line` on the table by `angle` degrees |
+| `turn_over()` | Turns the paper over, keeping its form in space |
+
+## Shape steps
+
+A shape step takes the paper as a fold does: the top `layers` layers at the flap point, with everything joined to them on that side of the line.
+The paper taken turns about its hinge, the crease along the line between it and the paper that stays.
+A positive angle turns it up, toward the viewer, and a negative angle turns it down.
+A turn of 180° on a fold opens it flat, and a turn of 90° stands it square.
+
+Lines and points read in the paper as it lies flat, so `paper.where` still names them after shaping.
+A shape step about a line with no crease along it bends the paper there, as a fold would.
+The [paper plane](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py) holds one wing and turns its body down, then turns the other wing level:
+
+```python
+paper.turn_over()
+for crease, flap, layers in (("1/4", ("3/8", "1/8"), 3), ("3/4", ("7/8", "1/8"), 1)):
+    line = Line.through(paper.where((crease, 0)), paper.where((crease, "1/2")))
+    paper.shape(line, flap=paper.where(flap), angle=90, layers=layers)
+paper.turn_over()
+```
+
+![The paper plane shaped: its crease pattern, the plane in space, and an x-ray of the paper as it lies flat](../images/paper-plane.png)
+
+## Tilts
+
+A tilt holds a finished model up to show it.
+The whole paper turns about a line on the table, and the side of the line where the flap point lies rises.
+The line reads in the coordinates of the paper as it lies flat, which match the table wherever shaping has turned no paper.
+The [crane](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py) spreads each wing level, then stands up on its shoulders, its tail's side rising:
+
+```python
+for tip, inside in wings:
+    paper.shape(shoulders(paper, tip), flap=paper.where(inside), angle=90, layers=1)
+    paper.turn_over()
+paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
+```
+
+## Rules
+
+Shaped paper takes shape steps, tilts and turning over, and no more folds.
+
+| Rule | Refuses |
+| --- | --- |
+| `not-flat` | A fold, unfold, precrease, collapse or named move after a shape step or a tilt |
+| `hinge-bent` | A shape step whose hinge runs through paper an earlier shape step turned apart |
+| `turns-through-paper` | A shape step that turns paper through paper that stays, where the two lie together |
+| `flap-on-line` | A tilt whose flap point lies on its line, and so names no side |
+
+Shape steps turn rigid pieces of paper about straight hinges.
+A model whose creases close a loop around a vertex, such as a cup's mouth or a waterbomb, opens only when those creases move together.
+Shape steps do not move creases together yet.
+
+## In pictures, the viewer and FOLD files
+
+Pictures draw shaped paper in space, nearer faces over farther ones, each in the color of the side it shows.
+The eye sits in front of the model and above it, square to its longest reach on the table.
+The x-ray still shows the paper as it lies flat, where every layer and stacking stays exact.
+
+The viewer turns each shaped face about its step's axis, and it opens on the model from the same eye as the pictures.
+The FOLD file writes a shaped step's folded form in 3D, and every frame gives each crease's fold angle in `edges_foldAngle`.

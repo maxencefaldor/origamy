@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from graphlib import CycleError, TopologicalSorter
 from html import escape
-from math import ceil, floor, hypot, sqrt
+from math import atan2, ceil, cos, floor, hypot, sin, sqrt
 from typing import Final
 
 from origamy.field import Number
@@ -158,6 +158,21 @@ def stacking(state: State) -> list[int]:
         return sorted(below, key=lambda f: len(below[f]))
 
 
+def heights(state: State) -> list[int]:
+    """How high each face lies: the most layers stacked under it, where it overlaps.
+
+    Faces that overlap lie at different heights, the upper higher. A face lies only as
+    high as the paper under it needs, so faces side by side in one layer lie level.
+    """
+    below: dict[int, set[int]] = {f: set() for f in range(len(state.faces))}
+    for upper, lower in state.above:
+        below[upper].add(lower)
+    height = [0] * len(state.faces)
+    for face in stacking(state):
+        height[face] = max((height[g] + 1 for g in below[face]), default=0)
+    return height
+
+
 def pattern_view(
     state: State, paper_box: tuple[Number, Number], marked: Iterable[int] = ()
 ) -> Canvas:
@@ -178,15 +193,6 @@ def pattern_view(
     _mark_faces(canvas, state.patterns, marked)
     canvas.rulers(max(width, height))
     return canvas
-
-
-@dataclass(frozen=True, slots=True)
-class Look:
-    """How to draw a paper: its two sides' colors, and the length its rulers divide."""
-
-    front: str
-    back: str
-    unit: Number
 
 
 def folded_view(
@@ -240,23 +246,82 @@ def _dot(a: Vector, b: Vector) -> float:
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-TOWARD: Final = _unit((0.35, -0.75, 0.75))
-"""The direction toward the eye in a picture of shaped paper, as the viewer's tilt."""
-_RIGHT: Final = _unit((-TOWARD[1], TOWARD[0], 0.0))
-_UP: Final = (
-    TOWARD[1] * _RIGHT[2] - TOWARD[2] * _RIGHT[1],
-    TOWARD[2] * _RIGHT[0] - TOWARD[0] * _RIGHT[2],
-    TOWARD[0] * _RIGHT[1] - TOWARD[1] * _RIGHT[0],
-)
+_TILT: Final = (0.35, -0.75, 0.75)
+"""Where the 3D viewer's eye first sits, from the paper's center: in front, above."""
 _GAP: Final = 0.002
 """The height between layers in a picture of shaped paper, as a share of its unit."""
 _TINY: Final = 1e-9
 """How small a length or area of a picture of shaped paper counts as none."""
 
 
-def project(point: Vector) -> Flat:
-    """Where a point of space lies in a picture of shaped paper."""
-    return _dot(point, _RIGHT), _dot(point, _UP)
+@dataclass(frozen=True, slots=True)
+class Eye:
+    """Where an eye sees shaped paper from, far away: the direction toward it."""
+
+    toward: Vector
+
+    @classmethod
+    def facing(cls, paper: Shaped) -> Eye:
+        """The eye in front of paper and above it, square to its longest reach.
+
+        The eye sits as the 3D viewer's first does for flat paper, turned about the
+        upright axis so that the paper's longest reach on the table runs across it.
+        """
+        state, form = paper.state, paper.form or Form.flat(len(paper.state.faces))
+        points = [
+            form.point(f, p) for f, polygon in enumerate(state.folded) for p in polygon
+        ]
+        mean = [sum(p[k] for p in points) / len(points) for k in range(2)]
+        xx, yy, xy = (
+            sum((p[i] - mean[i]) * (p[j] - mean[j]) for p in points)
+            for i, j in ((0, 0), (1, 1), (0, 1))
+        )
+        spin = atan2(2 * xy, xx - yy) / 2
+        if abs(xy) < _TINY and abs(xx - yy) < _TINY:
+            spin = 0.0
+        x, y, z = _TILT
+        c, s = cos(spin), sin(spin)
+        return cls(_unit((c * x - s * y, s * x + c * y, z)))
+
+    @property
+    def right(self) -> Vector:
+        """The direction to the right in the picture."""
+        return _unit((-self.toward[1], self.toward[0], 0.0))
+
+    @property
+    def up(self) -> Vector:
+        """The direction up in the picture."""
+        (a, b, c), (d, e, f) = self.toward, self.right
+        return b * f - c * e, c * d - a * f, a * e - b * d
+
+    def project(self, point: Vector) -> Flat:
+        """Where a point of space lies in the picture."""
+        return _dot(point, self.right), _dot(point, self.up)
+
+    def depth(self, normal: Vector, origin: Vector, point: Flat) -> float | None:
+        """How near the eye a plane lies behind a point of the picture.
+
+        The plane runs through ``origin``, square to ``normal``. Seen edge on, it has
+        no one depth there, and the depth is None.
+        """
+        facing = _dot(normal, self.toward)
+        if abs(facing) < _TINY:
+            return None
+        right, up = self.right, self.up
+        on = tuple(point[0] * r + point[1] * u for r, u in zip(right, up, strict=True))
+        shift = (origin[0] - on[0], origin[1] - on[1], origin[2] - on[2])
+        return _dot(normal, shift) / facing
+
+
+@dataclass(frozen=True, slots=True)
+class Look:
+    """How to draw a paper: its sides' colors, the length its rulers divide, the eye."""
+
+    front: str
+    back: str
+    unit: Number
+    eye: Eye = Eye(_unit(_TILT))
+    """Where an eye sees shaped paper from."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,25 +334,25 @@ class _Solid:
     """The direction its front looks toward."""
 
 
-def _solids(paper: Shaped, unit: Number) -> list[_Solid]:
+def _solids(paper: Shaped, look: Look) -> list[_Solid]:
     """Each face in space, lifted above the layers below it as it lay flat."""
     state = paper.state
     form = paper.form or Form.flat(len(state.faces))
-    gap = float(unit) * _GAP
+    gap = float(look.unit) * _GAP
     solids = [_Solid((), (), (0.0, 0.0, 1.0))] * len(state.faces)
-    for height, face in enumerate(stacking(state)):
+    for face, height in enumerate(heights(state)):
         motion = form.motions[face]
         corners = tuple(
             apply(motion, (*p.floats(), height * gap)) for p in state.folded[face]
         )
         normal = form.normal(face, flipped=state.flips(face))
-        solids[face] = _Solid(corners, tuple(map(project, corners)), normal)
+        solids[face] = _Solid(corners, tuple(map(look.eye.project, corners)), normal)
     return solids
 
 
-def shaped_box(*papers: Shaped, unit: Number) -> tuple[float, float, float, float]:
+def shaped_box(*papers: Shaped, look: Look) -> tuple[float, float, float, float]:
     """A box around the pictures of every shaped paper given."""
-    points = [p for paper in papers for s in _solids(paper, unit) for p in s.outline]
+    points = [p for paper in papers for s in _solids(paper, look) for p in s.outline]
     xs, ys = [x for x, _ in points], [y for _, y in points]
     return min(xs), min(ys), max(xs), max(ys)
 
@@ -301,10 +366,10 @@ def shaped_view(
 ) -> Canvas:
     """Shaped paper in space, each face in the color of the side it shows the eye."""
     canvas = Canvas(box, size, 36)
-    solids = _solids(paper, look.unit)
-    for face in _far_to_near(solids):
+    solids = _solids(paper, look)
+    for face in _far_to_near(solids, look.eye):
         solid = solids[face]
-        facing = _dot(solid.normal, TOWARD)
+        facing = _dot(solid.normal, look.eye.toward)
         canvas.polygon(
             solid.outline,
             fill=look.front if facing > 0 else look.back,
@@ -321,7 +386,7 @@ def shaped_view(
     return canvas
 
 
-def axis(turn: Turn, reach: float) -> tuple[Flat, Flat]:
+def axis(turn: Turn, reach: float, eye: Eye) -> tuple[Flat, Flat]:
     """The axis of a turn in a picture of shaped paper, ``reach`` each way."""
     ends = (
         tuple(
@@ -330,18 +395,20 @@ def axis(turn: Turn, reach: float) -> tuple[Flat, Flat]:
         )
         for sense in (-1, 1)
     )
-    first, last = (project((e[0], e[1], e[2])) for e in ends)
+    first, last = (eye.project((e[0], e[1], e[2])) for e in ends)
     return first, last
 
 
-def _far_to_near(solids: Sequence[_Solid]) -> list[int]:
+def _far_to_near(solids: Sequence[_Solid], eye: Eye) -> list[int]:
     """An order to paint faces in: each after every face it hides part of."""
     behind: dict[int, set[int]] = {f: set() for f in range(len(solids))}
     for f, g in _pairs(solids):
         point = _common(solids[f].outline, solids[g].outline)
         if point is None:
             continue
-        first, second = _depth(solids[f], point), _depth(solids[g], point)
+        first, second = (
+            eye.depth(solids[h].normal, solids[h].corners[0], point) for h in (f, g)
+        )
         if first is not None and second is not None and first != second:
             nearer, farther = (f, g) if first > second else (g, f)
             behind[nearer].add(farther)
@@ -351,7 +418,8 @@ def _far_to_near(solids: Sequence[_Solid]) -> list[int]:
         return sorted(
             behind,
             key=lambda f: (
-                sum(_dot(c, TOWARD) for c in solids[f].corners) / len(solids[f].corners)
+                sum(_dot(c, eye.toward) for c in solids[f].corners)
+                / len(solids[f].corners)
             ),
         )
 
@@ -412,17 +480,6 @@ def _area(polygon: Sequence[Flat]) -> float:
         )
         / 2
     )
-
-
-def _depth(solid: _Solid, point: Flat) -> float | None:
-    """How near the eye a face lies behind a point of the picture, or None edge on."""
-    normal, origin = solid.normal, solid.corners[0]
-    facing = _dot(normal, TOWARD)
-    if abs(facing) < _TINY:
-        return None
-    on = tuple(point[0] * r + point[1] * u for r, u in zip(_RIGHT, _UP, strict=True))
-    shift = (origin[0] - on[0], origin[1] - on[1], origin[2] - on[2])
-    return _dot(normal, shift) / facing
 
 
 def folded_box(*states: State) -> tuple[float, float, float, float]:

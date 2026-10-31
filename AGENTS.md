@@ -88,6 +88,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | hinge | A crease along the fold line between paper that moves and paper that stays |
 | collapse | An action that folds, unfolds or reverses many creases at once |
 | shape step | An action that turns folded paper out of the plane about a hinge, by an angle |
+| tilt | An action that turns the whole paper in space about a line on the table |
 | form | Where each face lies in space once shaping turns it: a rigid motion of its place |
 | named move | A collapse that computes its own creases, such as a reverse or petal fold |
 | action, step | What a script asks the paper to do, and an action the paper took |

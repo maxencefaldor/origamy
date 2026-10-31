@@ -40,7 +40,7 @@ The [skill](connect.md#skill) teaches the actions and the constructions that fin
 ## Mechanisms, not designs
 
 The API offers exact geometry and folding actions, never a design generator.
-The [crane](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py) is a script that folds a bird base, narrows its legs, reverse folds them up, and folds the wings.
+The [crane](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py) is a script that folds a bird base, narrows its legs, reverse folds them up, then folds and spreads the wings.
 Named moves such as reverse and petal folds compute only their own creases, judged like any collapse.
 The design stays the agent's work, and the build checks every step of it.
 

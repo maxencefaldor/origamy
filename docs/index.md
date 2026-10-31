@@ -18,7 +18,7 @@ The paper takes each action or refuses it, with the facts of why and the script 
 
 [Get started](get-started.md){ .md-button .md-button--primary } [Gallery in 3D](gallery.md){ .md-button }
 
-![The crane folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](images/crane.png){ .origamy-hero-image }
+![The crane folded with origamy: its crease pattern, the crane shaped in space, and an x-ray of its layers](images/crane.png){ .origamy-hero-image }
 
 </div>
 

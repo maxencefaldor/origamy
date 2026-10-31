@@ -20,6 +20,10 @@ The guide covers one concept per page, in the order a build meets them.
 
     Many creases folded at once, and the named moves: reverse and petal folds.
 
+-   🕊️ **[Shaping](shaping.md)**
+
+    Shape steps and tilts that turn folded paper out of the plane, as hands spread a crane's wings.
+
 -   🔎 **[Feedback](feedback.md)**
 
     Refusals and warnings: the facts a build states, its rules, and the layer solver.

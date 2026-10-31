@@ -11,28 +11,29 @@ Traditional models, folded step by step as diagrams teach them, with every creas
 
 -   ![The crane example](images/gallery-crane.png)
 
-    **[Crane](gallery/crane.html)** · 28 steps
+    **[Crane](gallery/crane.html)** · 33 steps
 
     The orizuru: a bird base, narrowed on both sides, with its neck, tail and head reverse folded up.
     Narrowing the legs bisects 22.5° angles, so its creases live at 11.25°, exactly.
+    Its wings then spread level, and the crane stands up on its shoulders.
 
     [Open in 3D](gallery/crane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py)
 
 -   ![The flapping bird example](images/gallery-flapping-bird.png)
 
-    **[Flapping bird](gallery/flapping-bird.html)** · 24 steps
+    **[Flapping bird](gallery/flapping-bird.html)** · 29 steps
 
-    A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down.
+    A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then spread level.
     Two precreases mark a quarter of the neck, where the head reverse folds.
 
     [Open in 3D](gallery/flapping-bird.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/flapping_bird.py)
 
 -   ![The paper plane example](images/gallery-paper-plane.png)
 
-    **[Paper plane](gallery/paper-plane.html)** · 10 steps
+    **[Paper plane](gallery/paper-plane.html)** · 14 steps
 
     The classic dart, from A-series paper √2 times as tall as it is wide.
-    Each wing folds square to the keel, halfway along the tail.
+    Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
 
     [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
 

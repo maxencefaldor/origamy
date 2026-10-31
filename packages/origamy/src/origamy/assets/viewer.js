@@ -3,7 +3,8 @@
 //
 // Each step holds every face's place before and after it, as 2D isometries. A face
 // whose move turns it over makes a half turn about the move's axis, lifted toward the
-// side it lands on; any other face glides. Layers sit a small gap apart, in stacking order.
+// side it lands on; any other face glides. Layers sit a small gap apart, each as high as the
+// layers under it need.
 // Once shaping turns the paper out of the plane, each face also has a rigid motion in
 // space, and a step that turns paper in space rotates its moving faces about the turn's axis.
 
@@ -169,8 +170,8 @@ function motion(step, face, t, size, together) {
   const corners = step.faces[face].map((v) => step.vertices[v]);
   const before = step.before[face];
   const after = step.places[face];
-  const z0 = step.orderBefore[face] * GAP * size;
-  const z1 = step.order[face] * GAP * size;
+  const z0 = step.heightBefore[face] * GAP * size;
+  const z1 = step.height[face] * GAP * size;
   if (step.turn) return turning(step, face, corners, t, z0, z1);
   const shaped = step.motions?.[face] ?? STILL;
   return flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
@@ -204,7 +205,7 @@ function flat(step, face, corners, before, after, t, z, together) {
     const offset = (tx * n[0] + ty * n[1]) / 2;
     const distances = starts.map(([x, y]) => x * n[0] + y * n[1] - offset);
     const mean = distances.reduce((s, v) => s + v, 0) / distances.length;
-    const up = together ?? step.order[face] >= step.orderBefore[face];
+    const up = together ?? step.height[face] >= step.heightBefore[face];
     const sense = together !== null ? 1 : (up ? 1 : -1) * Math.sign(mean || 1);
     const angle = Math.PI * t;
     return starts.map(([x, y], i) => {
@@ -313,7 +314,7 @@ class Stage {
     this.line = null;
     if (step.line) {
       const [[x0, y0], [x1, y1]] = step.line;
-      const top = (Math.max(...step.order) + 2) * GAP * this.size;
+      const top = (Math.max(...step.height) + 2) * GAP * this.size;
       let ends = [[x0, y0, top], [x1, y1, top]];
       if (step.turn) {
         // A turn in space draws its axis, as long as the line across the paper.
@@ -362,21 +363,33 @@ class Stage {
   look(view, instant = false) {
     const box = new THREE.Box3().setFromObject(this.paper);
     const center = box.isEmpty() ? new THREE.Vector3(this.size / 2, this.size / 2, 0) : box.getCenter(new THREE.Vector3());
-    const span = box.isEmpty() ? this.size : Math.max(box.max.x - box.min.x, box.max.y - box.min.y, this.size / 3);
-    const distance = (span / 2 / Math.tan((this.camera.fov * Math.PI) / 360)) * 1.15;
+    // Shaped paper comes with an eye that faces it; flat paper is seen from in front.
     const offsets = {
       top: [0, -0.0001, 1],
       bottom: [0, -0.0001, -1],
-      tilt: [0.35, -0.75, 0.75],
+      tilt: this.build.eye ?? [0.35, -0.75, 0.75],
     };
-    const [dx, dy, dz] = offsets[view];
-    const length = Math.hypot(dx, dy, dz);
+    const toward = new THREE.Vector3(...offsets[view]).normalize();
+    // Back away until every corner of the paper, seen from there, fits the view both ways.
+    const right = new THREE.Vector3(-toward.y, toward.x, 0);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const up = new THREE.Vector3().crossVectors(toward, right);
+    const half = Math.tan((this.camera.fov * Math.PI) / 360);
+    let [across, high, deep] = [this.size / 6, this.size / 6, 0];
+    const corner = new THREE.Vector3();
+    for (const face of this.faces ?? []) {
+      const positions = face.geometry.attributes.position;
+      for (let i = 0; i < positions.count; i++) {
+        corner.fromBufferAttribute(positions, i).sub(center);
+        across = Math.max(across, Math.abs(corner.dot(right)));
+        high = Math.max(high, Math.abs(corner.dot(up)));
+        deep = Math.max(deep, corner.dot(toward));
+      }
+    }
+    const distance = Math.max(across / (half * this.camera.aspect), high / half) * 1.1 + deep;
     this.controls.target.copy(center);
-    this.camera.position.set(
-      center.x + (dx / length) * distance,
-      center.y + (dy / length) * distance,
-      center.z + (dz / length) * distance,
-    );
+    this.camera.position.copy(center).addScaledVector(toward, distance);
     this.controls.update();
     if (instant) this.renderer.render(this.scene, this.camera);
   }

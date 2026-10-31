@@ -64,7 +64,11 @@ async def write_gallery_viewer(name: str, heading: str) -> Path:
 
 
 async def draw_thumbnails(names: list[str]) -> None:
-    """Draw each viewer's view from above of the folded model into a card image."""
+    """Draw each viewer's view of the finished model into a card image.
+
+    A model shaped in space shows in 3D, from the eye the viewer opens with; a flat
+    model shows from above.
+    """
 
     async def serve(route: Route) -> None:
         path = route.request.url.removeprefix(THREE_PACKAGE).replace("build/", "")
@@ -79,9 +83,10 @@ async def draw_thumbnails(names: list[str]) -> None:
             await page.goto((GALLERY / f"{name}.html").as_uri())
             await page.wait_for_selector('#origamy[data-state="ready"]')
             await page.add_style_tag(content="nav.views { display: none; }")
-            # The card shows the folded model alone, without its last fold line.
+            # The card shows the finished model alone, without its last fold line.
             await page.evaluate(
-                "const stage = window.origamy.stage; stage.look('top');"
+                "const stage = window.origamy.stage;"
+                "stage.look(stage.build.eye ? 'tilt' : 'top');"
                 "if (stage.line) stage.line.visible = false;"
             )
             await page.wait_for_timeout(900)

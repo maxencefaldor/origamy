@@ -26,15 +26,18 @@ The file `models/kite.fold` holds these keys:
 | --- | --- |
 | `file_spec`, `file_creator`, `file_classes` | `1.2`, `"origamy"` and `["singleModel"]` |
 | `frame_title` | The script's name, such as `"kite"`, and in each frame the step's description |
-| `frame_classes`, `frame_attributes` | `["creasePattern"]` at the top level and `["foldedForm"]` in each frame, all `["2D"]` |
+| `frame_classes`, `frame_attributes` | `["creasePattern"]` at the top level and `["foldedForm"]` in each frame, `["2D"]` or `["3D"]` once shaped |
 | `vertices_coords` | Each vertex as floats: on the crease pattern at the top level, and where it lies in each frame |
 | `edges_vertices`, `edges_assignment` | Each edge's two vertices, and `M`, `V` or `F` for a crease, or `B` for the paper's edge |
+| `edges_foldAngle` | Each edge's fold angle in degrees, valleys positive: 180 for a flat fold, less once shaped |
 | `faces_vertices` | Each face's vertices, counterclockwise on the crease pattern |
 | `faceOrders` | In each frame, which face lies above wherever two faces overlap |
 | `origamy:vertices_exact` | Each vertex of the crease pattern as exact data |
 | `origamy:tower` | The radicands of the build's tower of square roots, level 1 first |
 
 Assignments read from the paper's front, as on the crease pattern.
+A frame after a shape step or a tilt gives each vertex three coordinates, where the paper lies in space (see [Shaping](shaping.md)).
+The top level gives the fold angles of the last frame.
 Each entry of `faceOrders` follows the FOLD convention.
 The entry `[f, g, 1]` puts face `f` on the side that the normal of face `g` points to, and `[f, g, -1]` on the other side.
 

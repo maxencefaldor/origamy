@@ -14,6 +14,8 @@ Three views sit side by side:
 | Folded, from above | The folded paper, each face in the color of its side up: the front vermilion, the back cream |
 | X-ray | Every layer at once, darker where more layers lie |
 
+Once [shaping](shaping.md) turns the paper out of the plane, the middle view shows it in space instead, seen from in front and above.
+
 Each view carries rulers along its bottom and left sides, ticked every eighth of the paper's longer side and labeled every quarter.
 A coordinate read off the folded view's rulers is a coordinate to write in the fold script.
 

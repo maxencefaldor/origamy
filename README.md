@@ -2,7 +2,7 @@
 
 A compiler for origami, built for AI agents.
 
-![The crane folded with origamy: its crease pattern, the folded paper, and an x-ray of its layers](docs/images/crane.png)
+![The crane folded with origamy: its crease pattern, the crane shaped in space, and an x-ray of its layers](docs/images/crane.png)
 
 An AI agent writes an origami model as a Python fold script, and origamy folds it step by step on a simulated sheet.
 Each action either happens or is refused with the facts of why, at the script line that asked for it.
@@ -87,6 +87,18 @@ The [bird base](examples/bird_base.py) collapses a preliminary base, then petal 
 
 ![Every step of the bird base, each next fold dashed](docs/images/bird-base-steps.png)
 
+## Shape
+
+Shaping opens folds part of the way, as hands spread a crane's wings, so the model leaves the table.
+A shape step turns paper about its hinge by an angle, and a tilt holds the whole model up:
+
+```python
+paper.shape(shoulders, flap=wing, angle=90, layers=1)
+paper.tilt(shoulders, flap=tail, angle=90)
+```
+
+The pictures, the viewer and the FOLD file then show the model in space, with every crease's fold angle.
+
 ## Connect an agent
 
 The package `origamy-mcp` serves origamy over the Model Context Protocol, so any agent harness can fold.
@@ -143,9 +155,9 @@ When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
-The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, with the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
-The [crane](examples/crane.py) folds end to end, from the square to the head.
-Squash and sink folds, and 3D shaping in the viewer, come next.
+The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, shaping, the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
+The [crane](examples/crane.py) folds end to end, from the square to its wings spread in space.
+Squash and sink folds, and shaping that moves the creases around a vertex together, come next.
 
 ## License
 

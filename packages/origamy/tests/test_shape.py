@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+import runpy
 import shutil
 from collections.abc import Callable
 from math import isclose
@@ -9,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from origamy import Line, Paper, service
-from origamy.draw import TOWARD
+from origamy import Line, Paper, Point, service
+from origamy.draw import Eye
 from origamy.paper import RefusedError
 from origamy.shape import fold_angles
-from origamy.space import Form
+from origamy.space import Form, Shaped
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 SPINE = Line.through(("1/2", 0), ("1/2", 1))
@@ -106,6 +107,18 @@ def test_a_shape_step_needs_a_straight_hinge() -> None:
     assert caught.value.refusal.rule == "hinge-bent"
 
 
+def test_a_tilt_turns_the_whole_paper() -> None:
+    paper = Paper.square()
+    paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/2", "1/2"), angle=90)
+    form = paper.form
+    assert form is not None
+    assert form.point(0, Point.of((1, 1))) == pytest.approx((1, 0, 1))
+    assert paper.steps[-1].moved == {0}
+    with pytest.raises(RefusedError) as caught:
+        paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/2", 0), angle=90)
+    assert caught.value.refusal.rule == "flap-on-line"
+
+
 @pytest.fixture(scope="module")
 def plane(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The paper plane built, its last steps spreading its wings: its script."""
@@ -134,8 +147,10 @@ def test_a_build_exports_shaped_paper_in_3d(plane: Path) -> None:
 def test_pictures_draw_shaped_paper_in_space(
     plane: Path, colors: Callable[[Path], set[tuple[int, int, int]]]
 ) -> None:
+    folded = runpy.run_path(str(EXAMPLES / "paper_plane.py"))["fold"]()
+    eye = Eye.facing(Shaped(folded.state, folded.form))
     # The body stands upright, showing the eye its blue front, shaded as it turns away.
-    share = 1 - 0.3 * (1 - TOWARD[0])
+    share = 1 - 0.3 * (1 - abs(eye.toward[0]))
     shade = [c * share for c in (44, 111, 187)]
     assert any(
         all(abs(a - b) <= 2 for a, b in zip(color, shade, strict=True))
