@@ -2,7 +2,8 @@
 """Pictures of the paper as SVG: the crease pattern, the folded paper and an x-ray.
 
 Each view draws in exact coordinates turned into floats only here, with rulers along
-two sides so that a reader can take coordinates off the picture.
+two sides so that a reader can take coordinates off the picture. Shaped paper draws in
+space instead, seen tilted as the 3D viewer first shows it, nearer faces over farther.
 """
 
 from collections.abc import Iterable, Sequence
@@ -10,11 +11,16 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from graphlib import CycleError, TopologicalSorter
 from html import escape
-from math import ceil, floor, hypot
+from math import ceil, floor, hypot, sqrt
+from typing import Final
 
 from origamy.field import Number
-from origamy.geometry import Line, Point, bounds, center
+from origamy.geometry import Line, Point, bounds
+from origamy.space import Form, Shaped, Turn, Vector, apply
 from origamy.state import State
+
+type Flat = tuple[float, float]
+"""A point of a picture's plane, as floats."""
 
 MOUNTAIN = "#c0392b"
 VALLEY = "#2c6fbb"
@@ -38,7 +44,7 @@ class Canvas:
         x0, y0, x1, y1 = self.box
         return (self.size - 2 * self.margin) / max(x1 - x0, y1 - y0, 1e-9)
 
-    def xy(self, point: Point | tuple[float, float]) -> tuple[float, float]:
+    def xy(self, point: Point | Flat) -> Flat:
         """Where a point of the plane is in the picture."""
         x, y = point.floats() if isinstance(point, Point) else point
         x0, y0, x1, y1 = self.box
@@ -47,12 +53,12 @@ class Canvas:
         top = self.margin + ((span - (y1 - y0)) / 2) * self.scale
         return left + (x - x0) * self.scale, top + (y1 - y) * self.scale
 
-    def polygon(self, points: Sequence[Point], **style: str | float) -> None:
+    def polygon(self, points: Sequence[Point | Flat], **style: str | float) -> None:
         """Add a polygon."""
         corners = " ".join(f"{x:.2f},{y:.2f}" for x, y in map(self.xy, points))
         self.parts.append(f'<polygon points="{corners}" {_style(style)}/>')
 
-    def segment(self, a: Point, b: Point, **style: str | float) -> None:
+    def segment(self, a: Point | Flat, b: Point | Flat, **style: str | float) -> None:
         """Add a segment."""
         (ax, ay), (bx, by) = self.xy(a), self.xy(b)
         self.parts.append(
@@ -67,9 +73,7 @@ class Canvas:
             f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{radius}" {_style(style)}/>'
         )
 
-    def label(
-        self, point: Point | tuple[float, float], text: str, **style: str | float
-    ) -> None:
+    def label(self, point: Point | Flat, text: str, **style: str | float) -> None:
         """Add a label centered on a point."""
         x, y = self.xy(point)
         self.parts.append(
@@ -227,6 +231,200 @@ def xray_view(
     return canvas
 
 
+def _unit(vector: Vector) -> Vector:
+    length = sqrt(sum(c * c for c in vector))
+    return vector[0] / length, vector[1] / length, vector[2] / length
+
+
+def _dot(a: Vector, b: Vector) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+TOWARD: Final = _unit((0.35, -0.75, 0.75))
+"""The direction toward the eye in a picture of shaped paper, as the viewer's tilt."""
+_RIGHT: Final = _unit((-TOWARD[1], TOWARD[0], 0.0))
+_UP: Final = (
+    TOWARD[1] * _RIGHT[2] - TOWARD[2] * _RIGHT[1],
+    TOWARD[2] * _RIGHT[0] - TOWARD[0] * _RIGHT[2],
+    TOWARD[0] * _RIGHT[1] - TOWARD[1] * _RIGHT[0],
+)
+_GAP: Final = 0.002
+"""The height between layers in a picture of shaped paper, as a share of its unit."""
+_TINY: Final = 1e-9
+"""How small a length or area of a picture of shaped paper counts as none."""
+
+
+def project(point: Vector) -> Flat:
+    """Where a point of space lies in a picture of shaped paper."""
+    return _dot(point, _RIGHT), _dot(point, _UP)
+
+
+@dataclass(frozen=True, slots=True)
+class _Solid:
+    """A face of shaped paper in space, and its outline in the picture."""
+
+    corners: tuple[Vector, ...]
+    outline: tuple[Flat, ...]
+    normal: Vector
+    """The direction its front looks toward."""
+
+
+def _solids(paper: Shaped, unit: Number) -> list[_Solid]:
+    """Each face in space, lifted above the layers below it as it lay flat."""
+    state = paper.state
+    form = paper.form or Form.flat(len(state.faces))
+    gap = float(unit) * _GAP
+    solids = [_Solid((), (), (0.0, 0.0, 1.0))] * len(state.faces)
+    for height, face in enumerate(stacking(state)):
+        motion = form.motions[face]
+        corners = tuple(
+            apply(motion, (*p.floats(), height * gap)) for p in state.folded[face]
+        )
+        normal = form.normal(face, flipped=state.flips(face))
+        solids[face] = _Solid(corners, tuple(map(project, corners)), normal)
+    return solids
+
+
+def shaped_box(*papers: Shaped, unit: Number) -> tuple[float, float, float, float]:
+    """A box around the pictures of every shaped paper given."""
+    points = [p for paper in papers for s in _solids(paper, unit) for p in s.outline]
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def shaped_view(
+    paper: Shaped,
+    look: Look,
+    box: tuple[float, float, float, float],
+    marked: Iterable[int] = (),
+    size: int = 440,
+) -> Canvas:
+    """Shaped paper in space, each face in the color of the side it shows the eye."""
+    canvas = Canvas(box, size, 36)
+    solids = _solids(paper, look.unit)
+    for face in _far_to_near(solids):
+        solid = solids[face]
+        facing = _dot(solid.normal, TOWARD)
+        canvas.polygon(
+            solid.outline,
+            fill=look.front if facing > 0 else look.back,
+            stroke=INK,
+            **{"stroke-width": 0.9, "stroke-linejoin": "round"},
+        )
+        canvas.polygon(
+            solid.outline,
+            fill="#000",
+            stroke="none",
+            **{"fill-opacity": f"{0.3 * (1 - abs(facing)):.3f}"},
+        )
+    _mark_faces(canvas, [s.outline for s in solids], marked)
+    return canvas
+
+
+def axis(turn: Turn, reach: float) -> tuple[Flat, Flat]:
+    """The axis of a turn in a picture of shaped paper, ``reach`` each way."""
+    ends = (
+        tuple(
+            c + sense * reach * d
+            for c, d in zip(turn.point, turn.direction, strict=True)
+        )
+        for sense in (-1, 1)
+    )
+    first, last = (project((e[0], e[1], e[2])) for e in ends)
+    return first, last
+
+
+def _far_to_near(solids: Sequence[_Solid]) -> list[int]:
+    """An order to paint faces in: each after every face it hides part of."""
+    behind: dict[int, set[int]] = {f: set() for f in range(len(solids))}
+    for f, g in _pairs(solids):
+        point = _common(solids[f].outline, solids[g].outline)
+        if point is None:
+            continue
+        first, second = _depth(solids[f], point), _depth(solids[g], point)
+        if first is not None and second is not None and first != second:
+            nearer, farther = (f, g) if first > second else (g, f)
+            behind[nearer].add(farther)
+    try:
+        return list(TopologicalSorter(behind).static_order())
+    except CycleError:
+        return sorted(
+            behind,
+            key=lambda f: (
+                sum(_dot(c, TOWARD) for c in solids[f].corners) / len(solids[f].corners)
+            ),
+        )
+
+
+def _pairs(solids: Sequence[_Solid]) -> Iterable[tuple[int, int]]:
+    """The pairs of faces whose outlines' boxes overlap."""
+    boxes = [
+        (
+            min(x for x, _ in s.outline),
+            min(y for _, y in s.outline),
+            max(x for x, _ in s.outline),
+            max(y for _, y in s.outline),
+        )
+        for s in solids
+    ]
+    for f, a in enumerate(boxes):
+        for g in range(f + 1, len(boxes)):
+            b = boxes[g]
+            if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]:
+                yield f, g
+
+
+def _common(first: Sequence[Flat], second: Sequence[Flat]) -> Flat | None:
+    """A point inside both convex outlines, or None where they barely touch."""
+    clipped = list(first)
+    turning = 1 if _area(second) > 0 else -1
+    for a, b in zip(second, (*second[1:], second[0]), strict=True):
+        kept: list[Flat] = []
+        for p, q in zip(clipped, (*clipped[1:], clipped[0]), strict=True):
+            sp, sq = turning * _cross(a, b, p), turning * _cross(a, b, q)
+            if sp >= 0:
+                kept.append(p)
+            if (sp >= 0) != (sq >= 0):
+                share = sp / (sp - sq)
+                kept.append(
+                    (p[0] + share * (q[0] - p[0]), p[1] + share * (q[1] - p[1]))
+                )
+        clipped = kept
+        if not clipped:
+            return None
+    if abs(_area(clipped)) < _TINY:
+        return None
+    return (
+        sum(x for x, _ in clipped) / len(clipped),
+        sum(y for _, y in clipped) / len(clipped),
+    )
+
+
+def _cross(a: Flat, b: Flat, p: Flat) -> float:
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def _area(polygon: Sequence[Flat]) -> float:
+    return (
+        sum(
+            p[0] * q[1] - q[0] * p[1]
+            for p, q in zip(polygon, (*polygon[1:], polygon[0]), strict=True)
+        )
+        / 2
+    )
+
+
+def _depth(solid: _Solid, point: Flat) -> float | None:
+    """How near the eye a face lies behind a point of the picture, or None edge on."""
+    normal, origin = solid.normal, solid.corners[0]
+    facing = _dot(normal, TOWARD)
+    if abs(facing) < _TINY:
+        return None
+    on = tuple(point[0] * r + point[1] * u for r, u in zip(_RIGHT, _UP, strict=True))
+    shift = (origin[0] - on[0], origin[1] - on[1], origin[2] - on[2])
+    return _dot(normal, shift) / facing
+
+
 def folded_box(*states: State) -> tuple[float, float, float, float]:
     """A box around the folded paper of every state given."""
     x0, y0, x1, y1 = bounds(
@@ -236,13 +434,17 @@ def folded_box(*states: State) -> tuple[float, float, float, float]:
 
 
 def _mark_faces(
-    canvas: Canvas, polygons: Sequence[Sequence[Point]], marked: Iterable[int]
+    canvas: Canvas, polygons: Sequence[Sequence[Point | Flat]], marked: Iterable[int]
 ) -> None:
     for face in marked:
         polygon = polygons[face]
         canvas.polygon(polygon, fill="none", stroke=MARK, **{"stroke-width": 2.2})
+        points = [p.floats() if isinstance(p, Point) else p for p in polygon]
         canvas.label(
-            center(polygon),
+            (
+                sum(x for x, _ in points) / len(points),
+                sum(y for _, y in points) / len(points),
+            ),
             str(face),
             fill=MARK,
             **{"font-size": 12, "font-weight": 700},

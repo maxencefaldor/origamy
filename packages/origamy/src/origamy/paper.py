@@ -387,6 +387,7 @@ class Paper:
                 source,
                 tuple(diagnostics),
                 error.diagnostic,
+                self.form.carried(before, error.state) if self.form else None,
             )
             raise RefusedError(self, refused, error.diagnostic) from None
         self.steps.append(

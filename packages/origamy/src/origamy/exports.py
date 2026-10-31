@@ -5,20 +5,23 @@ FOLD 1.2 (https://edemaine.github.io/fold/doc/spec.html) stores coordinates as f
 The file holds the last crease pattern at the top level, then one folded form per step
 in ``file_frames``. Exact coordinates ride along as ``origamy:vertices_exact``, as
 `Number.data` writes them, with the radicands of their tower in ``origamy:tower``.
+Every crease has its fold angle, and a shaped step's folded form lies in 3D.
 """
 
 from typing import Any
 
+from origamy.paper import Step
 from origamy.result import BuildResult
-from origamy.state import State
+from origamy.shape import fold_angles
+from origamy.space import Form
 
 type FoldFile = dict[str, Any]
 
 
 def to_fold(result: BuildResult, title: str) -> FoldFile:
     """The FOLD file of a build's steps."""
-    states = [data.state.state() for data in result.steps]
-    last = states[-1]
+    steps = [data.step() for data in result.steps]
+    last = steps[-1]
     document: FoldFile = {
         "file_spec": 1.2,
         "file_creator": "origamy",
@@ -30,34 +33,37 @@ def to_fold(result: BuildResult, title: str) -> FoldFile:
         **_pattern(last),
         "file_frames": [
             {
-                "frame_title": data.description,
+                "frame_title": step.description,
                 "frame_classes": ["foldedForm"],
-                "frame_attributes": ["2D"],
-                **_folded(state),
+                "frame_attributes": ["2D" if step.form is None else "3D"],
+                **_folded(step),
             }
-            for data, state in zip(result.steps, states, strict=True)
+            for step in steps
         ],
     }
     return document
 
 
-def _pattern(state: State) -> FoldFile:
+def _pattern(step: Step) -> FoldFile:
+    state = step.state
     return {
         "vertices_coords": [p.floats() for p in state.vertices],
         "origamy:vertices_exact": [[p.x.data(), p.y.data()] for p in state.vertices],
-        **_topology(state),
+        **_topology(step),
     }
 
 
-def _folded(state: State) -> FoldFile:
-    places: list[tuple[float, float]] = [(0.0, 0.0)] * len(state.vertices)
-    for face in state.faces:
+def _folded(step: Step) -> FoldFile:
+    state, form = step.state, step.form
+    places: list[tuple[float, ...]] = [()] * len(state.vertices)
+    for f, face in enumerate(state.faces):
         for vertex in face.corners:
-            places[vertex] = face.place(state.vertices[vertex]).floats()
+            folded = state.folded_point(f, vertex)
+            places[vertex] = folded.floats() if form is None else form.point(f, folded)
     flips = [state.flips(f) for f in range(len(state.faces))]
     return {
         "vertices_coords": places,
-        **_topology(state),
+        **_topology(step),
         # +1 puts f above g along g's normal, which points down when g shows its back.
         "faceOrders": [
             [upper, lower, -1 if flips[lower] else 1]
@@ -66,10 +72,13 @@ def _folded(state: State) -> FoldFile:
     }
 
 
-def _topology(state: State) -> FoldFile:
+def _topology(step: Step) -> FoldFile:
+    state = step.state
     edges = sorted(state.edges)
+    angles = fold_angles(state, step.form or Form.flat(len(state.faces)))
     return {
         "edges_vertices": [list(edge) for edge in edges],
         "edges_assignment": [state.assignment(edge) for edge in edges],
+        "edges_foldAngle": [round(angles.get(edge, 0.0), 9) + 0.0 for edge in edges],
         "faces_vertices": [list(face.corners) for face in state.faces],
     }

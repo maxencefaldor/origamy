@@ -1,13 +1,21 @@
 # Copyright 2026 Maxence Faldor
+import asyncio
+import json
+import re
+import shutil
+from collections.abc import Callable
 from math import isclose
+from pathlib import Path
 
 import pytest
 
-from origamy import Line, Paper
+from origamy import Line, Paper, service
+from origamy.draw import TOWARD
 from origamy.paper import RefusedError
 from origamy.shape import fold_angles
 from origamy.space import Form
 
+EXAMPLES = Path(__file__).parents[3] / "examples"
 SPINE = Line.through(("1/2", 0), ("1/2", 1))
 MIDDLE = Line.through((0, "1/2"), (1, "1/2"))
 
@@ -96,3 +104,40 @@ def test_a_shape_step_needs_a_straight_hinge() -> None:
     with pytest.raises(RefusedError) as caught:
         paper.shape(MIDDLE, flap=("1/4", "3/4"), angle=90, layers=2)
     assert caught.value.refusal.rule == "hinge-bent"
+
+
+@pytest.fixture(scope="module")
+def plane(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The paper plane built, its last steps spreading its wings: its script."""
+    folder = tmp_path_factory.mktemp("plane")
+    script = Path(shutil.copy(EXAMPLES / "paper_plane.py", folder))
+    report = asyncio.run(service.build(service.BuildRequest(script=script)))
+    assert report.ok, report.text
+    return script
+
+
+def test_a_build_exports_shaped_paper_in_3d(plane: Path) -> None:
+    document = json.loads(plane.with_suffix(".fold").read_text(encoding="utf-8"))
+    last = document["file_frames"][-1]
+    assert last["frame_attributes"] == ["3D"]
+    assert min(z for _, _, z in last["vertices_coords"]) < -0.2
+    assert {round(a) for a in last["edges_foldAngle"]} >= {90, -90}
+    assert document["file_frames"][0]["frame_attributes"] == ["2D"]
+    page = plane.with_suffix(".html").read_text(encoding="utf-8")
+    found = re.search(r'id="build">(.*?)</script>', page, re.DOTALL)
+    assert found is not None
+    shaped = [s for s in json.loads(found.group(1))["steps"] if s["action"] == "shape"]
+    assert len(shaped) == 2
+    assert all(s["turn"] is not None and s["motions"] for s in shaped)
+
+
+def test_pictures_draw_shaped_paper_in_space(
+    plane: Path, colors: Callable[[Path], set[tuple[int, int, int]]]
+) -> None:
+    # The body stands upright, showing the eye its blue front, shaded as it turns away.
+    share = 1 - 0.3 * (1 - TOWARD[0])
+    shade = [c * share for c in (44, 111, 187)]
+    assert any(
+        all(abs(a - b) <= 2 for a, b in zip(color, shade, strict=True))
+        for color in colors(plane.with_suffix(".png"))
+    )

@@ -16,6 +16,7 @@ from origamy.geometry import Isometry, Line, Point
 from origamy.paper import Paper, Step
 from origamy.provenance import Frame, Source
 from origamy.rules import Diagnostic, Level
+from origamy.space import Form, Turn, Vector
 from origamy.state import Face, State
 
 
@@ -100,6 +101,14 @@ class DiagnosticData(_Data):
         return Diagnostic(self.rule, self.level, self.message, self.faces)
 
 
+class TurnData(_Data):
+    """A rotation in space about an axis."""
+
+    point: Vector = Field(description="A point of the axis: the middle of the hinge.")
+    direction: Vector = Field(description="The axis, as a unit vector.")
+    angle: float = Field(description="The rotation in radians, counterclockwise.")
+
+
 class StepData(_Data):
     """One action and the paper after it, or the paper a refused action began on."""
 
@@ -114,6 +123,14 @@ class StepData(_Data):
     source: Source | None = None
     diagnostics: tuple[DiagnosticData, ...] = ()
     refusal: DiagnosticData | None = None
+    form: tuple[tuple[float, ...], ...] | None = Field(
+        default=None,
+        description="Each face's rigid motion in space from where it lies flat, once "
+        "shaping turns the paper: a 3 by 3 rotation, row by row, then a shift.",
+    )
+    turn: TurnData | None = Field(
+        default=None, description="The turn in space a shape or turn over step makes."
+    )
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -133,6 +150,16 @@ class StepData(_Data):
             source=step.source.relative_to(root) if step.source else None,
             diagnostics=tuple(DiagnosticData.of(d) for d in step.diagnostics),
             refusal=DiagnosticData.of(step.refusal) if step.refusal else None,
+            form=step.form.motions if step.form else None,
+            turn=(
+                TurnData(
+                    point=step.turn.point,
+                    direction=step.turn.direction,
+                    angle=step.turn.angle,
+                )
+                if step.turn
+                else None
+            ),
         )
 
     def step(self) -> Step:
@@ -152,6 +179,10 @@ class StepData(_Data):
             self.source,
             tuple(d.diagnostic() for d in self.diagnostics),
             self.refusal.diagnostic() if self.refusal else None,
+            Form(self.form) if self.form is not None else None,
+            Turn(self.turn.point, self.turn.direction, self.turn.angle)
+            if self.turn
+            else None,
         )
 
 

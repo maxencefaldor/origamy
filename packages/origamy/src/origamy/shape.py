@@ -12,7 +12,7 @@ from math import acos, degrees, radians, sqrt
 
 from origamy import actions
 from origamy.actions import Outcome, grab
-from origamy.geometry import Line, Point, bounds, center, covers
+from origamy.geometry import Line, Point, bounds, center
 from origamy.rules import RefusalError
 from origamy.space import Form, Motion, Shaped, Turn, apply, compose, rotate, same
 from origamy.state import Edge, State
@@ -32,7 +32,7 @@ def shape(
     """
     cut, moved, hinges = grab(paper.state, line, flap, layers, unfolding=False)
     form = paper.form or Form.flat(len(paper.state.faces))
-    motions = tuple(form.motions[f] for f in _parents(paper.state, cut))
+    motions = form.carried(paper.state, cut).motions
     hinge = motions[hinges[0][1]]
     bent = sorted({s for _, s, _ in hinges if not same(motions[s], hinge)})
     if bent:
@@ -56,7 +56,8 @@ def shape(
         raise RefusalError(
             msg, rule="turns-through-paper", faces=tuple(blocked), state=cut
         )
-    turn = _turn(line, line.side(flap), hinge, radians(angle))
+    ends = [cut.folded_point(stay, v) for _, stay, edge in hinges for v in edge]
+    turn = _turn(line, line.side(flap), hinge, radians(angle), ends)
     rotation = turn.motion()
     turned = tuple(
         compose(motion, rotation) if face in moved else motion
@@ -101,21 +102,20 @@ def fold_angles(state: State, form: Form) -> dict[Edge, float]:
     return angles
 
 
-def _turn(line: Line, side: int, hinge: Motion, angle: float) -> Turn:
-    """The turn about a line that lifts its side ``side`` up by ``angle`` radians."""
+def _turn(
+    line: Line, side: int, hinge: Motion, angle: float, ends: list[Point]
+) -> Turn:
+    """The turn about a hinge that lifts the side ``side`` of a line up by ``angle``.
+
+    The turn's point is the middle of the hinge, which ``ends`` spans along the line.
+    """
     nx, ny = float(line.normal.x) * side, float(line.normal.y) * side
     length = sqrt(nx * nx + ny * ny)
-    axis = rotate(hinge, (ny / length, -nx / length, 0.0))
-    point = line.point
-    return Turn(apply(hinge, (float(point.x), float(point.y), 0.0)), axis, angle)
-
-
-def _parents(before: State, after: State) -> list[int]:
-    """The face of ``before`` that holds each face of ``after``."""
-    return [
-        next(f for f, pattern in enumerate(before.patterns) if covers(pattern, inner))
-        for inner in (center(polygon) for polygon in after.patterns)
-    ]
+    ux, uy = ny / length, -nx / length
+    along = sorted(ends, key=lambda p: float(p.x) * ux + float(p.y) * uy)
+    first, last = along[0].floats(), along[-1].floats()
+    middle = ((first[0] + last[0]) / 2, (first[1] + last[1]) / 2, 0.0)
+    return Turn(apply(hinge, middle), rotate(hinge, (ux, uy, 0.0)), angle)
 
 
 def _ids(faces: list[int]) -> str:

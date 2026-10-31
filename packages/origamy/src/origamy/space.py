@@ -66,6 +66,10 @@ class Form:
         """The form of paper that lies flat."""
         return cls((STILL,) * faces)
 
+    def carried(self, state: State, later: State) -> Form:
+        """The form of a later state, whose faces lie where their parents lie."""
+        return Form(tuple(self.motions[p] for p in state.parents(later)))
+
     def point(self, face: int, point: Point) -> Vector:
         """Where a point of a face, as it lies flat, lies in space."""
         return apply(self.motions[face], (float(point.x), float(point.y), 0.0))

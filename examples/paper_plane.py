@@ -5,7 +5,7 @@ from origamy import Line, Paper, Point, bisect, fold_onto, meet, midpoint
 
 
 def fold() -> Paper:
-    """Fold the top corners to the keel twice, halve it, then fold both wings down."""
+    """Fold the corners to the keel twice, halve it, then fold and spread the wings."""
     paper = Paper(1, "√2", front="#2c6fbb", back="#eef3fa")
     nose, tail = ("1/2", "√2"), ("1/2", 0)
     keel = Line.through(nose, tail)
@@ -31,4 +31,15 @@ def fold() -> Paper:
         flap += Point.of((0, "1/16"))
         paper.valley(wing, flap=flap, layers=1)
         paper.turn_over()
+    # Hold the plane by one wing and spread it: the body turns down to a right angle,
+    # then the other wing turns level. The wing creases halve the paper between each
+    # tail corner and the keel's foot.
+    paper.turn_over()
+    for crease, flap, layers in (
+        (("1/4"), ("3/8", "1/8"), 3),
+        ("3/4", ("7/8", "1/8"), 1),
+    ):
+        line = Line.through(paper.where((crease, 0)), paper.where((crease, "1/2")))
+        paper.shape(line, flap=paper.where(flap), angle=90, layers=layers)
+    paper.turn_over()
     return paper

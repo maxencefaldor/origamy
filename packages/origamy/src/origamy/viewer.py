@@ -5,6 +5,8 @@ The page holds the build as data, the viewer's module and its styles, and loads
 three.js from jsDelivr, so it stays small and needs a network connection when opened.
 Each step carries every face's place before and after it, so the viewer animates the
 move: a face that turns over makes a half turn about its axis, and the rest glide.
+Once shaping turns the paper out of the plane, each step also carries every face's
+motion in space, and the turn its moving faces make.
 """
 
 import base64
@@ -17,7 +19,7 @@ from string import Template
 from typing import Any, Final
 
 from origamy.draw import across, folded_box, stacking
-from origamy.geometry import Isometry, Line, Point, center, covers
+from origamy.geometry import Isometry, Line
 from origamy.paper import Step
 from origamy.result import BuildResult
 from origamy.state import State
@@ -101,11 +103,14 @@ def _step(step: Step, previous: Step | None) -> Data:
     state = step.state
     order = _order(state)
     before, order_before = [_floats(f.place) for f in state.faces], order
+    form_before = step.form
     if previous is not None:
-        parents = [_parent(previous.state, polygon) for polygon in state.patterns]
+        parents = previous.state.parents(state)
         old = _order(previous.state)
         before = [_floats(previous.state.faces[p].place) for p in parents]
         order_before = [old[p] for p in parents]
+        form_before = previous.form and previous.form.carried(previous.state, state)
+    turn = step.turn
     source = str(step.source.site) if step.source else None
     return {
         "action": step.action,
@@ -117,6 +122,13 @@ def _step(step: Step, previous: Step | None) -> Data:
         "order": order,
         "before": before,
         "orderBefore": order_before,
+        "motions": step.form.motions if step.form else None,
+        "motionsBefore": form_before.motions if form_before else None,
+        "turn": (
+            {"point": turn.point, "direction": turn.direction, "angle": turn.angle}
+            if turn
+            else None
+        ),
         "edges": [[u, v, state.assignment((u, v))] for u, v in sorted(state.edges)],
         "moved": sorted(step.moved),
         "line": _segment(step.line, state) if step.line else None,
@@ -139,12 +151,6 @@ def _order(state: State) -> list[int]:
     for index, face in enumerate(stacking(state)):
         order[face] = index
     return order
-
-
-def _parent(state: State, polygon: tuple[Point, ...]) -> int:
-    """The face of an earlier state that holds a polygon of the crease pattern."""
-    inner = center(polygon)
-    return next(f for f, pattern in enumerate(state.patterns) if covers(pattern, inner))
 
 
 def _segment(line: Line, state: State) -> tuple[tuple[float, float], ...]:

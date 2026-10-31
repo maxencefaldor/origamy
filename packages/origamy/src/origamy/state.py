@@ -11,7 +11,16 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from origamy.geometry import IDENTITY, Isometry, Line, Point, Polygon, overlaps
+from origamy.geometry import (
+    IDENTITY,
+    Isometry,
+    Line,
+    Point,
+    Polygon,
+    center,
+    covers,
+    overlaps,
+)
 
 type Pair = tuple[int, int]
 """Two faces, the upper first: ``(upper, lower)``."""
@@ -107,6 +116,18 @@ class State:
         return faces is not None and (
             self.faces[faces[0]].place != self.faces[faces[1]].place
         )
+
+    def parents(self, later: State) -> list[int]:
+        """The face of this state that holds each face of a later state.
+
+        Actions only ever cut faces, so each face of a later crease pattern lies inside
+        exactly one face of an earlier one.
+        """
+        inners = [center(polygon) for polygon in later.patterns]
+        return [
+            next(f for f, pattern in enumerate(self.patterns) if covers(pattern, inner))
+            for inner in inners
+        ]
 
     def flips(self, face: int) -> bool:
         """Whether a face shows the paper's back."""

@@ -4,6 +4,8 @@
 // Each step holds every face's place before and after it, as 2D isometries. A face
 // whose move turns it over makes a half turn about the move's axis, lifted toward the
 // side it lands on; any other face glides. Layers sit a small gap apart, in stacking order.
+// Once shaping turns the paper out of the plane, each face also has a rigid motion in
+// space, and a step that turns paper in space rotates its moving faces about the turn's axis.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -141,6 +143,27 @@ const compose = (a, b) => [
   a[0] * b[4] + a[1] * b[5] + a[4], a[2] * b[4] + a[3] * b[5] + a[5],
 ];
 
+// Rigid motions of space as a 3 by 3 rotation, row by row, then a shift.
+const STILL = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+const move = (m, [x, y, z]) => [
+  m[0] * x + m[1] * y + m[2] * z + m[9],
+  m[3] * x + m[4] * y + m[5] * z + m[10],
+  m[6] * x + m[7] * y + m[8] * z + m[11],
+];
+
+/** A share of a turn about an axis, as a rigid motion. */
+function rotation({ point, direction: [x, y, z], angle }, share) {
+  const [c, s] = [Math.cos(angle * share), Math.sin(angle * share)];
+  const k = 1 - c;
+  const r = [
+    k * x * x + c, k * x * y - s * z, k * x * z + s * y,
+    k * x * y + s * z, k * y * y + c, k * y * z - s * x,
+    k * x * z - s * y, k * y * z + s * x, k * z * z + c,
+  ];
+  const moved = move([...r, 0, 0, 0], point);
+  return [...r, point[0] - moved[0], point[1] - moved[1], point[2] - moved[2]];
+}
+
 /** Where a face's corners are, in 3D, at a share `t` of its move. */
 function motion(step, face, t, size, together) {
   const corners = step.faces[face].map((v) => step.vertices[v]);
@@ -148,7 +171,27 @@ function motion(step, face, t, size, together) {
   const after = step.places[face];
   const z0 = step.orderBefore[face] * GAP * size;
   const z1 = step.order[face] * GAP * size;
-  const z = z0 + (z1 - z0) * t;
+  if (step.turn) return turning(step, face, corners, t, z0, z1);
+  const shaped = step.motions?.[face] ?? STILL;
+  return flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
+}
+
+/** A face of paper that turns in space: about the turn's axis when it moves. */
+function turning(step, face, corners, t, z0, z1) {
+  const lift = (place, z, shaped) => corners.map(([x, y]) => move(shaped, [...apply(place, [x, y]), z]));
+  const start = lift(step.before[face], z0, step.motionsBefore?.[face] ?? STILL);
+  const end = lift(step.places[face], z1, step.motions[face]);
+  if (!step.moved.includes(face)) return start.map((p, i) => p.map((c, k) => c + (end[i][k] - c) * t));
+  const [now, whole] = [rotation(step.turn, t), rotation(step.turn, 1)];
+  // The turn takes the face to its end, but for the gap between layers, which closes as it goes.
+  return start.map((p, i) => {
+    const [turned, landed] = [move(now, p), move(whole, p)];
+    return turned.map((c, k) => c + (end[i][k] - landed[k]) * t);
+  });
+}
+
+/** A face of paper that lies flat, at height `z`. */
+function flat(step, face, corners, before, after, t, z, together) {
   const delta = compose(after, inverse(before));
   const starts = corners.map((p) => apply(before, p));
   const [a, b, c, d, tx, ty] = delta;
@@ -271,10 +314,14 @@ class Stage {
     if (step.line) {
       const [[x0, y0], [x1, y1]] = step.line;
       const top = (Math.max(...step.order) + 2) * GAP * this.size;
-      const geometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x0, y0, top),
-        new THREE.Vector3(x1, y1, top),
-      ]);
+      let ends = [[x0, y0, top], [x1, y1, top]];
+      if (step.turn) {
+        // A turn in space draws its axis, as long as the line across the paper.
+        const { point: p, direction: d } = step.turn;
+        const half = Math.hypot(x1 - x0, y1 - y0) / 2;
+        ends = [-1, 1].map((s) => p.map((c, k) => c + s * half * d[k]));
+      }
+      const geometry = new THREE.BufferGeometry().setFromPoints(ends.map((e) => new THREE.Vector3(...e)));
       this.line = new THREE.Line(geometry, step.refused ? this.materials.refused : this.materials.fold);
       this.line.computeLineDistances();
       this.scene.add(this.line);

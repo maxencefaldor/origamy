@@ -19,6 +19,12 @@ THREE = Path(str(files("origamy").joinpath("assets", "three")))
 
 type Colors = Callable[[Path], set[tuple[int, int, int]]]
 
+HEIGHTS = """(() => {
+  const heights = window.origamy.stage.faces.flatMap((face) =>
+    Array.from(face.geometry.attributes.position.array).filter((_, i) => i % 3 === 2));
+  return [Math.min(...heights), Math.max(...heights)];
+})()"""
+
 
 def viewer(tmp_path: Path, example: str) -> Path:
     script = Path(shutil.copy(EXAMPLES / f"{example}.py", tmp_path))
@@ -50,14 +56,27 @@ def test_the_viewer_replays_every_step_in_chromium(
 ) -> None:
     page = viewer(tmp_path, "bird_base")
     shot = tmp_path / "viewer.png"
-    errors = asyncio.run(replay(page, shot))
+    errors, heights = asyncio.run(replay(page, shot))
     assert errors == []
+    assert heights[1] - heights[0] < 0.05
     # The paper's front, lit and shaded: red well above green and blue.
     assert any(r > g + 50 and r > b + 50 for r, g, b in colors(shot))
 
 
-async def replay(page: Path, shot: Path) -> list[str]:
-    """Open the viewer, step through every step with its motion, and screenshot it."""
+def test_the_viewer_turns_shaped_paper_in_space(tmp_path: Path) -> None:
+    page = viewer(tmp_path, "paper_plane")
+    errors, (low, high) = asyncio.run(replay(page, tmp_path / "viewer.png"))
+    assert errors == []
+    # The plane's body hangs a quarter of its width below its level wings.
+    assert low < -0.2
+    assert high < 0.05
+
+
+async def replay(page: Path, shot: Path) -> tuple[list[str], tuple[float, float]]:
+    """Open the viewer, step through every step with its motion, and screenshot it.
+
+    Returns the page's errors, and the paper's lowest and highest heights at the end.
+    """
     errors: list[str] = []
 
     async def serve(route: Route) -> None:
@@ -79,5 +98,6 @@ async def replay(page: Path, shot: Path) -> list[str]:
             await tab.wait_for_timeout(120)
         await tab.wait_for_timeout(1500)
         await tab.screenshot(path=shot)
+        heights = await tab.evaluate(HEIGHTS)
         await browser.close()
-    return errors
+    return errors, (float(heights[0]), float(heights[1]))
