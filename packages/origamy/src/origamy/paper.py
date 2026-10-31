@@ -7,8 +7,10 @@ Unfolded, the paper covers the rectangle from (0, 0) to (width, height), its fro
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from fractions import Fraction
 
 from origamy import actions, moves
+from origamy import shape as shaping
 from origamy.actions import Outcome, Sense
 from origamy.checks import is_referenced, where
 from origamy.errors import OrigamyError
@@ -16,6 +18,7 @@ from origamy.field import Exact, Number
 from origamy.geometry import Line, Point, PointLike
 from origamy.provenance import Source, capture
 from origamy.rules import Diagnostic, RefusalError
+from origamy.space import Form, Shaped, Turn
 from origamy.state import Edge, State
 
 DEFAULT_FRONT = "#c8553d"
@@ -47,6 +50,10 @@ class Step:
     """The facts the step states, besides any refusal."""
     refusal: Diagnostic | None = None
     """The fact that refused the action, for a refused action."""
+    form: Form | None = None
+    """The paper's form in space once shaping turns it; None while it lies flat."""
+    turn: Turn | None = None
+    """The turn the step makes in space, when it shapes or turns shaped paper over."""
 
 
 type CreaseLike = Line | tuple[PointLike, PointLike]
@@ -119,8 +126,13 @@ class Paper:
 
     @property
     def state(self) -> State:
-        """The paper now."""
+        """The paper now, as it lies flat."""
         return self.steps[-1].state
+
+    @property
+    def form(self) -> Form | None:
+        """The paper's form in space, once shaping turns it; None while it lies flat."""
+        return self.steps[-1].form
 
     def valley(self, line: Line, flap: PointLike, *, layers: int | None = None) -> None:
         """Valley fold: turn the paper at ``flap`` over ``line``, onto the paper above.
@@ -150,7 +162,7 @@ class Paper:
         self._act(
             "unfold",
             f"unfold along {line}, the paper at {point}",
-            lambda state: actions.unfold(state, line, point, layers),
+            _flat(lambda state: actions.unfold(state, line, point, layers)),
             line,
             point,
         )
@@ -172,7 +184,7 @@ class Paper:
         self._act(
             "precrease",
             f"precrease along {line} with a {sense} fold, the paper at {point}",
-            lambda state: actions.precrease(state, line, point, layers, sense),
+            _flat(lambda state: actions.precrease(state, line, point, layers, sense)),
             line,
             point,
         )
@@ -196,7 +208,9 @@ class Paper:
         self._act(
             "reverse",
             f"{kind} reverse fold along {line}, the paper at {point}",
-            lambda state: moves.reverse(state, line, point, layers, outside=outside),
+            _flat(
+                lambda state: moves.reverse(state, line, point, layers, outside=outside)
+            ),
             line,
             point,
         )
@@ -211,7 +225,7 @@ class Paper:
         self._act(
             "petal",
             f"petal fold along {line}, the paper at {point}",
-            lambda state: moves.petal(state, line, point),
+            _flat(lambda state: moves.petal(state, line, point)),
             line,
             point,
         )
@@ -261,12 +275,33 @@ class Paper:
             "collapse",
             f"collapse {counts['V']} valleys, {counts['M']} mountains and "
             f"{counts['F']} flat creases",
-            act,
+            _flat(act),
+        )
+
+    def shape(
+        self, line: Line, flap: PointLike, *, angle: Exact, layers: int | None = None
+    ) -> None:
+        """Turn the paper at ``flap`` about ``line`` by ``angle`` degrees, in space.
+
+        Shaping opens folds part of the way, as the last steps of a model do. A positive
+        angle turns the paper up, toward the viewer, and a negative one turns it down.
+        The paper turns as one piece about its hinge, taken as `valley` takes it, and
+        lines and points read in the paper as it lies flat. Once shaped, the paper
+        takes no more folds; it still turns over and takes more shaping.
+        """
+        point = Point.of(flap)
+        turn = Fraction(Number.of(angle).fraction())
+        self._act(
+            "shape",
+            f"shape: turn the paper at {point} about {line} by {turn}°",
+            lambda paper: shaping.shape(paper, line, point, layers, turn),
+            line,
+            point,
         )
 
     def turn_over(self) -> None:
         """Turn the paper over, from left to right."""
-        self._act("turn-over", "turn over", actions.turn_over)
+        self._act("turn-over", "turn over", shaping.turn_over)
 
     def layers(self, at: PointLike) -> int:
         """How many layers of paper lie at a point."""
@@ -320,7 +355,7 @@ class Paper:
         self._act(
             sense.value,
             f"{sense} fold along {line}, the paper at {point}{taken}",
-            lambda state: actions.fold(state, line, point, layers, sense),
+            _flat(lambda state: actions.fold(state, line, point, layers, sense)),
             line,
             point,
         )
@@ -329,7 +364,7 @@ class Paper:
         self,
         action: str,
         description: str,
-        act: Callable[[State], Outcome],
+        act: Callable[[Shaped], Outcome],
         line: Line | None = None,
         flap: Point | None = None,
     ) -> None:
@@ -340,7 +375,7 @@ class Paper:
             message = f"no point or line on the paper locates the fold line {line}"
             diagnostics.append(Diagnostic.of("unreferenced-fold", message))
         try:
-            outcome = act(before)
+            outcome = act(Shaped(before, self.form))
         except RefusalError as error:
             refused = Step(
                 action,
@@ -364,5 +399,19 @@ class Paper:
                 flap,
                 source,
                 tuple(diagnostics),
+                form=outcome.form,
+                turn=outcome.turn,
             )
         )
+
+
+def _flat(act: Callable[[State], Outcome]) -> Callable[[Shaped], Outcome]:
+    """An action that folds flat paper, refused once shaping has turned the paper."""
+
+    def on(paper: Shaped) -> Outcome:
+        if paper.form is not None:
+            msg = "shaping has turned the paper out of the plane, so it takes no fold"
+            raise RefusalError(msg, rule="not-flat", state=paper.state)
+        return act(paper.state)
+
+    return on

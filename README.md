@@ -125,6 +125,9 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
 | `layer-crossing` | error | No stacking of the faces keeps paper from passing through paper |
 | `layer-order-unknown` | error | The layer solver stopped before finding a stacking |
+| `not-flat` | error | The action folds paper that shaping has turned out of the plane |
+| `hinge-bent` | error | The hinge of a shape step runs through paper turned apart before |
+| `turns-through-paper` | error | A shape step turns paper through paper that stays |
 | `unreferenced-fold` | warn | No point or line already on the paper locates the fold line |
 
 ## How it works

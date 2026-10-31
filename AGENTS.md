@@ -28,11 +28,11 @@ Each module imports only from the modules listed before it:
 
 1. `errors`: the errors front ends show as messages.
 1. `field`, `geometry`, `constructions`: exact numbers in a tower of square roots, points, lines, isometries and convex polygons, and the Huzita-Justin constructions.
-1. `state`: the crease pattern, each face's place, and the stacking.
+1. `state`, `space`: the crease pattern, each face's place, and the stacking; and the form shaping gives paper in space.
 1. `layers`: the layer solver's constraints, propagation and search.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
 1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
-1. `moves`: named moves, such as reverse and petal folds, each computing its creases and collapsing.
+1. `moves`, `shape`: named moves, such as reverse and petal folds, each computing its creases and collapsing; and shape steps.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
 1. `draw`, `render`, `exports`, `viewer`: SVG views, PNG pictures through Chromium, FOLD files, and the standalone 3D viewer.
@@ -51,6 +51,7 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
 - **Exactness:** every coordinate is a `Number`, and every decision is exact.
   A float estimate carries an error bound and decides a sign only where the bound leaves it clear.
   Floats otherwise appear only in what people read: pictures, the viewer, FOLD files and the angles a message states.
+  The form is the one exception: shaping turns paper by any angle, so a form is floats, and its checks compare motions within a tolerance.
   A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact; a build carries its tower in its data.
 - **Store once:** a state stores its vertices, faces with their places, and the stacking.
   Whether a crease is folded, and its mountain or valley assignment, derive from them.
@@ -86,6 +87,8 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | flap point | The point at which an action takes the paper to move |
 | hinge | A crease along the fold line between paper that moves and paper that stays |
 | collapse | An action that folds, unfolds or reverses many creases at once |
+| shape step | An action that turns folded paper out of the plane about a hinge, by an angle |
+| form | Where each face lies in space once shaping turns it: a rigid motion of its place |
 | named move | A collapse that computes its own creases, such as a reverse or petal fold |
 | action, step | What a script asks the paper to do, and an action the paper took |
 | refusal | An action the paper cannot take, with the facts of why |

@@ -30,6 +30,7 @@ from origamy.geometry import (
 )
 from origamy.layers import BudgetError, Constraint, NoStackingError, Problem, solve
 from origamy.rules import RefusalError
+from origamy.space import Form, Turn
 from origamy.state import Edge, Face, Pair, State, sides_of
 
 
@@ -52,6 +53,10 @@ class Outcome:
 
     state: State
     moved: frozenset[int]
+    form: Form | None = None
+    """The paper's form in space, once shaping turns it out of the plane."""
+    turn: Turn | None = None
+    """The turn in space that a shape step, or turning shaped paper over, makes."""
 
 
 def fold(

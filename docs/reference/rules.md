@@ -20,6 +20,9 @@ A refusal rule is always an error, and the other rules state a fact about a step
 | [`unbalanced-angles`](#unbalanced-angles) | `error` | yes | The angles between folds at a vertex do not alternate to 180°. |
 | [`layer-crossing`](#layer-crossing) | `error` | yes | No stacking of the faces keeps paper from passing through paper. |
 | [`layer-order-unknown`](#layer-order-unknown) | `error` | yes | The layer solver stopped before finding a stacking. |
+| [`not-flat`](#not-flat) | `error` | yes | The action folds paper that shaping has turned out of the plane. |
+| [`hinge-bent`](#hinge-bent) | `error` | yes | The hinge of a shape step runs through paper turned apart before. |
+| [`turns-through-paper`](#turns-through-paper) | `error` | yes | A shape step turns paper through paper that stays. |
 | [`unreferenced-fold`](#unreferenced-fold) | `warn` | no | No point or line already on the paper locates the fold line. |
 
 ## flap-off-paper
@@ -106,6 +109,24 @@ The layer solver proved that no order of the overlapping faces meets the taco-ta
 The layer solver stopped before finding a stacking.
 
 The layer solver reached its budget of dead ends before it found a stacking or proved that none exists.
+
+## not-flat
+
+The action folds paper that shaping has turned out of the plane.
+
+A fold, unfold, precrease, collapse or named move runs after a shape step, so the paper no longer lies flat to fold.
+
+## hinge-bent
+
+The hinge of a shape step runs through paper turned apart before.
+
+The faces that stay along a shape step's line do not all lie where one rigid motion puts them, so the line is no straight hinge in space.
+
+## turns-through-paper
+
+A shape step turns paper through paper that stays.
+
+A face a shape step turns lies under a face that stays, for a turn up, or over it, for a turn down, where the two overlap in the same plane.
 
 ## unreferenced-fold
 

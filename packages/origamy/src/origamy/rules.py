@@ -154,6 +154,30 @@ RULES = {
             refusal=True,
         ),
         Rule(
+            "not-flat",
+            Level.ERROR,
+            "The action folds paper that shaping has turned out of the plane.",
+            "A fold, unfold, precrease, collapse or named move runs after a shape "
+            "step, so the paper no longer lies flat to fold.",
+            refusal=True,
+        ),
+        Rule(
+            "hinge-bent",
+            Level.ERROR,
+            "The hinge of a shape step runs through paper turned apart before.",
+            "The faces that stay along a shape step's line do not all lie where one "
+            "rigid motion puts them, so the line is no straight hinge in space.",
+            refusal=True,
+        ),
+        Rule(
+            "turns-through-paper",
+            Level.ERROR,
+            "A shape step turns paper through paper that stays.",
+            "A face a shape step turns lies under a face that stays, for a turn up, or "
+            "over it, for a turn down, where the two overlap in the same plane.",
+            refusal=True,
+        ),
+        Rule(
             "unreferenced-fold",
             Level.WARN,
             "No point or line already on the paper locates the fold line.",
