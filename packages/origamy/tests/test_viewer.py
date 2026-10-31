@@ -72,6 +72,37 @@ def test_the_viewer_turns_shaped_paper_in_space(tmp_path: Path) -> None:
     assert high < 0.05
 
 
+FLEXED = """from origamy import Line, Paper
+
+
+def fold() -> Paper:
+    paper = Paper.square()
+    rising = Line.through((0, 0), (1, 1))
+    falling = Line.through((1, 0), (0, 1))
+    upright = Line.through(("1/2", 0), ("1/2", 1))
+    level = Line.through((0, "1/2"), (1, "1/2"))
+    paper.precrease(rising, flap=("3/4", "1/4"))
+    paper.precrease(falling, flap=("7/8", "5/8"), mountain=True)
+    paper.precrease(upright, flap=("3/4", "1/8"))
+    paper.precrease(level, flap=("1/8", "3/4"))
+    paper.collapse(valleys=[upright, level], mountains=[falling], fixed=("7/8", "5/8"))
+    paper.flex({upright: 120, level: 120})
+    return paper
+"""
+
+
+def test_the_viewer_follows_a_flex_through_its_path(tmp_path: Path) -> None:
+    script = tmp_path / "flexed.py"
+    script.write_text(FLEXED, encoding="utf-8")
+    report = asyncio.run(service.build(service.BuildRequest(script=script)))
+    assert report.ok, report.text
+    errors, (low, high) = asyncio.run(
+        replay(script.with_suffix(".html"), tmp_path / "v.png")
+    )
+    assert errors == []
+    assert high - low > 0.3
+
+
 async def replay(page: Path, shot: Path) -> tuple[list[str], tuple[float, float]]:
     """Open the viewer, step through every step with its motion, and screenshot it.
 

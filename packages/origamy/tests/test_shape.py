@@ -13,8 +13,7 @@ import pytest
 from origamy import Line, Paper, Point, service
 from origamy.draw import Eye
 from origamy.paper import RefusedError
-from origamy.shape import fold_angles
-from origamy.space import Form, Shaped
+from origamy.space import Form, Shaped, fold_angles
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 SPINE = Line.through(("1/2", 0), ("1/2", 1))

@@ -7,6 +7,7 @@ Shaped paper leaves the table: the pictures, the viewer and the FOLD file show i
 | Action | Does |
 | --- | --- |
 | `shape(line, flap, angle, layers=None)` | Turns the paper at `flap` about `line` by `angle` degrees, as one rigid piece |
+| `flex({crease: angle, ...}, fixed=None)` | Folds creases to angles, and the other creases follow as rigid origami |
 | `tilt(line, flap, angle)` | Turns the whole paper about `line` on the table by `angle` degrees |
 | `turn_over()` | Turns the paper over, keeping its form in space |
 
@@ -31,6 +32,26 @@ paper.turn_over()
 
 ![The paper plane shaped: its crease pattern, the plane in space, and an x-ray of the paper as it lies flat](../images/paper-plane.png)
 
+## Flexes
+
+A shape step turns one piece of paper about one hinge.
+Creases that meet at a vertex inside the paper close a loop, and they turn only together.
+A flex folds the creases it names to their angles, and every other crease follows.
+
+Each crease is a line of the crease pattern, or a segment of one, and takes every crease along it, as in a collapse.
+Each crease folds its own way to the angle named: 180 pressed flat, 0 open flat, and a negative angle the other way.
+A crease lying flat folds as a valley.
+The top face at `fixed` stays where it lies, and the largest face stays when the script names no point.
+
+Every face stays rigid, so the paper moves as rigid origami.
+Around each vertex inside the paper, the turns about its creases undo one another.
+A solver follows the named creases to their angles in steps of 2°, and turns the other creases as little as closes every loop.
+The preliminary base opens its four valleys to 120° in one flex:
+
+```python
+paper.flex({upright: 120, level: 120})
+```
+
 ## Tilts
 
 A tilt holds a finished model up to show it.
@@ -47,18 +68,18 @@ paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
 
 ## Rules
 
-Shaped paper takes shape steps, tilts and turning over, and no more folds.
+Shaped paper takes shape steps, flexes, tilts and turning over, and no more folds.
 
 | Rule | Refuses |
 | --- | --- |
-| `not-flat` | A fold, unfold, precrease, collapse or named move after a shape step or a tilt |
+| `not-flat` | A fold, unfold, precrease, collapse or named move after a shape step, a flex or a tilt |
 | `hinge-bent` | A shape step whose hinge runs through paper an earlier shape step turned apart |
-| `turns-through-paper` | A shape step that turns paper through paper that stays, where the two lie together |
+| `turns-through-paper` | A shape step that turns paper through paper that stays, or a flex that folds a crease past flat or passes faces through each other |
+| `no-flex` | A flex whose angles no rigid motion of the faces reaches |
 | `flap-on-line` | A tilt whose flap point lies on its line, and so names no side |
 
-Shape steps turn rigid pieces of paper about straight hinges.
-A model whose creases close a loop around a vertex, such as a cup's mouth or a waterbomb, opens only when those creases move together.
-Shape steps do not move creases together yet.
+Shape steps and flexes keep every face rigid.
+A cup's mouth opens only as its paper bends, so a flex that opens it is refused.
 
 ## In pictures, the viewer and FOLD files
 
@@ -66,5 +87,5 @@ Pictures draw shaped paper in space, nearer faces over farther ones, each in the
 The eye sits in front of the model and above it, square to its longest reach on the table.
 The x-ray still shows the paper as it lies flat, where every layer and stacking stays exact.
 
-The viewer turns each shaped face about its step's axis, and it opens on the model from the same eye as the pictures.
+The viewer turns each shaped face about its step's axis, follows a flex through the forms it passes, and opens on the model from the same eye as the pictures.
 The FOLD file writes a shaped step's folded form in 3D, and every frame gives each crease's fold angle in `edges_foldAngle`.

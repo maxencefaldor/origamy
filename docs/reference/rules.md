@@ -22,7 +22,8 @@ A refusal rule is always an error, and the other rules state a fact about a step
 | [`layer-order-unknown`](#layer-order-unknown) | `error` | yes | The layer solver stopped before finding a stacking. |
 | [`not-flat`](#not-flat) | `error` | yes | The action folds paper that shaping has turned out of the plane. |
 | [`hinge-bent`](#hinge-bent) | `error` | yes | The hinge of a shape step runs through paper turned apart before. |
-| [`turns-through-paper`](#turns-through-paper) | `error` | yes | A shape step turns paper through paper that stays. |
+| [`turns-through-paper`](#turns-through-paper) | `error` | yes | A shape step or a flex turns paper through paper. |
+| [`no-flex`](#no-flex) | `error` | yes | No rigid motion turns the creases to the angles a flex names. |
 | [`unreferenced-fold`](#unreferenced-fold) | `warn` | no | No point or line already on the paper locates the fold line. |
 
 ## flap-off-paper
@@ -114,7 +115,7 @@ The layer solver reached its budget of dead ends before it found a stacking or p
 
 The action folds paper that shaping has turned out of the plane.
 
-A fold, unfold, precrease, collapse or named move runs after a shape step, so the paper no longer lies flat to fold.
+A fold, unfold, precrease, collapse or named move runs after a shape step, a flex or a tilt, so the paper no longer lies flat to fold.
 
 ## hinge-bent
 
@@ -124,9 +125,16 @@ The faces that stay along a shape step's line do not all lie where one rigid mot
 
 ## turns-through-paper
 
-A shape step turns paper through paper that stays.
+A shape step or a flex turns paper through paper.
 
 A face a shape step turns lies under a face that stays, for a turn up, or over it, for a turn down, where the two overlap in the same plane.
+A flex folds a crease past flat, or passes two faces through each other.
+
+## no-flex
+
+No rigid motion turns the creases to the angles a flex names.
+
+The solver that follows a flex finds no way to turn the other creases so that every face stays rigid and the paper stays whole around each vertex.
 
 ## unreferenced-fold
 

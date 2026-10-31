@@ -12,8 +12,7 @@ from typing import Any
 
 from origamy.paper import Step
 from origamy.result import BuildResult
-from origamy.shape import fold_angles
-from origamy.space import Form
+from origamy.space import fold_angles
 
 type FoldFile = dict[str, Any]
 
@@ -75,7 +74,7 @@ def _folded(step: Step) -> FoldFile:
 def _topology(step: Step) -> FoldFile:
     state = step.state
     edges = sorted(state.edges)
-    angles = fold_angles(state, step.form or Form.flat(len(state.faces)))
+    angles = fold_angles(state, step.form)
     return {
         "edges_vertices": [list(edge) for edge in edges],
         "edges_assignment": [state.assignment(edge) for edge in edges],

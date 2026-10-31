@@ -8,11 +8,11 @@ model, and every check still reads the flat paper.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from math import cos, isclose, sin
+from math import atan2, cos, degrees, isclose, pi, sin, sqrt
 from typing import Final
 
-from origamy.geometry import Point
-from origamy.state import State
+from origamy.geometry import Isometry, Point, center
+from origamy.state import Edge, State
 
 type Vector = tuple[float, float, float]
 
@@ -105,6 +105,76 @@ class Shaped:
     state: State
     form: Form | None = None
     """None while the paper lies flat."""
+
+
+def invert(motion: Motion) -> Motion:
+    """The motion that undoes a motion."""
+    rotation = tuple(motion[3 * j + i] for i in range(3) for j in range(3))
+    shift = rotate(rotation, (motion[9], motion[10], motion[11]))
+    return (*rotation, -shift[0], -shift[1], -shift[2])
+
+
+def embedding(place: Isometry) -> Motion:
+    """A face's place as a rigid motion of space, from the crease pattern.
+
+    A place that turns the face over turns it over in space too, so its front looks
+    down: the motion stays a rotation, as rigid paper's must.
+    """
+    xx, xy, yx, yy, tx, ty = (
+        float(n) for n in (place.xx, place.xy, place.yx, place.yy, place.tx, place.ty)
+    )
+    turned = -1.0 if place.flips else 1.0
+    return (xx, xy, 0.0, yx, yy, 0.0, 0.0, 0.0, turned, tx, ty, 0.0)
+
+
+def placements(state: State, form: Form | None) -> list[Motion]:
+    """Where each face lies in space, as a rigid motion from the crease pattern."""
+    motions = form.motions if form else (STILL,) * len(state.faces)
+    return [
+        compose(embedding(face.place), motion)
+        for face, motion in zip(state.faces, motions, strict=True)
+    ]
+
+
+def crease_angles(state: State, placed: Sequence[Motion]) -> dict[Edge, float]:
+    """Each crease's fold angle in radians, valleys positive, from the paper's front.
+
+    The angle is the turn about the crease, on the crease pattern, that takes one of
+    its faces to where the other lies. A fold pressed flat reads its assignment.
+    """
+    angles = {}
+    for edge, (f, g) in state.creases.items():
+        _, normal = hinge(state, edge, g)
+        relative = compose(placed[g], invert(placed[f]))
+        across = rotate(relative, normal)
+        angle = atan2(
+            across[2], sum(a * b for a, b in zip(across, normal, strict=True))
+        )
+        if abs(abs(angle) - pi) < _TOLERANCE:
+            angle = {"V": pi, "M": -pi}.get(state.assignment(edge), angle)
+        angles[edge] = angle
+    return angles
+
+
+def fold_angles(state: State, form: Form | None) -> dict[Edge, float]:
+    """Each crease's fold angle in degrees, as FOLD writes it: valleys positive."""
+    angles = crease_angles(state, placements(state, form))
+    return {edge: degrees(angle) for edge, angle in angles.items()}
+
+
+def hinge(state: State, edge: Edge, face: int) -> tuple[Vector, Vector]:
+    """A crease's direction with ``face`` on its left, and the way into that face.
+
+    Both lie on the crease pattern: a turn about the direction by a positive angle
+    lifts the face toward the paper's front.
+    """
+    (ax, ay), (bx, by) = (state.vertices[v].floats() for v in edge)
+    length = sqrt((bx - ax) ** 2 + (by - ay) ** 2)
+    ux, uy = (bx - ax) / length, (by - ay) / length
+    cx, cy = center(state.patterns[face]).floats()
+    if ux * (cy - ay) - uy * (cx - ax) < 0:
+        ux, uy = -ux, -uy
+    return (ux, uy, 0.0), (-uy, ux, 0.0)
 
 
 def same(first: Motion, second: Motion) -> bool:

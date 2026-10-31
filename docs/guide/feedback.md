@@ -73,7 +73,8 @@ A refusal rule stops the action it states, so it is always an error:
 | `layer-order-unknown` | error | The layer solver stopped before finding a stacking |
 | `not-flat` | error | The action folds paper that shaping has turned out of the plane |
 | `hinge-bent` | error | The hinge of a shape step runs through paper turned apart before |
-| `turns-through-paper` | error | A shape step turns paper through paper that stays |
+| `turns-through-paper` | error | A shape step or a flex turns paper through paper |
+| `no-flex` | error | No rigid motion turns the creases to the angles a flex names |
 | `unreferenced-fold` | warn | No point or line already on the paper locates the fold line |
 
 The [rules](../reference/rules.md) page gives every rule's exact condition.

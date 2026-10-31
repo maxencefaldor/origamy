@@ -131,6 +131,9 @@ class StepData(_Data):
     turn: TurnData | None = Field(
         default=None, description="The turn in space a shape or turn over step makes."
     )
+    path: tuple[tuple[tuple[float, ...], ...], ...] = Field(
+        default=(), description="The forms a flex passes through on its way, in order."
+    )
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -160,6 +163,7 @@ class StepData(_Data):
                 if step.turn
                 else None
             ),
+            path=tuple(form.motions for form in step.path),
         )
 
     def step(self) -> Step:
@@ -183,6 +187,7 @@ class StepData(_Data):
             Turn(self.turn.point, self.turn.direction, self.turn.angle)
             if self.turn
             else None,
+            tuple(Form(motions) for motions in self.path),
         )
 
 

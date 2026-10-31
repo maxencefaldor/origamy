@@ -127,6 +127,7 @@ def _step(step: Step, previous: Step | None) -> Data:
         "heightBefore": height_before,
         "motions": step.form.motions if step.form else None,
         "motionsBefore": form_before.motions if form_before else None,
+        "path": [form.motions for form in step.path],
         "turn": (
             {"point": turn.point, "direction": turn.direction, "angle": turn.angle}
             if turn

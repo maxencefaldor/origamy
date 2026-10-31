@@ -9,11 +9,11 @@ turns the whole paper, as hands hold a finished model up to show it.
 """
 
 from fractions import Fraction
-from math import acos, degrees, radians, sqrt
+from math import radians, sqrt
 
 from origamy import actions
 from origamy.actions import Outcome, grab
-from origamy.geometry import Line, Point, bounds, center
+from origamy.geometry import Line, Point, bounds
 from origamy.rules import RefusalError
 from origamy.space import (
     STILL,
@@ -26,10 +26,6 @@ from origamy.space import (
     rotate,
     same,
 )
-from origamy.state import Edge, State
-
-_LEAN = 1e-9
-"""How far a face must lie off another's plane to count as off it."""
 
 
 def shape(
@@ -111,25 +107,6 @@ def turn_over(paper: Shaped) -> Outcome:
     half = turn.motion()
     form = Form(tuple(compose(compose(half, m), half) for m in paper.form.motions))
     return Outcome(outcome.state, outcome.moved, form, turn)
-
-
-def fold_angles(state: State, form: Form) -> dict[Edge, float]:
-    """Each crease's fold angle in degrees, as FOLD writes it: valleys positive."""
-    angles = {}
-    for edge, (f, g) in state.creases.items():
-        front = form.normal(f, flipped=state.flips(f))
-        other = form.normal(g, flipped=state.flips(g))
-        cosine = sum(a * b for a, b in zip(front, other, strict=True))
-        magnitude = degrees(acos(max(-1.0, min(1.0, cosine))))
-        on_edge = form.point(f, state.folded_point(f, edge[0]))
-        beyond = form.point(g, center(state.folded[g]))
-        lean = sum(n * (b - e) for n, b, e in zip(front, beyond, on_edge, strict=True))
-        if abs(lean) > _LEAN:
-            sense = 1.0 if lean > 0 else -1.0
-        else:
-            sense = {"V": 1.0, "M": -1.0}.get(state.assignment(edge), 0.0)
-        angles[edge] = sense * magnitude
-    return angles
 
 
 def _turn(

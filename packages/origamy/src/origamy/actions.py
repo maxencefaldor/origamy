@@ -57,6 +57,8 @@ class Outcome:
     """The paper's form in space, once shaping turns it out of the plane."""
     turn: Turn | None = None
     """The turn in space that a shape step, or turning shaped paper over, makes."""
+    path: tuple[Form, ...] = ()
+    """The forms a flex passes through on its way, in order."""
 
 
 def fold(

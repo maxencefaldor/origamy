@@ -173,8 +173,28 @@ function motion(step, face, t, size, together) {
   const z0 = step.heightBefore[face] * GAP * size;
   const z1 = step.height[face] * GAP * size;
   if (step.turn) return turning(step, face, corners, t, z0, z1);
-  const shaped = step.motions?.[face] ?? STILL;
+  const shaped = step.path.length ? along(step, face, t) : step.motions?.[face] ?? STILL;
   return flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
+}
+
+/** Where a flex has moved a face at a share `t` of it, between the forms it passes. */
+function along(step, face, t) {
+  const forms = [step.motionsBefore?.[face] ?? STILL, ...step.path.map((m) => m[face]), step.motions[face]];
+  const at = t * (forms.length - 1);
+  const k = Math.min(forms.length - 2, Math.floor(at));
+  return blend(forms[k], forms[k + 1], at - k);
+}
+
+/** A share of the way from one rigid motion to another: slerped, then slid. */
+function blend(a, b, t) {
+  const matrix = (m) => new THREE.Matrix4().set(m[0], m[1], m[2], m[9], m[3], m[4], m[5], m[10], m[6], m[7], m[8], m[11], 0, 0, 0, 1);
+  const [pa, pb] = [new THREE.Vector3(), new THREE.Vector3()];
+  const [qa, qb] = [new THREE.Quaternion(), new THREE.Quaternion()];
+  const scale = new THREE.Vector3();
+  matrix(a).decompose(pa, qa, scale);
+  matrix(b).decompose(pb, qb, scale);
+  const e = new THREE.Matrix4().compose(pa.lerp(pb, t), qa.slerp(qb, t), new THREE.Vector3(1, 1, 1)).elements;
+  return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10], e[12], e[13], e[14]];
 }
 
 /** A face of paper that turns in space: about the turn's axis when it moves. */

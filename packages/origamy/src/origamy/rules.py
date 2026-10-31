@@ -158,7 +158,7 @@ RULES = {
             Level.ERROR,
             "The action folds paper that shaping has turned out of the plane.",
             "A fold, unfold, precrease, collapse or named move runs after a shape "
-            "step, so the paper no longer lies flat to fold.",
+            "step, a flex or a tilt, so the paper no longer lies flat to fold.",
             refusal=True,
         ),
         Rule(
@@ -172,9 +172,18 @@ RULES = {
         Rule(
             "turns-through-paper",
             Level.ERROR,
-            "A shape step turns paper through paper that stays.",
+            "A shape step or a flex turns paper through paper.",
             "A face a shape step turns lies under a face that stays, for a turn up, or "
-            "over it, for a turn down, where the two overlap in the same plane.",
+            "over it, for a turn down, where the two overlap in the same plane. A flex "
+            "folds a crease past flat, or passes two faces through each other.",
+            refusal=True,
+        ),
+        Rule(
+            "no-flex",
+            Level.ERROR,
+            "No rigid motion turns the creases to the angles a flex names.",
+            "The solver that follows a flex finds no way to turn the other creases so "
+            "that every face stays rigid and the paper stays whole around each vertex.",
             refusal=True,
         ),
         Rule(

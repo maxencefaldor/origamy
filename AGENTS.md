@@ -32,7 +32,7 @@ Each module imports only from the modules listed before it:
 1. `layers`: the layer solver's constraints, propagation and search.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
 1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
-1. `moves`, `shape`: named moves, such as reverse and petal folds, each computing its creases and collapsing; and shape steps.
+1. `moves`, `shape`, `flex`: named moves, such as reverse and petal folds, each computing its creases and collapsing; shape steps and tilts; and flexes, as rigid origami.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
 1. `draw`, `render`, `exports`, `viewer`: SVG views, PNG pictures through Chromium, FOLD files, and the standalone 3D viewer.
@@ -89,6 +89,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | collapse | An action that folds, unfolds or reverses many creases at once |
 | shape step | An action that turns folded paper out of the plane about a hinge, by an angle |
 | tilt | An action that turns the whole paper in space about a line on the table |
+| flex | An action that folds creases to angles while the other creases follow as rigid origami |
 | form | Where each face lies in space once shaping turns it: a rigid motion of its place |
 | named move | A collapse that computes its own creases, such as a reverse or petal fold |
 | action, step | What a script asks the paper to do, and an action the paper took |

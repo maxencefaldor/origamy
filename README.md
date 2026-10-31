@@ -90,7 +90,7 @@ The [bird base](examples/bird_base.py) collapses a preliminary base, then petal 
 ## Shape
 
 Shaping opens folds part of the way, as hands spread a crane's wings, so the model leaves the table.
-A shape step turns paper about its hinge by an angle, and a tilt holds the whole model up:
+A shape step turns paper about its hinge by an angle, a flex folds creases that meet at a vertex together, and a tilt holds the whole model up:
 
 ```python
 paper.shape(shoulders, flap=wing, angle=90, layers=1)
@@ -139,7 +139,8 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `layer-order-unknown` | error | The layer solver stopped before finding a stacking |
 | `not-flat` | error | The action folds paper that shaping has turned out of the plane |
 | `hinge-bent` | error | The hinge of a shape step runs through paper turned apart before |
-| `turns-through-paper` | error | A shape step turns paper through paper that stays |
+| `turns-through-paper` | error | A shape step or a flex turns paper through paper |
+| `no-flex` | error | No rigid motion turns the creases to the angles a flex names |
 | `unreferenced-fold` | warn | No point or line already on the paper locates the fold line |
 
 ## How it works
@@ -157,7 +158,7 @@ When no stacking exists, origamy names the constraints that conflict.
 
 The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, shaping, the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
 The [crane](examples/crane.py) folds end to end, from the square to its wings spread in space.
-Squash and sink folds, and shaping that moves the creases around a vertex together, come next.
+Squash and sink folds, and shaping that bends paper as well as folding it, come next.
 
 ## License
 

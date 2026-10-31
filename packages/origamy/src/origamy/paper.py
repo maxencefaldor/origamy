@@ -5,11 +5,13 @@ Coordinates are where the paper lies now, as seen from above: x to the right, y 
 Unfolded, the paper covers the rectangle from (0, 0) to (width, height), its front up.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from fractions import Fraction
+from math import radians
 
 from origamy import actions, moves
+from origamy import flex as flexing
 from origamy import shape as shaping
 from origamy.actions import Outcome, Sense
 from origamy.checks import is_referenced, where
@@ -54,6 +56,8 @@ class Step:
     """The paper's form in space once shaping turns it; None while it lies flat."""
     turn: Turn | None = None
     """The turn the step makes in space, when it shapes or turns shaped paper over."""
+    path: tuple[Form, ...] = ()
+    """The forms a flex passes through on its way, in order, for the viewer."""
 
 
 type CreaseLike = Line | tuple[PointLike, PointLike]
@@ -299,6 +303,50 @@ class Paper:
             point,
         )
 
+    def flex(
+        self,
+        angles: Mapping[CreaseLike, Exact],
+        *,
+        fixed: PointLike | None = None,
+    ) -> None:
+        """Fold creases to angles in degrees, and let the paper follow, rigid.
+
+        Each crease is a line of the crease pattern, or a segment of one as its two
+        ends, and takes every crease of the paper along it. Each crease folds its own
+        way to the angle named: 180 pressed flat, 0 open flat, and a negative angle
+        the other way. A crease lying flat folds as a valley. Every other crease
+        turns as little as it can while every face stays rigid. The top face at
+        ``fixed`` stays where it lies; by default, the largest face stays.
+        """
+        targets = [
+            (_crease(crease), Fraction(Number.of(angle).fraction()))
+            for crease, angle in angles.items()
+        ]
+        point = None if fixed is None else Point.of(fixed)
+
+        def act(paper: Shaped) -> Outcome:
+            state = paper.state
+            goals: dict[Edge, float] = {}
+            for crease, angle in targets:
+                edges = actions.along(state, crease)
+                if not edges:
+                    msg = f"no crease of the paper lies along {_describe(crease)}"
+                    raise RefusalError(msg, rule="no-crease", state=state)
+                for edge in edges:
+                    sense = -1 if state.assignment(edge) == "M" else 1
+                    goals[edge] = sense * radians(angle)
+            face = actions.largest(state)
+            if point is not None:
+                stack = actions.stack_at(state, point)
+                if not stack:
+                    msg = f"the fixed point {point} lies on no face's inside"
+                    raise RefusalError(msg, rule="flap-off-paper", state=state)
+                face = stack[0]
+            return flexing.flex(paper, goals, face)
+
+        named = ", ".join(f"{_describe(c)} to {a}°" for c, a in targets)
+        self._act("flex", f"flex: fold {named}", act)
+
     def tilt(self, line: Line, flap: PointLike, *, angle: Exact) -> None:
         """Turn the whole paper about ``line`` by ``angle`` degrees, in space.
 
@@ -420,6 +468,7 @@ class Paper:
                 tuple(diagnostics),
                 form=outcome.form,
                 turn=outcome.turn,
+                path=outcome.path,
             )
         )
 
