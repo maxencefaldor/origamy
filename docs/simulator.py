@@ -40,8 +40,8 @@ RUNS: Final = Path(__file__).resolve().parent / "simulator" / "runs"
 
 type Name = Literal["fold-over", "stack", "strip", "ramps", "accordion", "miura"]
 
-CREASE: Final = Crease(stiffness=0.01)
-"""A crease about as stiff as one folded firmly in kami, in N·m per meter per radian."""
+CREASE: Final = Crease.kami()
+"""A crease in kami, which yields and springs back as measured."""
 
 
 type Stats = dict[str, float | int | bool]

@@ -22,6 +22,9 @@ from pydantic_settings import (
 type Positive = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 """A positive, finite number."""
 
+type NonNegative = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+"""A finite number, zero or positive."""
+
 type Finite = Annotated[float, Field(allow_inf_nan=False)]
 """A finite number."""
 
@@ -147,11 +150,39 @@ class Crease(_Parameters):
     """A sharp crease: a dihedral where the paper has yielded.
 
     The paper bends there alone, about the dihedral's rest angle, instead of with the
-    plate around it.
+    plate around it. Past its yield moment, the crease yields further, and its rest
+    angle follows the fold. Released, the crease springs back by its moment over its
+    stiffness. The defaults are kami's.
     """
 
-    stiffness: Positive
-    """The moment per length that turns the crease a radian from rest, in N·m/m/rad."""
+    stiffness: Positive = 9.0e-3
+    """The moment per length that turns the crease a radian from rest, in N·m/m/rad.
+
+    The default is the bending stiffness of kami over 200 thicknesses, the length that
+    creased sheets measure.
+    """
+
+    yield_moment: Annotated[float, Field(gt=0)] = 5.65e-3
+    """The moment per length past which the crease yields, in N·m/m.
+
+    The yield moment is infinite for a crease that never yields. Paper pressed flat
+    springs back to 36°, so the default is the stiffness times that angle.
+    """
+
+    hardening: NonNegative = 0.0
+    """The rise of the yield moment per radian the crease yields through, in N·m/m/rad.
+
+    Pressing harder closes a fold of paper no further, so the default is zero.
+    """
+
+    @classmethod
+    def kami(cls) -> Self:
+        """A crease in kami.
+
+        Returns:
+            The crease of the stiffness, yield moment and hardening measured for paper.
+        """
+        return cls()
 
 
 class Solver(_Parameters):
@@ -210,7 +241,7 @@ class Contact(_Parameters):
     """The squared sine of the angle under which two edges' barrier fades as they turn
     parallel, at their rest lengths: 0.001 is about 1.8°."""
 
-    friction: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.4
+    friction: NonNegative = 0.4
     """Coulomb's coefficient of friction between two pieces of paper.
 
     The default lies inside the measured ranges for copy paper and sticky notes: 0.17
@@ -231,7 +262,7 @@ class Table(_Parameters):
     height: Finite = 0.0
     """The height of the table's top, in meters."""
 
-    friction: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.4
+    friction: NonNegative = 0.4
     """Coulomb's coefficient of friction between paper and the table.
 
     The default takes a table as rough as paper.

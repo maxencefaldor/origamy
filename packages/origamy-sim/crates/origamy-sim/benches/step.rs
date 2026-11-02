@@ -66,14 +66,18 @@ fn sag() -> Simulation {
 }
 
 /// A square of 24 by 24 cells folded 1.5 radians along its diagonal crease, to rest.
+///
+/// The crease is actuated, as in a self-folding sheet, so it never yields.
 fn fold() -> Simulation {
     let cells = 24;
     let mut sheet = square(cells);
+    let actuated = Crease {
+        yield_moment: f64::INFINITY,
+        ..Crease::kami()
+    };
     for k in 0..cells {
         let edge = [k * (cells + 1) + k, (k + 1) * (cells + 1) + k + 1];
-        sheet
-            .set_crease(edge, Some(Crease { stiffness: 0.01 }))
-            .unwrap();
+        sheet.set_crease(edge, Some(actuated)).unwrap();
         sheet.set_rest_angle(edge, 1.5).unwrap();
     }
     let settings = Settings {

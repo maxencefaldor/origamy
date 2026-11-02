@@ -83,16 +83,22 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     assert validates(Material, data) == core
 
 
-@given(NUMBERS)
-def test_pydantic_accepts_a_crease_exactly_when_the_core_does(stiffness: float) -> None:
+@given(
+    st.fixed_dictionaries(
+        dict.fromkeys(("stiffness", "yield_moment", "hardening"), NUMBERS)
+    )
+)
+def test_pydantic_accepts_a_crease_exactly_when_the_core_does(
+    crease: dict[str, float],
+) -> None:
     sheet = Sheet(SQUARE)
     try:
-        sheet.set_crease((0, 2), Crease.model_construct(stiffness=stiffness))
+        sheet.set_crease((0, 2), Crease.model_construct(None, **crease))
     except ValueError:
         core = False
     else:
         core = True
-    assert validates(Crease, {"stiffness": stiffness}) == core
+    assert validates(Crease, crease) == core
 
 
 def settings_data() -> st.SearchStrategy[dict[str, Any]]:
@@ -173,6 +179,7 @@ def test_the_defaults_are_the_cores() -> None:
     assert Sheet(SQUARE).material == Material() == Material.kami()
     assert Simulation([]).settings == Settings()
     assert Stiffness.isotropic(4e9, 0.3) == Stiffness()
+    assert Crease.kami() == Crease()
 
 
 def test_a_refused_parameter_is_named() -> None:

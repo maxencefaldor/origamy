@@ -1,4 +1,4 @@
-//! Bending: the plate energy of each triangle from a discrete curvature, and sharp creases.
+//! The plate energy of each triangle from a discrete curvature, and the dihedral angles.
 //!
 //! A triangle's curvature comes from the normals at the midpoints of its edges. Each is the
 //! mean of the normals of the two triangles along that edge. Each tilts from the triangle's
@@ -132,16 +132,6 @@ pub(crate) fn plate(
     (0.5 * deviation.dot(&moment), moment, masked)
 }
 
-/// The energy of a sharp crease, with its derivatives in the dihedral angle.
-///
-/// The crease has rest length `length`, stiffness `stiffness` per length per radian, and rest
-/// angle `rest`.
-pub(crate) fn crease(angle: f64, length: f64, stiffness: f64, rest: f64) -> [f64; 3] {
-    let k = stiffness * length;
-    let turn = angle - rest;
-    [0.5 * k * turn * turn, k * turn, k]
-}
-
 /// The bending energy of one triangle over its stencil of up to six vertices: its corners, then
 /// the vertex across the edge opposite each corner.
 ///
@@ -262,12 +252,5 @@ mod tests {
         sines: [Option<f64>; 3],
     ) -> (f64, Vector3<f64>, nalgebra::Matrix3<f64>) {
         plate(matrix, sines, [0.0; 3])
-    }
-
-    #[test]
-    fn a_sharp_crease_rests_at_its_angle() {
-        let [energy, slope, curvature] = crease(0.5, 0.01, 2.0, 0.5);
-        assert!(energy.abs() < 1e-15 && slope.abs() < 1e-15);
-        assert!((curvature - 0.02).abs() < 1e-15);
     }
 }

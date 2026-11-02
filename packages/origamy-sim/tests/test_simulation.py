@@ -133,6 +133,34 @@ def test_holds_take_one_vertex_or_an_array_of_them() -> None:
     assert simulation.held(0).tolist() == [True, False, False, False]
 
 
+def test_a_crease_folded_past_its_yield_moment_springs_back_short_of_the_fold() -> None:
+    sheet = Sheet(SQUARE)
+    sheet.set_crease((0, 2), Crease.kami())
+    simulation = Simulation([sheet], STILL)
+    simulation.hold(0, [0, 1, 2, 3])
+    # A hand turns the free corner about the diagonal, a radian and a half toward the
+    # front, then lets it go.
+    fold = 1.5
+    diagonal = np.array([1.0, 1.0, 0.0]) / math.sqrt(2)
+    across = np.array([-SIDE / 2, SIDE / 2, 0.0])
+    positions = simulation.positions(0)
+    positions[3] = (
+        diagonal * SIDE / math.sqrt(2)
+        + across * math.cos(fold)
+        + np.array([0.0, 0.0, SIDE / math.sqrt(2)]) * math.sin(fold)
+    )
+    simulation.set_positions(0, positions)
+    folding = simulation.step()
+    assert folding.energy.yielding > 0
+    simulation.hold(0, 3, held=False)
+    assert simulation.step().converged
+    springback = Crease.kami().yield_moment / Crease.kami().stiffness
+    assert simulation.fold_angles(0) == pytest.approx([fold - springback], abs=1e-6)
+    crease = simulation.sheet(0)
+    assert crease.rest_angle((0, 2)) == pytest.approx(fold - springback)
+    assert crease.plastic_rotation((0, 2)) == pytest.approx(fold - springback)
+
+
 def test_creases_and_rest_angles_lie_along_interior_edges() -> None:
     sheet = Sheet(SQUARE)
     with pytest.raises(ValueError, match="no interior edge from vertex 0 to vertex 1"):

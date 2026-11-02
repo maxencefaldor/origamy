@@ -56,6 +56,8 @@ A sheet of kami, the thin paper most origami uses, sets the scales below.
 | Length where stretching and bending balance | √(D / Eh) | 21 µm |
 | Length that gravity bends | (D / ρgh)^(1/3) | 6 cm |
 | Width of a crease | S₀ | about 0.5 mm |
+| Stiffness of a crease | κ ≈ D / 200h | 9 mN·m/m/rad |
+| Springback of a crease pressed flat | M_y / κ | about 36° |
 | Friction of paper on paper | μ | 0.17 to 0.44 sliding, 0.33 to 0.61 at rest |
 | Terminal velocity of a sheet falling flat | √(2ρhg / ρₐC) | 0.91 m/s |
 
@@ -114,7 +116,7 @@ Each vertex also keeps its place in the flat sheet, the material coordinates, wh
 Every behavior of the paper enters as one term of a total energy:
 
 ```text
-E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction + E_drag + E_hands + E_gravity
+E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_friction + E_drag + E_hands + E_gravity
 ```
 
 | Term | Meaning |
@@ -123,6 +125,7 @@ E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction +
 | E_strain-limit | A smooth barrier on the size of each triangle's strain, growing without bound as the strain nears its cap |
 | E_bend | Plate bending energy of each triangle, from a discrete curvature built from its edges' dihedral angles |
 | E_crease | Bending energy of crease bands, softer than the paper around them, about a rest curvature |
+| E_yield | The work creases take as they yield over a time step, dissipated or stored by hardening |
 | E_contact | A barrier on the distance between mid-surface primitives, offset by the thickness |
 | E_friction | Smoothed Coulomb friction between paper and paper, and between paper and the table, lagged per time step |
 | E_drag | Quadratic air drag on each vertex's patch of paper, across the sheet, lagged per time step |
@@ -169,15 +172,24 @@ The simulator models it the same way:
 - **Elasticity.**
   Bending within the band costs a reduced stiffness, about its rest curvature.
 - **Plasticity.**
-  When the bending moment in the band passes a yield moment, the rest curvature moves toward the current curvature, by return mapping.
+  When the bending moment in the band passes a yield moment, the rest curvature moves toward the current curvature.
+  Hardening raises the yield moment with the rotation the crease has yielded through.
   Pressing a fold flat therefore makes it rest more closed; releasing it lets it spring back to its rest angle.
+  The springback is the yield moment over the stiffness, 36° for paper.
 - **Aging.**
   The rest curvature relaxes slowly toward the current one, logarithmically in time, as folded paper does.
 - **A precrease.**
-  A crease folded and unfolded rests nearly flat but stays soft, so the paper refolds there first.
+  A crease folded flat, then pressed flat again, yields both ways.
+  Released, it rises by its springback toward the side it was folded to.
+  The crease stays softer than the paper around it, so the paper refolds there first.
 
 At coarse resolution, a crease band narrows to a sharp crease on mesh edges, with the same rest angle and an equivalent stiffness.
 Both levels share one definition, so a model can run coarse for speed and fine for close views.
+
+A time step yields each crease by the variational update of plasticity.
+Within the step, a crease's energy is the least, over how far it yields, of its elastic energy and the work that yielding takes.
+That energy is convex and continuously differentiable in the fold angle, with the moment as its slope.
+Newton's method therefore yields creases inside each time step, with exact derivatives, and the step takes the new rest angles.
 
 ### 3.5 Contact with thickness
 
@@ -309,7 +321,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction |
 | Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
-| Crease | Band width, stiffness, yield moment, hardening, springback, aging rate, softening by a precrease |
+| Crease | Band width, stiffness, yield moment, hardening, aging rate |
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
@@ -453,7 +465,9 @@ The simulator is excellent when it passes all of these, in CI:
 | A square sliding down an incline, on the table and on paper | Coulomb's law: acceleration g (sin θ − μ cos θ) | Velocity within 1% |
 | A square on an incline gentler than its friction angle | Coulomb's law: no slip | Slip under the stick distance a step |
 | A sheet falling flat through air | Implicit Euler of v′ = −g + kv², and the terminal velocity | Velocity within 10 nm/s of implicit Euler, and within 0.1% of the terminal velocity |
-| A fold pressed flat, then released | Measured springback | Rest angle within measured scatter |
+| A fold pressed flat, then released | Measured springback | Opening between 30° and 40°, the measured scatter |
+| A fold turned short of or past its yield angle, then released | Perfect plasticity | Springs back whole, or by its yield angle, within 10⁻⁶ rad |
+| A precrease pressed flat again, then released | Perfect plasticity | Rises by its yield angle, within 10⁻⁶ rad |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
 | The crane, folded by hand from the square | origamy's exact layer orders | Same layer order at every flat state, no crossing |
@@ -482,7 +496,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 3 are done.
+Phases 0 to 3 are done, and phase 4 has its plastic creases.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -526,6 +540,14 @@ Phase 3 adds these findings:
   Real air reaches only the outer layers, so a stack of n layers falls √n times faster.
   Shielding the layers that contact covers is left for later.
 
+Phase 4 adds this finding:
+
+- **How far a sharp crease closes.**
+  Pressed flat, the cells beside a sharp crease meet a thickness apart where their diagonals cross, 2.5 mm from the crease in 5 mm cells.
+  The crease therefore stops about 0.03 rad short of flat.
+  Pressed to 0.04 rad short, kami's crease springs back to an opening of 38°.
+  A crease band wraps round the layers inside it instead, so it closes fully.
+
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
 Shaping becomes crease actuation and hands; animation becomes simulated motion.
@@ -551,6 +573,7 @@ A research track runs alongside, with ambitious targets:
 | Derivatives | Generated from symbolic energies | Hand derivation, error prone; runtime autodiff, slow in the hot loop |
 | Friction | Lagged, smoothed Coulomb friction in the incremental potential | Friction forces applied after each step, which stick and slip at large time steps; exact Coulomb constraints, which are not smooth |
 | Air | Quadratic drag across the sheet, as a potential | Damping proportional to mass, which slows paper alike in every direction, even in a vacuum |
+| Crease plasticity | The variational update, inside each time step | A return mapping after each step, which lags yielding by a step |
 
 ## 9. References
 
@@ -565,5 +588,8 @@ A research track runs alongside, with ambitious targets:
 - [Coefficient of friction of paper used in a copy machine](https://instron.jp/ja-jp/-/media/literature-library/applications/2006/03/coefficient-of-friction-of-paper-used-in-a-copy-machine.pdf), Instron application note, 2006.
 - [Stick-slip dynamics in an interleaved system with self-amplified friction](https://arxiv.org/abs/2602.14935), by Plati, Restagno and Poulard, arXiv, 2026.
 - Fluid-Dynamic Drag, by Sighard Hoerner, 1965.
+- [The mechanical response of a creased sheet](https://arxiv.org/abs/1404.1243), by Frédéric Lechenault, Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2014.
+- [Relaxation constant in the folding of thin viscoelastic sheets](https://arxiv.org/abs/1905.09220), by Kasra Farain, Physical Review Applied, 2020.
+- [The variational formulation of viscoplastic constitutive updates](https://resolver.caltech.edu/CaltechAUTHORS:20171213-091546263), by Michael Ortiz and Laurent Stainier, Computer Methods in Applied Mechanics and Engineering, 1999.
 - [Local Mechanical Description of an Elastic Fold](https://arxiv.org/pdf/1808.04892), by Théo Jules, Frédéric Lechenault and Mokhtar Adda-Bedia, Soft Matter, 2019.
 - [Relaxation Mechanisms in the Unfolding of Thin Sheets](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.107.025506), by Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2011.

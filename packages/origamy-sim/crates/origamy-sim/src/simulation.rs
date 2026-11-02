@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use crate::contact::friction::Slip;
 use crate::contact::{self, Kind, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
+use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
 use crate::energy::{Point, Project};
 use crate::parameter::ParameterError;
@@ -34,6 +35,9 @@ pub struct Energy {
     pub bending: f64,
     /// The elastic energy of sharp creases.
     pub creases: f64,
+    /// The work creases take as they yield over the time step, dissipated or stored by
+    /// hardening.
+    pub yielding: f64,
     /// The energy of contact's barrier, between sheets and with the table.
     pub contact: f64,
     /// The work friction does against the slip of contacts over the time step, up to the
@@ -55,13 +59,14 @@ impl Energy {
     }
 
     /// Every term, in a fixed order.
-    fn terms(&self) -> [f64; 9] {
+    fn terms(&self) -> [f64; 10] {
         // The destructuring names every field, so a new term cannot be left out of the total.
         let Self {
             stretching,
             strain_barrier,
             bending,
             creases,
+            yielding,
             contact,
             friction,
             drag,
@@ -73,6 +78,7 @@ impl Energy {
             strain_barrier,
             bending,
             creases,
+            yielding,
             contact,
             friction,
             drag,
@@ -458,38 +464,41 @@ impl Simulation {
     /// Advances the simulation by `dt`, halving the time step wherever it does not converge,
     /// down to the shortest time step. A refused step leaves the state as it was.
     fn advance(&mut self, dt: f64) -> Result<Report, StepError> {
-        let (positions, velocities, time) =
-            (self.positions.clone(), self.velocities.clone(), self.time);
-        let report = self.attempt(dt)?;
+        let attempt = self.attempt(dt)?;
         let half = 0.5 * dt;
-        if report.converged || !dt.is_finite() || half < self.settings.solver.shortest_step {
-            return Ok(report);
+        let floor = half < self.settings.solver.shortest_step;
+        if attempt.solve.converged || !dt.is_finite() || floor {
+            return Ok(self.finish(dt, &attempt));
         }
-        self.positions.clone_from(&positions);
-        self.velocities.clone_from(&velocities);
-        self.time = time;
+        // The halves change the state, so a refused half restores it.
+        let saved = (
+            self.positions.clone(),
+            self.velocities.clone(),
+            self.time,
+            self.sheets.clone(),
+        );
         let halves = self
             .advance(half)
             .and_then(|first| Ok((first, self.advance(half)?)));
         match halves {
             Ok((first, second)) => Ok(Report {
                 converged: first.converged && second.converged,
-                iterations: report.iterations + first.iterations + second.iterations,
+                iterations: attempt.iterations + first.iterations + second.iterations,
                 substeps: first.substeps + second.substeps,
                 ..second
             }),
             Err(error) => {
-                (self.positions, self.velocities, self.time) = (positions, velocities, time);
+                (self.positions, self.velocities, self.time, self.sheets) = saved;
                 Err(error)
             }
         }
     }
 
-    /// One time step of length `dt`, reported whether it converged or not.
+    /// One time step of length `dt`, solved whether it converges or not, and not yet taken.
     ///
     /// Friction lags from the step's start, then from each solution the step reaches, until
     /// the solution stays where it is or the lags run out.
-    fn attempt(&mut self, dt: f64) -> Result<Report, StepError> {
+    fn attempt(&mut self, dt: f64) -> Result<Attempt, StepError> {
         let start: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
         self.trees = Trees::new(&self.primitives, &start);
         let predicted: Vec<Point> = if dt.is_finite() {
@@ -529,7 +538,11 @@ impl Simulation {
             }
             slips = self.slips(&solve.x);
         }
-        Ok(self.finish(dt, &start, &solve, iterations))
+        Ok(Attempt {
+            start,
+            solve,
+            iterations,
+        })
     }
 
     /// The minimum of a time step's incremental potential, by Newton's method from `x`.
@@ -644,9 +657,16 @@ impl Simulation {
         }
     }
 
-    /// Ends a time step of length `dt` from `start` at the solution `solve`, and reports it with
-    /// the Newton iterations of all its lags.
-    fn finish(&mut self, dt: f64, start: &[Point], solve: &Solve, iterations: usize) -> Report {
+    /// Takes an attempted time step of length `dt`, and reports it.
+    ///
+    /// The vertices move to the solution, and each crease yields as far as the solution turns
+    /// it.
+    fn finish(&mut self, dt: f64, attempt: &Attempt) -> Report {
+        let Attempt {
+            start,
+            solve,
+            iterations,
+        } = attempt;
         for (i, point) in solve.x.iter().enumerate() {
             let velocity = if dt.is_finite() {
                 (point - start[i]) / dt
@@ -659,6 +679,28 @@ impl Simulation {
         if dt.is_finite() {
             self.time += dt;
         }
+        for (sheet, &offset) in self.sheets.iter_mut().zip(&self.offsets) {
+            let yielded: Vec<(usize, crease::Plastic)> = sheet
+                .creases()
+                .iter()
+                .zip(sheet.mesh().dihedrals())
+                .enumerate()
+                .filter_map(|(d, (crease, dihedral))| {
+                    let points = stencil(dihedral).map(|v| solve.x[offset + v as usize]);
+                    let angle = bending::angle_value(&points);
+                    let turned = crease::turn(
+                        crease.as_ref()?,
+                        sheet.lengths()[d],
+                        sheet.plastic(d),
+                        angle,
+                    );
+                    Some((d, turned.state))
+                })
+                .collect();
+            for (d, state) in yielded {
+                sheet.set_plastic(d, state);
+            }
+        }
         let energy = Energy {
             kinetic: self.kinetic(),
             ..solve.potential.energy
@@ -666,7 +708,7 @@ impl Simulation {
         let (contacts, least_gap) = self.contacts(&solve.x);
         Report {
             converged: solve.converged,
-            iterations,
+            iterations: *iterations,
             substeps: 1,
             update: solve.update,
             energy,
@@ -866,13 +908,10 @@ impl Simulation {
             }
             for (d, crease) in sheet.creases().iter().enumerate() {
                 if let Some(crease) = crease {
-                    let [value, _, _] = bending::crease(
-                        angles[d],
-                        sheet.lengths()[d],
-                        crease.stiffness,
-                        sheet.rest_angles()[d],
-                    );
-                    energy.creases += value;
+                    let turned =
+                        crease::turn(crease, sheet.lengths()[d], sheet.plastic(d), angles[d]);
+                    energy.creases += turned.elastic;
+                    energy.yielding += turned.yielding;
                 }
             }
         }
@@ -1017,15 +1056,11 @@ fn bend(
                     let mut hessian = sine.hessian * moments[d];
                     let mut gradient = SMatrix::<f64, 12, 1>::zeros();
                     if let Some(crease) = &sheet.creases()[d] {
-                        let [_, slope, curvature] = bending::crease(
-                            angle.value,
-                            sheet.lengths()[d],
-                            crease.stiffness,
-                            sheet.rest_angles()[d],
-                        );
-                        gradient += angle.gradient * slope;
-                        hessian += angle.gradient * angle.gradient.transpose() * curvature
-                            + angle.hessian * slope;
+                        let turned =
+                            crease::turn(crease, sheet.lengths()[d], sheet.plastic(d), angle.value);
+                        gradient += angle.gradient * turned.moment;
+                        hessian += angle.gradient * angle.gradient.transpose() * turned.stiffness
+                            + angle.hessian * turned.moment;
                     }
                     let stencil = stencil(dihedral).map(|v| Some(global(v)));
                     (stencil, gradient, hessian)
@@ -1284,6 +1319,14 @@ struct Drag {
     scale: f64,
 }
 
+/// A time step solved but not yet taken: where it starts, where its last lag's solve ended, and
+/// the Newton iterations of all its lags.
+struct Attempt {
+    start: Vec<Point>,
+    solve: Solve,
+    iterations: usize,
+}
+
 /// Where Newton's method ended a time step's minimization, and how.
 struct Solve {
     x: Vec<Point>,
@@ -1496,14 +1539,21 @@ mod tests {
     #[test]
     fn the_assembly_differentiates_the_elastic_potential() {
         // A creased sheet folded off its rest angle, curved off its rest curvature, and
-        // stretched along x into its strain barrier.
+        // stretched along x into its strain barrier. The crease yields, and hardens.
         let mut sheet =
             Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
         let at = |i: u32, j: u32| j * 4 + i;
         for j in 0..3 {
             let edge = [at(1, j), at(1, j + 1)];
             sheet
-                .set_crease(edge, Some(Crease { stiffness: 0.01 }))
+                .set_crease(
+                    edge,
+                    Some(Crease {
+                        yield_moment: 1e-3,
+                        hardening: 2e-3,
+                        ..Crease::kami()
+                    }),
+                )
                 .unwrap();
             sheet.set_rest_angle(edge, 0.9).unwrap();
             sheet
@@ -1531,6 +1581,7 @@ mod tests {
             .potential(&x, &Incremental::still(&x), &[])
             .energy;
         assert!(energy.strain_barrier > 0.0 && energy.creases > 0.0 && energy.bending > 0.0);
+        assert!(energy.yielding > 0.0);
         // The step started a tenth of a millimeter away, so inertia and air drag act.
         let start: Vec<Point> = x
             .iter()

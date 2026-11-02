@@ -233,9 +233,17 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
         })
         .collect();
     let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
+    // The creases never yield, so the actuation alone sets their rest angles.
     for &edge in &creases {
         sheet
-            .set_crease(edge, Some(Crease { stiffness: 0.1 }))
+            .set_crease(
+                edge,
+                Some(Crease {
+                    stiffness: 0.1,
+                    yield_moment: f64::INFINITY,
+                    hardening: 0.0,
+                }),
+            )
             .unwrap();
     }
     let settings = Settings {
@@ -351,7 +359,13 @@ fn a_strip_folded_over_itself_never_crosses_and_rests_above_itself() {
         .collect();
     for &edge in &crease {
         sheet
-            .set_crease(edge, Some(Crease { stiffness: 1e-3 }))
+            .set_crease(
+                edge,
+                Some(Crease {
+                    stiffness: 1e-3,
+                    ..Crease::kami()
+                }),
+            )
             .unwrap();
     }
     let settings = Settings {
@@ -537,5 +551,138 @@ fn kami_falls_flat_at_the_terminal_velocity_that_drag_sets() {
     assert!(
         (-z / terminal - 1.0).abs() < 1e-3,
         "the square falls at {z} m/s, its terminal velocity is {terminal}"
+    );
+}
+
+/// A strip of kami 6 cm long with a crease across its middle, in quasi-static steps without
+/// gravity. A hand holds the strip and turns its far half about the crease to each of `folds`
+/// in turn, then lets the far half go.
+///
+/// Returns the crease's rest angle, its fold angle once the strip rests again, and the rotation
+/// it has yielded through.
+fn turn_and_release(folds: &[f64]) -> (f64, f64, f64) {
+    let (columns, rows, length, width) = (12, 4, 0.06, 0.015);
+    let mesh = Mesh::grid(columns, rows, length, width).unwrap();
+    let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
+    let at = |i: u32, j: u32| j * (columns + 1) + i;
+    let crease: Vec<[u32; 2]> = (0..rows)
+        .map(|j| [at(columns / 2, j), at(columns / 2, j + 1)])
+        .collect();
+    for &edge in &crease {
+        sheet.set_crease(edge, Some(Crease::kami())).unwrap();
+    }
+    let settings = Settings {
+        gravity: [0.0; 3],
+        time_step: f64::INFINITY,
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let flat = simulation.positions(0).to_vec();
+    let hinge = 0.5 * length;
+    let far: Vec<usize> = (0..flat.len())
+        .filter(|&v| flat[v][0] > hinge + 1e-9)
+        .collect();
+    for v in 0..flat.len() {
+        simulation.hold(0, v, true);
+    }
+    for &fold in folds {
+        let mut turned = flat.clone();
+        for &v in &far {
+            let r = flat[v][0] - hinge;
+            turned[v] = [hinge + r * fold.cos(), flat[v][1], r * fold.sin()];
+        }
+        simulation.set_positions(0, &turned).unwrap();
+        assert!(simulation.step().unwrap().converged);
+    }
+    for &v in &far {
+        simulation.hold(0, v, false);
+    }
+    let report = simulation.step().unwrap();
+    assert!(report.converged, "{report:?}");
+    let dihedrals = simulation.sheets()[0].mesh().dihedrals();
+    let angles = simulation.fold_angles(0);
+    let creased: Vec<f64> = dihedrals
+        .iter()
+        .zip(&angles)
+        .filter(|(d, _)| crease.contains(&d.edge))
+        .map(|(_, &angle)| angle)
+        .collect();
+    let fold = creased.iter().sum::<f64>() / f64::from(rows);
+    let sheet = &simulation.sheets()[0];
+    let rest = sheet.rest_angle(crease[0]).unwrap();
+    for &edge in &crease {
+        assert!((sheet.rest_angle(edge).unwrap() - rest).abs() < 1e-12);
+    }
+    (rest, fold, sheet.plastic_rotation(crease[0]).unwrap())
+}
+
+/// The angles a hand turns the strip's far half through, from `from` to `to` in `count` equal
+/// turns.
+fn ramp(from: f64, to: f64, count: u32) -> Vec<f64> {
+    (1..=count)
+        .map(|k| from + (to - from) * f64::from(k) / f64::from(count))
+        .collect()
+}
+
+#[test]
+fn kami_pressed_flat_springs_back_to_the_measured_angle() {
+    // The hand presses the fold closed until the 5 mm cells beside the crease lie just over a
+    // thickness apart where their diagonals cross. Released, the fold opens to between 30° and
+    // 40°, as measured creases rest, and the crease rests where the fold does.
+    let closed = std::f64::consts::PI - 0.04;
+    let (rest, fold, _) = turn_and_release(&ramp(0.0, closed, 32));
+    let opening = (std::f64::consts::PI - fold).to_degrees();
+    assert!(
+        (30.0..=40.0).contains(&opening),
+        "the fold opens to {opening}°"
+    );
+    assert!(
+        (fold - rest).abs() < 1e-6,
+        "the fold rests at {fold}, its crease at {rest}"
+    );
+}
+
+#[test]
+fn a_crease_springs_back_by_its_yield_angle_or_whole_below_it() {
+    // Folded past the angle its yield moment allows, a crease springs back by that angle.
+    // Folded short of it, the crease springs back flat.
+    let kami = Crease::kami();
+    let springback = kami.yield_moment / kami.stiffness;
+    for (folded, expected) in [
+        (
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::FRAC_PI_2 - springback,
+        ),
+        (0.5, 0.0),
+    ] {
+        let (rest, fold, rotation) = turn_and_release(&ramp(0.0, folded, 16));
+        assert!(
+            (rest - expected).abs() < 1e-12,
+            "the crease rests at {rest}"
+        );
+        assert!((fold - expected).abs() < 1e-6, "the fold rests at {fold}");
+        assert!((rotation - expected).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn a_precrease_pressed_flat_again_springs_back_by_its_yield_angle() {
+    // Folded flat and unfolded flat again, the crease yields both ways. Released, it rises by
+    // its yield angle on the side it was folded to, and has yielded through both turns.
+    let kami = Crease::kami();
+    let springback = kami.yield_moment / kami.stiffness;
+    let closed = std::f64::consts::PI - 0.04;
+    let mut folds = ramp(0.0, closed, 32);
+    folds.extend(ramp(closed, 0.0, 32));
+    let (rest, fold, rotation) = turn_and_release(&folds);
+    assert!(
+        (rest - springback).abs() < 1e-12,
+        "the crease rests at {rest}"
+    );
+    assert!((fold - springback).abs() < 1e-6, "the fold rests at {fold}");
+    let yielded = 2.0 * (closed - springback) - springback;
+    assert!(
+        (rotation - yielded).abs() < 1e-12,
+        "the crease yielded {rotation} rad"
     );
 }

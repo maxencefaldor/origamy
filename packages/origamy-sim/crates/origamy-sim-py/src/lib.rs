@@ -280,6 +280,15 @@ impl PySheet {
         self.0.rest_angle(edge).map_err(value_error)
     }
 
+    /// The rotation the crease along an interior edge has yielded through, in radians; zero
+    /// for plain paper.
+    ///
+    /// Raises:
+    ///     ValueError: When the edge is not an interior edge of the sheet.
+    fn plastic_rotation(&self, edge: [Vertex; 2]) -> PyResult<f64> {
+        self.0.plastic_rotation(edge).map_err(value_error)
+    }
+
     /// Sets the dihedral angle an interior edge rests at.
     ///
     /// Along a sharp crease, the crease rests there. Elsewhere the plate around the edge
@@ -318,6 +327,9 @@ struct PyEnergy {
     bending: f64,
     /// The elastic energy of sharp creases.
     creases: f64,
+    /// The work creases take as they yield over the time step, dissipated or stored by
+    /// hardening.
+    yielding: f64,
     /// The energy of contact's barrier, between sheets and with the table.
     contact: f64,
     /// The work friction does against the slip of contacts over the time step.
@@ -337,6 +349,7 @@ impl From<Energy> for PyEnergy {
             strain_barrier: e.strain_barrier,
             bending: e.bending,
             creases: e.creases,
+            yielding: e.yielding,
             contact: e.contact,
             friction: e.friction,
             drag: e.drag,
@@ -356,6 +369,7 @@ impl PyEnergy {
             strain_barrier: self.strain_barrier,
             bending: self.bending,
             creases: self.creases,
+            yielding: self.yielding,
             contact: self.contact,
             friction: self.friction,
             drag: self.drag,
@@ -367,11 +381,12 @@ impl PyEnergy {
 
     fn __repr__(&self) -> String {
         format!(
-            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, contact={:?}, friction={:?}, drag={:?}, gravity={:?}, kinetic={:?})",
+            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, yielding={:?}, contact={:?}, friction={:?}, drag={:?}, gravity={:?}, kinetic={:?})",
             self.stretching,
             self.strain_barrier,
             self.bending,
             self.creases,
+            self.yielding,
             self.contact,
             self.friction,
             self.drag,

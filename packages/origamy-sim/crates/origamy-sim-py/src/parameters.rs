@@ -129,11 +129,15 @@ impl Parameters for Crease {
     fn read(model: &Bound<'_, PyAny>) -> PyResult<Self> {
         Ok(Self {
             stiffness: field(model, "stiffness")?,
+            yield_moment: field(model, "yield_moment")?,
+            hardening: field(model, "hardening")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
-        fields.set_item("stiffness", self.stiffness)
+        fields.set_item("stiffness", self.stiffness)?;
+        fields.set_item("yield_moment", self.yield_moment)?;
+        fields.set_item("hardening", self.hardening)
     }
 }
 

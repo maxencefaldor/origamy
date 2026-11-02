@@ -52,6 +52,6 @@ The pleats rise off the table under gravity, and no panel passes through the tab
 
 An 8 by 6 Miura-ori of 15 mm parallelograms folds in the air, with gravity off.
 Every crease's rest angle follows the rigid folding of the pattern, in quasi-static steps.
-The sheet folds from flat to 132° without stretching, its folds within 10⁻⁷ rad of the rigid folding.
+The sheet folds from flat to 132° without stretching, its folds within 2 × 10⁻⁷ rad of the rigid folding.
 
 <iframe class="origamy-run" src="viewer.html?run=miura" title="Miura-ori" loading="lazy"></iframe>

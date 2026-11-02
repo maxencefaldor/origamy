@@ -40,6 +40,16 @@ pub(crate) fn positive(name: &'static str, value: f64) -> Result<(), ParameterEr
     )
 }
 
+/// Checks that a parameter is zero or positive, and finite.
+pub(crate) fn non_negative(name: &'static str, value: f64) -> Result<(), ParameterError> {
+    require(
+        name,
+        value,
+        value >= 0.0 && value.is_finite(),
+        "zero or positive, and finite",
+    )
+}
+
 /// Checks that a parameter is finite.
 pub(crate) fn finite(name: &'static str, value: f64) -> Result<(), ParameterError> {
     require(name, value, value.is_finite(), "finite")
@@ -60,6 +70,10 @@ mod tests {
         for refused in [0.0, -1.0, f64::INFINITY, f64::NAN] {
             let error = positive("thickness", refused).unwrap_err();
             assert_eq!(error.name, "thickness");
+        }
+        assert!(non_negative("friction", 0.0).is_ok());
+        for refused in [-1e-300, f64::INFINITY, f64::NAN] {
+            assert!(non_negative("friction", refused).is_err());
         }
         assert!(finite("grain", -3.0).is_ok());
         assert!(finite("grain", f64::NEG_INFINITY).is_err());

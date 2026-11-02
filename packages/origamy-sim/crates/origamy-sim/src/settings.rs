@@ -1,7 +1,7 @@
 //! The settings of a simulation: the world it runs in, how contact pushes and how the solver
 //! works. Every setting is an input with a documented default.
 
-use crate::parameter::{ParameterError, finite, fraction, positive, require};
+use crate::parameter::{ParameterError, finite, fraction, non_negative, positive, require};
 
 /// The settings of a simulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -236,12 +236,7 @@ impl Contact {
         positive("contact gap", self.gap)?;
         positive("contact stiffness", self.stiffness)?;
         fraction("parallel", self.parallel)?;
-        require(
-            "friction",
-            self.friction,
-            self.friction >= 0.0 && self.friction.is_finite(),
-            "zero or positive, and finite",
-        )?;
+        non_negative("friction", self.friction)?;
         positive("stick", self.stick)
     }
 }
@@ -254,12 +249,7 @@ impl Table {
     /// Returns the first setting outside its values.
     pub fn check(&self) -> Result<(), ParameterError> {
         finite("table height", self.height)?;
-        require(
-            "table friction",
-            self.friction,
-            self.friction >= 0.0 && self.friction.is_finite(),
-            "zero or positive, and finite",
-        )
+        non_negative("table friction", self.friction)
     }
 }
 

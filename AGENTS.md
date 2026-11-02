@@ -141,6 +141,8 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | dihedral | An interior edge of a mesh with its two triangles, where the sheet bends |
 | crease band | The strip along a crease where the paper has yielded, about half a millimeter wide |
 | sharp crease | A crease band narrowed onto mesh edges, for coarse meshes |
+| springback | The angle a released crease opens by: its yield moment over its stiffness |
+| plastic rotation | The rotation a crease has yielded through, which hardening reads |
 | time step | One interval of simulated time: a minimization of the incremental potential |
 | lag | One solve of a time step with friction fixed at a state: the step's start, then each solution it reaches |
 | stick distance | The slip within one time step under which friction holds a contact |

@@ -2,6 +2,7 @@
 //! semi-definite, element by element.
 
 pub(crate) mod bending;
+pub(crate) mod crease;
 pub(crate) mod membrane;
 
 use nalgebra::{SMatrix, Vector3};

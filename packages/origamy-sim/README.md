@@ -24,6 +24,7 @@ A sheet stretches, bends and folds along sharp creases, under gravity and held v
 Paper never comes closer than its thickness to paper or to the table.
 Coulomb friction holds paper on paper and on the table, and air drags paper moving across its surface.
 A time step that does not converge retries as two half steps.
+Creases yield past their yield moment and spring back when released, as paper's creases do.
 Benchmarks hold it to known solutions:
 
 - A cantilever bent by its own weight to 30% of its length matches the elastica within 0.1%.
@@ -35,9 +36,10 @@ Benchmarks hold it to known solutions:
 - A square of kami slides down an incline, on the table or on paper, within 1% of Coulomb's law.
 - Below its friction angle, the square creeps by less than the 0.1 µm stick distance a step.
 - A sheet falling flat through air follows implicit Euler within 10 nm/s, to its terminal velocity of 0.91 m/s within 0.1%.
+- A crease of kami pressed flat springs back to an opening of 38°, within the measured 30° to 40°.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Paper itself comes next, in phase 4: crease bands, plasticity, aging and presets calibrated on measurements.
+Phase 4 is under way: creases yield and spring back, and aging and crease bands come next.
 
 ## Install
 

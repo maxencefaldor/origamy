@@ -1,30 +1,67 @@
 //! A sheet of paper: its rest mesh, its material and its creases.
 
 use crate::energy::bending::RestPlate;
+use crate::energy::crease::Plastic;
 use crate::energy::membrane::RestTriangle;
 use crate::material::Material;
 use crate::mesh::{Mesh, Vertex};
-use crate::parameter::{ParameterError, finite, positive, require};
+use crate::parameter::{ParameterError, finite, non_negative, positive, require};
 
 /// A sharp crease: a dihedral where the paper has yielded.
 ///
 /// The paper bends there alone, about the dihedral's rest angle, instead of with the plate
-/// around it.
+/// around it. Past its yield moment, the crease yields further, and its rest angle follows the
+/// fold. Released, the crease springs back by its moment over its stiffness.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crease {
     /// The moment per length that turns the crease by one radian from rest, in newton meters per
     /// meter per radian.
     pub stiffness: f64,
+    /// The moment per length past which the crease yields, in newton meters per meter; infinite
+    /// for a crease that never yields.
+    pub yield_moment: f64,
+    /// The rise of the yield moment per radian the crease yields through, in newton meters per
+    /// meter per radian.
+    pub hardening: f64,
 }
 
 impl Crease {
+    /// A crease in kami.
+    ///
+    /// The stiffness is the bending stiffness of kami over 200 thicknesses, the length that
+    /// creased sheets measure, from Lechenault, Thiria and Adda-Bedia, 2014. Paper pressed flat
+    /// springs back to 36°, from Farain, 2020, so the yield moment is the stiffness times that
+    /// angle. Pressing harder closes a fold no further, so the crease does not harden.
+    #[must_use]
+    pub const fn kami() -> Self {
+        Self {
+            stiffness: 9.0e-3,
+            yield_moment: 5.65e-3,
+            hardening: 0.0,
+        }
+    }
+
     /// Checks that every parameter takes a value it may.
     ///
     /// # Errors
     ///
     /// Returns the first parameter outside its values.
     pub fn check(&self) -> Result<(), ParameterError> {
-        positive("crease stiffness", self.stiffness)
+        positive("crease stiffness", self.stiffness)?;
+        require(
+            "yield moment",
+            self.yield_moment,
+            self.yield_moment > 0.0,
+            "positive, or infinite for a crease that never yields",
+        )?;
+        non_negative("hardening", self.hardening)
+    }
+}
+
+impl Default for Crease {
+    /// A crease in kami.
+    fn default() -> Self {
+        Self::kami()
     }
 }
 
@@ -66,6 +103,8 @@ pub struct Sheet {
     material: Material,
     creases: Vec<Option<Crease>>,
     rest_angles: Vec<f64>,
+    /// The rotation each crease has yielded through, in radians.
+    rotations: Vec<f64>,
     triangles: Vec<RestTriangle>,
     plates: Vec<RestPlate>,
     stencils: Vec<EdgeStencils>,
@@ -114,6 +153,7 @@ impl Sheet {
         Ok(Self {
             creases: vec![None; mesh.dihedrals().len()],
             rest_angles: vec![0.0; mesh.dihedrals().len()],
+            rotations: vec![0.0; mesh.dihedrals().len()],
             mesh,
             material,
             triangles,
@@ -159,6 +199,8 @@ impl Sheet {
     /// Makes an interior edge a sharp crease, changes its crease, or with `None` makes it plain
     /// paper again.
     ///
+    /// Plain paper has yielded through no rotation, so a crease made there starts unhardened.
+    ///
     /// # Errors
     ///
     /// Returns [`SheetError::NoDihedral`] when the edge is not an interior edge of the sheet,
@@ -171,9 +213,21 @@ impl Sheet {
         let index = self.dihedral(edge)?;
         if let Some(crease) = &crease {
             crease.check()?;
+        } else {
+            self.rotations[index] = 0.0;
         }
         self.creases[index] = crease;
         Ok(())
+    }
+
+    /// The rotation the crease along an interior edge has yielded through, in radians; zero for
+    /// plain paper.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoDihedral`] when the edge is not an interior edge of the sheet.
+    pub fn plastic_rotation(&self, edge: [Vertex; 2]) -> Result<f64, SheetError> {
+        Ok(self.rotations[self.dihedral(edge)?])
     }
 
     /// The dihedral angle an interior edge rests at, in radians.
@@ -216,9 +270,18 @@ impl Sheet {
         &self.creases
     }
 
-    /// Each dihedral's rest angle, in the order of the mesh's dihedrals.
-    pub(crate) fn rest_angles(&self) -> &[f64] {
-        &self.rest_angles
+    /// Where a dihedral rests, and how far its crease has yielded.
+    pub(crate) fn plastic(&self, dihedral: usize) -> Plastic {
+        Plastic {
+            rest: self.rest_angles[dihedral],
+            rotation: self.rotations[dihedral],
+        }
+    }
+
+    /// Sets where a dihedral's crease rests, and how far it has yielded, after a time step.
+    pub(crate) fn set_plastic(&mut self, dihedral: usize, state: Plastic) {
+        self.rest_angles[dihedral] = state.rest;
+        self.rotations[dihedral] = state.rotation;
     }
 
     /// The rest half-angle sines of a triangle's edges, zero where an edge takes no part in its
@@ -320,7 +383,7 @@ mod tests {
     #[test]
     fn a_crease_lies_along_an_interior_edge() {
         let mut sheet = square();
-        let crease = Crease { stiffness: 0.01 };
+        let crease = Crease::kami();
         sheet.set_crease([2, 0], Some(crease)).unwrap();
         sheet.set_rest_angle([0, 2], 1.0).unwrap();
         assert_eq!(sheet.rest_angle([2, 0]), Ok(1.0));
@@ -337,8 +400,32 @@ mod tests {
             Err(SheetError::Parameter(_))
         ));
         assert!(matches!(
-            sheet.set_crease([0, 2], Some(Crease { stiffness: -1.0 })),
+            sheet.set_crease(
+                [0, 2],
+                Some(Crease {
+                    stiffness: -1.0,
+                    ..Crease::kami()
+                })
+            ),
             Err(SheetError::Parameter(_))
         ));
+    }
+
+    #[test]
+    fn plain_paper_has_yielded_through_no_rotation() {
+        let mut sheet = square();
+        sheet.set_crease([0, 2], Some(Crease::kami())).unwrap();
+        let yielded = Plastic {
+            rest: 2.5,
+            rotation: 2.5,
+        };
+        sheet.set_plastic(0, yielded);
+        assert_eq!(sheet.plastic_rotation([2, 0]), Ok(2.5));
+        // A changed crease keeps its rotation; plain paper drops it.
+        sheet.set_crease([0, 2], Some(Crease::default())).unwrap();
+        assert_eq!(sheet.plastic(0), yielded);
+        sheet.set_crease([0, 2], None).unwrap();
+        assert_eq!(sheet.plastic_rotation([0, 2]), Ok(0.0));
+        assert_eq!(sheet.rest_angle([0, 2]), Ok(2.5));
     }
 }
