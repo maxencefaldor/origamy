@@ -6,6 +6,8 @@
 
 mod dihedral;
 mod distance;
+mod parallel;
 
 pub use dihedral::*;
 pub use distance::*;
+pub use parallel::*;

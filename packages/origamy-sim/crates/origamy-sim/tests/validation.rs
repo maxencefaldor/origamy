@@ -1,6 +1,8 @@
 //! Physics benchmarks: the simulator against known solutions, each with its acceptance threshold.
 
-use origamy_sim::{Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness};
+use origamy_sim::{
+    Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness, Table,
+};
 
 /// A rectangle of `columns` by `rows` cells of `width` by `height` meters.
 fn grid(columns: u32, rows: u32, width: f64, height: f64) -> Mesh {
@@ -286,6 +288,114 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
         assert!(
             error < 1e-6,
             "the folds miss the rigid folding by {error} rad"
+        );
+    }
+}
+
+#[test]
+fn sheets_dropped_on_the_table_stack_a_thickness_apart() {
+    // Four squares of kami fall onto the table, a millimeter apart, and settle into a stack.
+    // Every layer rests a thickness above the one below, within the barrier's gap.
+    let (layers, cells, side) = (4, 6, 0.03);
+    let kami = Material::kami();
+    let (h, gap) = (kami.thickness, Contact::default().gap);
+    let sheets = (0..layers)
+        .map(|_| Sheet::new(Mesh::grid(cells, cells, side, side).unwrap(), kami).unwrap())
+        .collect();
+    let settings = Settings {
+        time_step: 1.0 / 120.0,
+        table: Some(Table { height: 0.0 }),
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(sheets, settings).unwrap();
+    for layer in 0..layers {
+        let height = 1e-3 * f64::from(u32::try_from(layer + 1).unwrap());
+        let placed: Vec<[f64; 3]> = simulation
+            .positions(layer)
+            .iter()
+            .map(|&[x, y, _]| [x, y, height])
+            .collect();
+        simulation.set_positions(layer, &placed).unwrap();
+    }
+    for step in 0..60 {
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "step {step}: {report:?}");
+        assert!(report.least_gap > 0.0, "step {step}: {report:?}");
+    }
+    for layer in 0..layers {
+        let k = f64::from(u32::try_from(layer).unwrap());
+        let (low, high) = (0.5 * h + k * h, 0.5 * h + k * h + (k + 1.0) * gap);
+        for [_, _, z] in simulation.positions(layer) {
+            assert!(
+                (low..=high).contains(z),
+                "layer {layer} rests at {z}, outside [{low}, {high}]"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_strip_folded_over_itself_never_crosses_and_rests_above_itself() {
+    // The right half of a strip on the table folds over its crease onto the left half, which a
+    // hand holds. No step brings paper within its thickness of paper. The folded half springs
+    // into a low arch, as kami does. The arch rises half a millimeter, and its end comes down
+    // to within a tenth of a millimeter of the near end.
+    let (columns, rows, length, width) = (40, 4, 0.1, 0.01);
+    let kami = Material::kami();
+    let (h, gap) = (kami.thickness, Contact::default().gap);
+    let mut sheet = Sheet::new(Mesh::grid(columns, rows, length, width).unwrap(), kami).unwrap();
+    let at = |i: u32, j: u32| j * (columns + 1) + i;
+    let middle = columns / 2;
+    let crease: Vec<[u32; 2]> = (0..rows)
+        .map(|j| [at(middle, j), at(middle, j + 1)])
+        .collect();
+    for &edge in &crease {
+        sheet
+            .set_crease(edge, Some(Crease { stiffness: 1e-3 }))
+            .unwrap();
+    }
+    let settings = Settings {
+        time_step: 1.0 / 120.0,
+        table: Some(Table { height: 0.0 }),
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let rest = 0.5 * h + 0.5 * gap;
+    let lying: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x, y, rest])
+        .collect();
+    simulation.set_positions(0, &lying).unwrap();
+    for j in 0..=rows {
+        for i in 0..=middle {
+            simulation.hold(0, at(i, j) as usize, true);
+        }
+    }
+    let target = std::f64::consts::PI - 0.01;
+    for step in 0..180 {
+        let ramp = (f64::from(step + 1) / 60.0).min(1.0);
+        for &edge in &crease {
+            simulation
+                .sheet_mut(0)
+                .set_rest_angle(edge, ramp * target)
+                .unwrap();
+        }
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "step {step}: {report:?}");
+        assert!(report.least_gap > 0.0, "step {step}: {report:?}");
+    }
+    for j in 0..=rows {
+        for i in middle + 1..=columns {
+            let above = simulation.positions(0)[at(i, j) as usize][2] - rest;
+            assert!(above >= h, "column {i} lies {above} m above the near half");
+        }
+        let [x, _, z] = simulation.positions(0)[at(columns, j) as usize];
+        assert!(x.abs() < 2e-3, "the far end lies at x = {x}");
+        assert!(
+            z - rest < 1e-4,
+            "the far end lies {} m above the near end",
+            z - rest
         );
     }
 }

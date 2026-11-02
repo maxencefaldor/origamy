@@ -48,6 +48,9 @@ pub struct Contact {
     pub gap: f64,
     /// The barrier's energy scale, in joules: the larger, the less contact yields.
     pub stiffness: f64,
+    /// The squared sine of the angle under which two edges' barrier fades as they turn
+    /// parallel, at their rest lengths; between 0 and 1.
+    pub parallel: f64,
 }
 
 /// A table: the horizontal plane paper cannot pass below.
@@ -86,11 +89,13 @@ impl Default for Solver {
 }
 
 impl Default for Contact {
-    /// A barrier that starts 2 µm beyond the thickness, with an energy scale of 10 nJ.
+    /// A barrier that starts 2 µm beyond the thickness, with an energy scale of 10 nJ. The
+    /// barrier between two edges fades within about 1.8° of parallel.
     fn default() -> Self {
         Self {
             gap: 2e-6,
             stiffness: 1e-8,
+            parallel: 1e-3,
         }
     }
 }
@@ -150,7 +155,8 @@ impl Contact {
     /// Returns the first setting outside its values.
     pub fn check(&self) -> Result<(), ParameterError> {
         positive("contact gap", self.gap)?;
-        positive("contact stiffness", self.stiffness)
+        positive("contact stiffness", self.stiffness)?;
+        fraction("parallel", self.parallel)
     }
 }
 

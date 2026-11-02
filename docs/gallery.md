@@ -1,7 +1,8 @@
 # Gallery
 
 The models below each fold with one command from [`examples/`](https://github.com/maxencefaldor/origamy/tree/main/examples).
-Each opens in the 3D viewer, to replay its steps, orbit the paper, see every layer in x-ray, and trace each face back to the crease pattern.
+Each opens in the 3D viewer, to replay its steps, orbit the paper and see every layer in x-ray.
+The viewer also traces each face back to the crease pattern.
 
 ## Classics
 

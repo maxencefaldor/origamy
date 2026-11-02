@@ -185,6 +185,11 @@ A bounding volume hierarchy over the triangles, and another over the edges, find
 Each is built at the start of a time step and refit to every later arrangement, since paper keeps its neighbors as it moves.
 A query costs about the logarithm of the count plus what it finds, however far the primitives sweep.
 
+**Parallel edges.**
+Two parallel edges have no single closest pair of points, so their distance is not smooth there.
+The barrier between two edges fades smoothly to zero as they turn parallel, below a set angle, as in incremental potential contact.
+The points and triangles around them hold them apart there instead.
+
 **Collision-checked updates.**
 Each Newton update is cut short before any primitive would cross the offset surface of another, by continuous collision detection over the whole update.
 The detection is conservative: it may stop an update early, but it never misses a crossing.
@@ -374,7 +379,7 @@ docs/simulator.md                       this design
 | `generated` | Derivative code generated from symbolic expressions |
 | `system` | The sparse Newton system in 3 by 3 blocks, and its Cholesky factorization |
 | `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
-| `contact` | Broad phase, distances, barrier, exclusions, continuous collision detection |
+| `contact` | Bounding volume hierarchies, distances, the barrier and its fade for parallel edges, exclusions, continuous collision detection |
 | `body` | Rigid bodies on paths, grips, force fields |
 
 ### 5.5 Engineering standards
@@ -404,6 +409,11 @@ The simulator is excellent when it passes all of these, in CI:
 | Paper rolled round a cylinder | The cylinder | Exact curvature on a grid through its vertices |
 | A cantilever under gravity | The elastica | Tip deflection error under 0.1% |
 | Miura-ori folding | Rigid origami | Greatest strain under 10⁻⁸, fold angles within 10⁻⁶ rad |
+| Paper curved at rest | Its rest shape | Every vertex within 1 nm |
+| A square hung on a hinge | Hanging straight | Every vertex within 1 µm |
+| The assembled system | Finite differences of the whole potential | Gradient within 10⁻⁶ and Hessian within 10⁻⁵, with and without contact |
+| Sheets dropped on the table | k thicknesses for layer k | Each layer within the barrier's gap of its place; distances never under h |
+| A strip folded over itself onto the table | No crossing | Distances never under h at any step |
 | A fold pressed flat, then released | Measured springback | Rest angle within measured scatter |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -433,7 +443,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 and 1 are done.
+Phases 0, 1 and 2 are done.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -450,7 +460,7 @@ Two findings from phase 1 shape the next phases:
   The solver now projects only when the exact Hessian is not positive definite.
   A time step of a falling strip takes 4 iterations instead of 22, and a quasi-static fold increment 7 instead of 128.
 
-Phase 2 so far adds these findings:
+Phase 2 adds these findings:
 
 - **Every term in the total.**
   The line search once summed every energy term but contact, so a sheet landing on the table stalled a micrometer above it.

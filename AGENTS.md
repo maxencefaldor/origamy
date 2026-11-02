@@ -38,7 +38,7 @@ Each module imports only from the modules listed before it:
 1. `layers`: the layer solver's constraints, propagation and search.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
 1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
-1. `moves`, `shape`, `flex`: named moves, such as reverse and petal folds, each computing its creases and collapsing; shape steps and tilts; and flexes, as rigid origami.
+1. `moves`, `shape`, `flex`: named moves, such as reverse and petal folds, which compute their creases and collapse; shape steps and tilts; and rigid flexes.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
 1. `draw`, `render`, `exports`, `viewer`: SVG views, PNG pictures through Chromium, FOLD files, and the standalone 3D viewer.
@@ -50,7 +50,7 @@ The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, desi
 
 | Path | Holds |
 | --- | --- |
-| `crates/origamy-sim` | The core, with no Python: meshes, materials, energies and the Newton solver; contact next |
+| `crates/origamy-sim` | The core, with no Python: meshes, materials, energies, contact and the Newton solver |
 | `crates/origamy-sim-py` | The bindings, which make the core the module `origamy_sim._core` |
 | `src/origamy_sim` | The Python package: the core's classes, typed by `_core.pyi`, and the pydantic models of every parameter |
 | `codegen` | The SymPy expressions behind the generated derivative code |
@@ -60,7 +60,8 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 ## Conventions
 
 - **Tools:** the standard, official tool in each category: uv, ruff, ty, rumdl, pytest with Hypothesis, pydantic and pydantic-settings, and Playwright.
-  Add a dependency only when it is high-quality and used well; the exact kernel uses the standard library alone, and numpy serves the numeric solvers that shape paper in space.
+  Add a dependency only when it is high-quality and used well.
+  The exact kernel uses the standard library alone, and numpy serves the numeric solvers that shape paper in space.
 - **Format and lint:** [maxencefaldor/toolchain](https://github.com/maxencefaldor/toolchain): ruff's default format, every ruff rule, every ty rule as an error, and Markdown one sentence per line.
   A rule is switched off only in `pyproject.toml`, as narrowly as it can be, with its reason beside it.
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
@@ -69,7 +70,8 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   A float estimate carries an error bound and decides a sign only where the bound leaves it clear.
   Floats otherwise appear only in what people read: pictures, the viewer, FOLD files and the angles a message states.
   The form is the one exception: shaping turns paper by any angle, so a form is floats, and its checks compare motions within a tolerance.
-  A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact; a build carries its tower in its data.
+  A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact.
+  A build carries its tower in its data.
 - **Store once:** a state stores its vertices, faces with their places, and the stacking.
   Whether a crease is folded, and its mountain or valley assignment, derive from them.
 - **Feedback is facts:** origamy states what is true about an action and never says how to fix it.
@@ -82,10 +84,10 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 - **Fold scripts run in their own process** (`origamy.runner`), never in the command line.
 - **Pictures are first-class feedback:** every build draws the crease pattern, the folded paper and an x-ray, and every step.
 - **The viewer** is `assets/viewer.js` and `assets/viewer.css`, written into one HTML page with the build as data.
-  It draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
-  It loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
+  The viewer draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
+  The viewer loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
 - **Rust:** `rust-toolchain.toml` pins the toolchain, and `Cargo.lock` every crate.
-  rustfmt formats, clippy's pedantic group lints as errors, and the core forbids unsafe code.
+  The code is formatted by rustfmt and linted by clippy's pedantic group as errors, and the core forbids unsafe code.
   PyO3 and maturin build the bindings, and proptest tests properties.
 - **Physics:** SI units and 64-bit floats.
   Every physical and numerical quantity is an input with a documented default, and a preset, such as kami, is a named set of values.

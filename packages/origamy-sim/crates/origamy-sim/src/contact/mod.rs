@@ -17,6 +17,7 @@ use bvh::{Bounds, Bvh};
 use rayon::prelude::*;
 
 use crate::energy::{Barrier, Point};
+use crate::generated::edge_cross_squared;
 use crate::settings::Contact;
 pub(crate) use distance::Kind;
 
@@ -105,24 +106,96 @@ impl Contact {
         ])
     }
 
-    /// The gradient and Hessian of a pair's barrier over its four vertices, or `None` where the
-    /// pair lies beyond the barrier's reach.
+    /// The squared cross product of two edges' directions under which their barrier fades, at
+    /// the edges' rest lengths; `None` for a point and a triangle.
+    pub(crate) fn fade(&self, primitives: &Primitives, pair: &Pair) -> Option<f64> {
+        match pair.kind {
+            Kind::PointTriangle => None,
+            Kind::EdgeEdge => {
+                let [a, b, c, d] = pair.at(&primitives.rest);
+                Some(self.parallel * (b - a).norm_squared() * (d - c).norm_squared())
+            }
+        }
+    }
+
+    /// The barrier of a pair at positions `x`, faded below `fade`: infinite where the pair
+    /// reaches its thickness.
+    pub(crate) fn pair_energy(
+        &self,
+        pair: &Pair,
+        x: &[Point],
+        thickness: f64,
+        fade: Option<f64>,
+    ) -> f64 {
+        let points = pair.at(x);
+        let Some([value, _, _]) = self.pair(distance::squared(pair.kind, &points), thickness)
+        else {
+            return f64::INFINITY;
+        };
+        let [weight, _, _] = fade.map_or([1.0, 0.0, 0.0], |fade| {
+            let [start, end, other_start, other_end] = points;
+            let cross = (end - start).cross(&(other_end - other_start));
+            mollifier(cross.norm_squared(), fade)
+        });
+        value * weight
+    }
+
+    /// The gradient and Hessian of a pair's barrier over its four vertices, faded below
+    /// `fade`, or `None` where the pair lies beyond the barrier's reach.
     pub(crate) fn pair_derivatives(
         &self,
         pair: &Pair,
         x: &[Point],
         thickness: f64,
+        fade: Option<f64>,
     ) -> Option<(SMatrix<f64, 12, 1>, SMatrix<f64, 12, 12>)> {
         let points = pair.at(x);
         if distance::squared(pair.kind, &points) >= (thickness + self.gap).powi(2) {
             return None;
         }
         let (squared, gradient, hessian) = distance::derivatives(pair.kind, &points);
-        let [_, slope, curvature] = self.pair(squared, thickness)?;
+        let [value, slope, curvature] = self.pair(squared, thickness)?;
+        let barrier_gradient = gradient * slope;
+        let barrier_hessian = gradient * gradient.transpose() * curvature + hessian * slope;
+        let Some(fade) = fade else {
+            return Some((barrier_gradient, barrier_hessian));
+        };
+        let [start, end, other_start, other_end] = points.map(|p| [p[0], p[1], p[2]]);
+        let (cross, cross_gradient, cross_hessian) =
+            edge_cross_squared(start, end, other_start, other_end);
+        let [weight, weight_slope, weight_curvature] = mollifier(cross, fade);
+        if weight_slope == 0.0 {
+            return Some((barrier_gradient, barrier_hessian));
+        }
+        let cross_gradient = SMatrix::<f64, 12, 1>::from_column_slice(&cross_gradient);
+        let cross_hessian = SMatrix::<f64, 12, 12>::from_fn(|i, j| cross_hessian[i][j]);
+        let weight_gradient = cross_gradient * weight_slope;
+        let weight_hessian = cross_gradient * cross_gradient.transpose() * weight_curvature
+            + cross_hessian * weight_slope;
         Some((
-            gradient * slope,
-            gradient * gradient.transpose() * curvature + hessian * slope,
+            barrier_gradient * weight + weight_gradient * value,
+            barrier_hessian * weight
+                + weight_gradient * barrier_gradient.transpose()
+                + barrier_gradient * weight_gradient.transpose()
+                + weight_hessian * value,
         ))
+    }
+}
+
+/// The weight that fades two edges' barrier as they turn parallel, with its derivatives.
+///
+/// The weight is a function of the squared cross product `cross` of the edges' directions. It
+/// is 1 from `fade` up, and falls smoothly to 0 as the edges turn parallel.
+///
+/// Parallel edges have no single closest pair of points, so their distance is not smooth there.
+/// The points and triangles around them hold them apart instead. The weight follows incremental
+/// potential contact: (2 − s) s, with s the cross product over `fade`.
+fn mollifier(cross: f64, fade: f64) -> [f64; 3] {
+    let s = cross / fade;
+    if s >= 1.0 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [(2.0 - s) * s, (2.0 - 2.0 * s) / fade, -2.0 / (fade * fade)]
     }
 }
 
@@ -222,6 +295,7 @@ fn resting(primitives: &Primitives, pair: &Pair, margin: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::energy::testing::check;
 
     /// Two unit squares of two triangles each, the second `height` above the first.
     fn stack(height: f64) -> (Primitives, Vec<Point>) {
@@ -297,10 +371,66 @@ mod tests {
     }
 
     #[test]
+    fn nearly_parallel_edges_fade_their_barrier_smoothly() {
+        // Two edges crossing a thickness apart, 0.02 rad from parallel: within the fade.
+        let (h, contact) = (70e-6, Contact::default());
+        let x = SMatrix::<f64, 12, 1>::from_column_slice(&[
+            0.0,
+            0.0,
+            0.0,
+            0.01,
+            0.0,
+            0.0,
+            0.002,
+            -0.0001,
+            h + 1e-6,
+            0.012,
+            0.0001,
+            h + 1.2e-6,
+        ]);
+        let points = |x: &SMatrix<f64, 12, 1>| -> Vec<Point> {
+            (0..4)
+                .map(|k| x.fixed_rows::<3>(3 * k).into_owned())
+                .collect()
+        };
+        let pair = Pair {
+            kind: Kind::EdgeEdge,
+            vertices: [0, 1, 2, 3],
+        };
+        let fade = Some(1e-3 * 1e-4 * 1e-4);
+        let weight = |x: &SMatrix<f64, 12, 1>| {
+            let p = points(x);
+            mollifier((p[1] - p[0]).cross(&(p[3] - p[2])).norm_squared(), 1e-11)[0]
+        };
+        assert!(weight(&x) > 0.5 && weight(&x) < 1.0);
+        let (_, hessian) = contact
+            .pair_derivatives(&pair, &points(&x), h, fade)
+            .unwrap();
+        check(
+            x,
+            |x| contact.pair_energy(&pair, &points(x), h, fade),
+            |x| {
+                contact
+                    .pair_derivatives(&pair, &points(x), h, fade)
+                    .unwrap()
+                    .0
+            },
+            &hessian,
+            1e-10,
+            1e-4,
+        );
+        // Parallel edges take no barrier, though they lie as close.
+        let mut parallel = points(&x);
+        parallel[3] = parallel[2] + (parallel[1] - parallel[0]);
+        assert!(contact.pair_energy(&pair, &parallel, h, fade).abs() < f64::MIN_POSITIVE);
+    }
+
+    #[test]
     fn the_barrier_reaches_only_to_the_gap() {
         let contact = Contact {
             gap: 1e-5,
             stiffness: 1e-6,
+            ..Contact::default()
         };
         let h = 7e-5;
         assert_eq!(contact.pair((h + 1e-5) * (h + 1e-5), h), Some([0.0; 3]));

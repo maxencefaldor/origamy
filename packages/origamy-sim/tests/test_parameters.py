@@ -105,7 +105,7 @@ def test_pydantic_accepts_a_crease_exactly_when_the_core_does(stiffness: float) 
             "shortest_update": NUMBERS,
         }
     ),
-    st.fixed_dictionaries({"gap": NUMBERS, "stiffness": NUMBERS}),
+    st.fixed_dictionaries({"gap": NUMBERS, "stiffness": NUMBERS, "parallel": NUMBERS}),
     st.none() | st.fixed_dictionaries({"height": NUMBERS}),
 )
 def test_pydantic_accepts_settings_exactly_when_the_core_does(

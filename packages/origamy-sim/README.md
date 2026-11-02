@@ -19,16 +19,20 @@ Every physical and numerical quantity is an input, in SI units, with a documente
 
 ## Status
 
-Phases 0 and 1 of the plan are done: the foundations, and the elastic sheet.
+Phases 0 to 2 of the plan are done: the foundations, the elastic sheet, and contact with real thickness.
 A sheet stretches, bends and folds along sharp creases, under gravity and held vertices, in implicit or quasi-static time steps.
+Paper never comes closer than its thickness to paper or to the table.
 Benchmarks hold it to known solutions:
 
 - A cantilever bent by its own weight to 30% of its length matches the elastica within 0.1%.
 - A Miura-ori folds rigidly to 120° as its creases are actuated, with strain under 10⁻⁸.
 - A grid rolled round a cylinder through its vertices takes the cylinder's exact curvature.
-- Every gradient and Hessian matches finite differences.
+- A strip curved at rest rolls into its rest shape within 1 nm.
+- Four sheets dropped on the table stack a thickness apart, each within the barrier's 2 µm gap.
+- A strip folded over itself onto the table never brings paper within its thickness of paper.
+- Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Contact with real thickness comes next, in phase 2.
+Friction and dynamics come next, in phase 3.
 
 ## Install
 

@@ -166,12 +166,14 @@ impl Parameters for Contact {
         Ok(Self {
             gap: field(model, "gap")?,
             stiffness: field(model, "stiffness")?,
+            parallel: field(model, "parallel")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("gap", self.gap)?;
-        fields.set_item("stiffness", self.stiffness)
+        fields.set_item("stiffness", self.stiffness)?;
+        fields.set_item("parallel", self.parallel)
     }
 }
 

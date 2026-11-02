@@ -5,7 +5,17 @@ import re
 import numpy as np
 import pytest
 
-from origamy_sim import Crease, Mesh, Settings, Sheet, Simulation, SingularError
+from origamy_sim import (
+    Contact,
+    Crease,
+    Material,
+    Mesh,
+    Settings,
+    Sheet,
+    Simulation,
+    SingularError,
+    Table,
+)
 
 SIDE = 0.1
 SQUARE = Mesh([[0, 0], [SIDE, 0], [SIDE, SIDE], [0, SIDE]], [[0, 1, 2], [0, 2, 3]])
@@ -149,3 +159,21 @@ def test_a_rest_angle_curves_plain_paper() -> None:
     assert report.converged
     assert report.energy.bending == pytest.approx(0, abs=1e-15)
     assert simulation.fold_angles(0) == pytest.approx([0.3], abs=1e-6)
+
+
+def test_stacked_sheets_land_on_the_table_a_thickness_apart() -> None:
+    mesh = Mesh.grid(4, 4, 0.02, 0.02)
+    table = Table(height=0.0)
+    simulation = Simulation([Sheet(mesh), Sheet(mesh)], Settings(table=table))
+    for sheet, height in enumerate((1e-3, 2e-3)):
+        lifted = simulation.positions(sheet)
+        lifted[:, 2] = height
+        simulation.set_positions(sheet, lifted)
+    reports = [simulation.step() for _ in range(30)]
+    assert all(r.converged and r.least_gap > 0 for r in reports)
+    h, gap = Material().thickness, Contact().gap
+    lower, upper = simulation.positions(0)[:, 2], simulation.positions(1)[:, 2]
+    assert ((lower > h / 2) & (lower < h / 2 + gap)).all()
+    assert ((upper - lower > h) & (upper - lower < h + 2 * gap)).all()
+    assert reports[-1].contacts > 0
+    assert reports[-1].energy.contact > 0

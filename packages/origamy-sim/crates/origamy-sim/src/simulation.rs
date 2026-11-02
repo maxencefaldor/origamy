@@ -717,10 +717,8 @@ impl Simulation {
         let barriers: Vec<f64> = pairs
             .par_iter()
             .map(|pair| {
-                let squared = distance::squared(pair.kind, &pair.at(x));
-                contact
-                    .pair(squared, self.pair_thickness(pair))
-                    .map_or(f64::INFINITY, |[value, _, _]| value)
+                let fade = contact.fade(&self.primitives, pair);
+                contact.pair_energy(pair, x, self.pair_thickness(pair), fade)
             })
             .collect();
         energy.contact = barriers.iter().sum();
@@ -809,8 +807,9 @@ impl Simulation {
             pairs: pairs
                 .par_iter()
                 .filter_map(|pair| {
+                    let fade = contact.fade(&self.primitives, pair);
                     let (gradient, hessian) =
-                        contact.pair_derivatives(pair, x, self.pair_thickness(pair))?;
+                        contact.pair_derivatives(pair, x, self.pair_thickness(pair), fade)?;
                     Some((pair.stencil(), gradient, hessian))
                 })
                 .collect(),
@@ -1313,38 +1312,42 @@ mod tests {
     #[test]
     fn the_assembly_differentiates_contact() {
         // A small sheet lies turned over a larger one, which lies on the table, each within
-        // the reach of contact.
-        let (h, gap) = (70e-6, 2e-6);
-        let lower = Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
-        let upper = Sheet::new(Mesh::grid(2, 2, 0.006, 0.006).unwrap(), Material::kami()).unwrap();
-        let settings = Settings {
-            table: Some(Table { height: 0.0 }),
-            ..Settings::default()
-        };
-        let simulation = Simulation::new(vec![lower, upper], settings).unwrap();
-        let turn = nalgebra::Rotation3::from_axis_angle(&Vector3::z_axis(), 0.3);
-        let x: Vec<Point> = simulation
-            .positions
-            .iter()
-            .enumerate()
-            .map(|(v, p)| {
-                let flat = Point::new(p[0], p[1], 0.0);
-                let placed = if v < 16 {
-                    flat + Point::new(0.0, 0.0, 0.5 * h + 0.6 * gap)
-                } else {
-                    turn * flat + Point::new(0.003, 0.001, 1.5 * h + 1.2 * gap)
-                };
-                placed + wobble(v, 0.1 * gap)
-            })
-            .collect();
-        let pairs = simulation.candidates(&x, &x);
-        let energy = simulation.potential(&x, &x, 0.0, &pairs).energy;
-        assert!(
-            energy.contact > 0.0 && pairs.len() > 10,
-            "{} pairs",
-            pairs.len()
-        );
-        let predicted: Vec<Point> = x.iter().map(|p| p - Point::new(0.0, 0.0, 1e-3)).collect();
-        check(&simulation, &x, &predicted, 1e-9);
+        // the reach of contact. At a turn of 0.02 rad, edges lie within the fade of parallel.
+        for turn in [0.3, 0.02] {
+            let (h, gap) = (70e-6, 2e-6);
+            let lower =
+                Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+            let upper =
+                Sheet::new(Mesh::grid(2, 2, 0.006, 0.006).unwrap(), Material::kami()).unwrap();
+            let settings = Settings {
+                table: Some(Table { height: 0.0 }),
+                ..Settings::default()
+            };
+            let simulation = Simulation::new(vec![lower, upper], settings).unwrap();
+            let rotation = nalgebra::Rotation3::from_axis_angle(&Vector3::z_axis(), turn);
+            let x: Vec<Point> = simulation
+                .positions
+                .iter()
+                .enumerate()
+                .map(|(v, p)| {
+                    let flat = Point::new(p[0], p[1], 0.0);
+                    let placed = if v < 16 {
+                        flat + Point::new(0.0, 0.0, 0.5 * h + 0.6 * gap)
+                    } else {
+                        rotation * flat + Point::new(0.003, 0.001, 1.5 * h + 1.2 * gap)
+                    };
+                    placed + wobble(v, 0.1 * gap)
+                })
+                .collect();
+            let pairs = simulation.candidates(&x, &x);
+            let energy = simulation.potential(&x, &x, 0.0, &pairs).energy;
+            assert!(
+                energy.contact > 0.0 && pairs.len() > 10,
+                "{} pairs",
+                pairs.len()
+            );
+            let predicted: Vec<Point> = x.iter().map(|p| p - Point::new(0.0, 0.0, 1e-3)).collect();
+            check(&simulation, &x, &predicted, 1e-9);
+        }
     }
 }

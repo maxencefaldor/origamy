@@ -162,6 +162,17 @@ def distances() -> dict[str, tuple[str, sp.Basic, list[sp.Symbol]]]:
     }
 
 
+def parallel() -> tuple[sp.Basic, list[sp.Symbol]]:
+    """The squared size of the cross product of two edges' directions.
+
+    The size vanishes as the edges turn parallel, where their barrier fades.
+    """
+    a, b, c, d = vectors("abcd")
+    cross = (b - a).cross(d - c)
+    squared = sp.Add(*(component**2 for component in cross))
+    return squared, [s for v in (a, b, c, d) for s in v]
+
+
 def derivatives(
     name: str, doc: str, function: sp.Basic, variables: list[sp.Symbol]
 ) -> str:
@@ -216,6 +227,14 @@ def main() -> None:
             symbols,
         )
         for name, (between, value, symbols) in distances().items()
+    )
+    cross, variables = parallel()
+    modules["parallel"] = derivatives(
+        "edge_cross_squared",
+        "The squared size of the cross product of the edges from `a` to `b` and\n"
+        "from `c` to `d`, with its gradient and Hessian.",
+        cross,
+        variables,
     )
     GENERATED.mkdir(exist_ok=True)
     for name, code in modules.items():

@@ -185,6 +185,10 @@ class Contact(_Parameters):
     stiffness: Positive = 1e-8
     """The barrier's energy scale, in joules: the larger, the less contact yields."""
 
+    parallel: Fraction = 1e-3
+    """The squared sine of the angle under which two edges' barrier fades as they turn
+    parallel, at their rest lengths: 0.001 is about 1.8°."""
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""

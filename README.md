@@ -10,7 +10,8 @@ Every build draws the crease pattern, the folded paper and an x-ray of its layer
 
 The tool is a simulator and a compiler at once.
 No list of legal moves exists: the agent proposes any fold, and origamy says exactly what happens.
-Coordinates are exact numbers built from the rationals by square roots, so every check is exact: the 22.5° angles of the bird base, the 11.25° creases of a crane, and any angle bisected.
+Coordinates are exact numbers built from the rationals by square roots, so every check is exact.
+The 22.5° angles of the bird base, the 11.25° creases of a crane, and any angle bisected all stay exact.
 
 The [documentation](https://maxencefaldor.github.io/origamy/) teaches the fold scripts, the actions and the rules.
 The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each example in the 3D viewer: classics such as the crane and the paper plane, bases, and original models.
@@ -30,7 +31,8 @@ uv run playwright install chromium                   # the browser origamy draws
 
 A fold script defines `fold()`, which folds a `Paper` and returns it.
 Coordinates are where the paper lies now, seen from above, with the unfolded square from (0, 0) to (1, 1).
-Each fold takes a line and a flap point: the paper at that point, and everything joined to it on its side of the line, turns over the line.
+Each fold takes a line and a flap point.
+The paper at that point, and everything joined to it on its side of the line, turns over the line.
 
 ```python
 from origamy import Line, Paper
@@ -56,7 +58,8 @@ The [cup example](examples/cup.py) folds a traditional paper cup with exact cons
 ## Viewer
 
 Every build also writes a standalone page, such as `square.html`, that replays the fold in 3D.
-It shows the crease pattern beside the folded paper, animates each step with the paper whole, bends each folded edge round, and lets people orbit, view from above or below, and see through the layers.
+The viewer shows the crease pattern beside the folded paper, and animates each step with the paper whole.
+Each folded edge bends round, and people can orbit, view from above or below, and see through the layers.
 Hovering a face lights it in both views, and each step names its script line and its facts.
 
 ![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](docs/images/viewer.png)
@@ -71,7 +74,9 @@ The [preliminary base](examples/preliminary_base.py) precreases four lines throu
 paper.collapse(valleys=[upright, level], mountains=[falling])
 ```
 
-Two queries find the creases to name: `paper.creases(line)` gives the creases lying along a line now, as crease pattern segments, and `paper.origin(point)` gives where a point of the top layer lies on the unfolded paper.
+Two queries find the creases to name.
+`paper.creases(line)` gives the creases lying along a line now, as crease pattern segments.
+`paper.origin(point)` gives where a point of the top layer lies on the unfolded paper.
 Before folding, a collapse checks every vertex with Maekawa's and Kawasaki's theorems, and the layer solver checks every stacking.
 
 ## Named moves
@@ -90,7 +95,9 @@ The [bird base](examples/bird_base.py) collapses a preliminary base, then petal 
 ## Shape
 
 Shaping opens folds part of the way, as hands spread a crane's wings, so the model leaves the table.
-A shape step turns paper about its hinge by an angle, a flex folds creases that meet at a vertex together, and a tilt holds the whole model up:
+Three actions shape paper in space.
+A shape step turns paper about its hinge by an angle, and a flex folds creases that meet at a vertex together.
+A tilt holds the model up:
 
 ```python
 paper.shape(shoulders, flap=wing, angle=90, layers=1)
@@ -108,12 +115,14 @@ From a clone of this repository, Claude Code adds it with one command:
 claude mcp add origamy -- uv run --directory /path/to/origamy origamy-mcp
 ```
 
-The tool `fold_model` runs a fold script and answers with the report and both pictures, `view_model` draws any step in 3D from any direction, and `explain_rule` gives a rule's exact condition.
+The tool `fold_model` runs a fold script and answers with the report and both pictures.
+The tool `view_model` draws any step in 3D from any direction, and `explain_rule` gives a rule's exact condition.
 The skill in [.claude/skills/fold-model](.claude/skills/fold-model/SKILL.md) teaches the loop, the coordinates and the actions, and no designs.
 
 ## Feedback is facts
 
-A refused action stops the build at its line, and the picture shows the paper the action began on, with the fold line and the faces involved.
+A refused action stops the build at its line.
+The picture shows the paper the action began on, with the fold line and the faces involved.
 
 ```text
 broken.py: 1 step folded, then step 2 refused
@@ -148,15 +157,19 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 The state of the paper is its crease pattern, where each face lies, and which face is above wherever two overlap.
 Coordinates are exact numbers in a tower of square roots, so every crease a construction finds is exact.
 Float estimates with error bounds decide most signs fast, and exact arithmetic decides the rest.
-A fold reflects the faces it moves across its line, and a collapse places each face by the reflections across the folds between it and a fixed face.
+A fold reflects the faces it moves across its line.
+A collapse places each face by the reflections across the folds between it and a fixed face.
 The layer solver then finds how the faces stack, after the constraints of [Flat-Folder](https://erikdemaine.org/papers/FlatFolder_OSME2024/paper.pdf): taco-taco, taco-tortilla, tortilla-tortilla and transitivity.
-The paper that stays keeps its order, the paper that moves reverses its own, and a valley fold lands it on top or a mountain fold underneath.
+The paper that stays keeps its order, and the paper that moves reverses its own.
+A valley fold lands the moving paper on top, and a mountain fold underneath.
 A collapse moves the paper as little through itself as it can: each face that turns about a fold lands beside the face across it.
 When no stacking exists, origamy names the constraints that conflict.
 
 ## Status
 
-The project is in its first phase: exact folds, unfolds, precreases, collapses, reverse and petal folds, shaping, the layer solver, pictures, a 3D viewer, an MCP server and FOLD export.
+The project is in its first phase.
+The phase covers exact folds, unfolds, precreases, collapses, reverse and petal folds, and shaping.
+The layer solver, pictures, a 3D viewer, an MCP server and FOLD export complete it.
 The [crane](examples/crane.py) folds end to end, from the square to its wings spread in space.
 Squash and sink folds, and shaping that bends paper as well as folding it, come next.
 
