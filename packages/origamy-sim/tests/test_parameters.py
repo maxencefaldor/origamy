@@ -85,7 +85,10 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
 
 @given(
     st.fixed_dictionaries(
-        dict.fromkeys(("stiffness", "yield_moment", "hardening"), NUMBERS)
+        dict.fromkeys(
+            ("stiffness", "yield_moment", "hardening", "aging_moment", "aging_rate"),
+            NUMBERS,
+        )
     )
 )
 def test_pydantic_accepts_a_crease_exactly_when_the_core_does(

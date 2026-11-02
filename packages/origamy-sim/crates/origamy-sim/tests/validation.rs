@@ -233,7 +233,7 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
         })
         .collect();
     let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
-    // The creases never yield, so the actuation alone sets their rest angles.
+    // The creases never yield or age, so the actuation alone sets their rest angles.
     for &edge in &creases {
         sheet
             .set_crease(
@@ -241,7 +241,8 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
                 Some(Crease {
                     stiffness: 0.1,
                     yield_moment: f64::INFINITY,
-                    hardening: 0.0,
+                    aging_rate: 0.0,
+                    ..Crease::kami()
                 }),
             )
             .unwrap();
@@ -556,11 +557,11 @@ fn kami_falls_flat_at_the_terminal_velocity_that_drag_sets() {
 
 /// A strip of kami 6 cm long with a crease across its middle, in quasi-static steps without
 /// gravity. A hand holds the strip and turns its far half about the crease to each of `folds`
-/// in turn, then lets the far half go.
+/// in turn. The hand holds the last fold for `hold` seconds, then lets the far half go.
 ///
 /// Returns the crease's rest angle, its fold angle once the strip rests again, and the rotation
-/// it has yielded through.
-fn turn_and_release(folds: &[f64]) -> (f64, f64, f64) {
+/// it has flowed through.
+fn turn_and_release(folds: &[f64], hold: f64) -> (f64, f64, f64) {
     let (columns, rows, length, width) = (12, 4, 0.06, 0.015);
     let mesh = Mesh::grid(columns, rows, length, width).unwrap();
     let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
@@ -594,6 +595,20 @@ fn turn_and_release(folds: &[f64]) -> (f64, f64, f64) {
         simulation.set_positions(0, &turned).unwrap();
         assert!(simulation.step().unwrap().converged);
     }
+    // Time passes in time steps that grow by a tenth each, since the crease ages in log time.
+    let (mut elapsed, mut dt) = (0.0, 1e-3);
+    while elapsed < hold {
+        let step = f64::min(dt, hold - elapsed);
+        simulation
+            .set_settings(Settings {
+                time_step: step,
+                ..settings
+            })
+            .unwrap();
+        assert!(simulation.step().unwrap().converged);
+        (elapsed, dt) = (elapsed + step, 1.1 * dt);
+    }
+    simulation.set_settings(settings).unwrap();
     for &v in &far {
         simulation.hold(0, v, false);
     }
@@ -630,7 +645,7 @@ fn kami_pressed_flat_springs_back_to_the_measured_angle() {
     // thickness apart where their diagonals cross. Released, the fold opens to between 30° and
     // 40°, as measured creases rest, and the crease rests where the fold does.
     let closed = std::f64::consts::PI - 0.04;
-    let (rest, fold, _) = turn_and_release(&ramp(0.0, closed, 32));
+    let (rest, fold, _) = turn_and_release(&ramp(0.0, closed, 32), 0.0);
     let opening = (std::f64::consts::PI - fold).to_degrees();
     assert!(
         (30.0..=40.0).contains(&opening),
@@ -655,7 +670,7 @@ fn a_crease_springs_back_by_its_yield_angle_or_whole_below_it() {
         ),
         (0.5, 0.0),
     ] {
-        let (rest, fold, rotation) = turn_and_release(&ramp(0.0, folded, 16));
+        let (rest, fold, rotation) = turn_and_release(&ramp(0.0, folded, 16), 0.0);
         assert!(
             (rest - expected).abs() < 1e-12,
             "the crease rests at {rest}"
@@ -674,7 +689,7 @@ fn a_precrease_pressed_flat_again_springs_back_by_its_yield_angle() {
     let closed = std::f64::consts::PI - 0.04;
     let mut folds = ramp(0.0, closed, 32);
     folds.extend(ramp(closed, 0.0, 32));
-    let (rest, fold, rotation) = turn_and_release(&folds);
+    let (rest, fold, rotation) = turn_and_release(&folds, 0.0);
     assert!(
         (rest - springback).abs() < 1e-12,
         "the crease rests at {rest}"
@@ -684,5 +699,34 @@ fn a_precrease_pressed_flat_again_springs_back_by_its_yield_angle() {
     assert!(
         (rotation - yielded).abs() < 1e-12,
         "the crease yielded {rotation} rad"
+    );
+}
+
+#[test]
+fn a_fold_of_kami_held_longer_springs_back_less() {
+    // Held past its yield, the crease ages: its moment falls by m* ln(1 + t / τ), with τ about
+    // a second. The fold therefore springs back less. Between holds of 10 and 100 s, the
+    // springback falls by about the 5.7° a decade that paper measures.
+    let kami = Crease::kami();
+    let tau = 2.0 * kami.aging_moment
+        / (kami.stiffness * kami.aging_rate * (kami.yield_moment / kami.aging_moment).exp());
+    let folded = std::f64::consts::FRAC_PI_2;
+    let mut springbacks = Vec::new();
+    for hold in [1.0, 10.0, 100.0] {
+        let (rest, fold, _) = turn_and_release(&ramp(0.0, folded, 16), hold);
+        let springback = folded - fold;
+        let law =
+            (kami.yield_moment - kami.aging_moment * (1.0 + hold / tau).ln()) / kami.stiffness;
+        assert!(
+            (springback - law).abs() < 2e-3,
+            "held {hold} s, the fold springs back {springback} rad; the law says {law}"
+        );
+        assert!((fold - rest).abs() < 1e-6);
+        springbacks.push(springback);
+    }
+    let decade = (springbacks[1] - springbacks[2]).to_degrees();
+    assert!(
+        (decade / 5.7 - 1.0).abs() < 0.05,
+        "a decade of holding sets {decade}° deeper"
     );
 }

@@ -11,7 +11,8 @@ use crate::parameter::{ParameterError, finite, non_negative, positive, require};
 ///
 /// The paper bends there alone, about the dihedral's rest angle, instead of with the plate
 /// around it. Past its yield moment, the crease yields further, and its rest angle follows the
-/// fold. Released, the crease springs back by its moment over its stiffness.
+/// fold. Released, the crease springs back by its moment over its stiffness. Below its yield
+/// moment, the crease ages: its rest angle creeps toward the fold, faster the larger its moment.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crease {
     /// The moment per length that turns the crease by one radian from rest, in newton meters per
@@ -20,9 +21,18 @@ pub struct Crease {
     /// The moment per length past which the crease yields, in newton meters per meter; infinite
     /// for a crease that never yields.
     pub yield_moment: f64,
-    /// The rise of the yield moment per radian the crease yields through, in newton meters per
+    /// The rise of the yield moment per radian the crease flows through, in newton meters per
     /// meter per radian.
     pub hardening: f64,
+    /// The moment per length that multiplies the rate of aging by e, in newton meters per meter.
+    ///
+    /// A crease held at an angle loses this moment for each factor e its hold time grows by.
+    pub aging_moment: f64,
+    /// The rate of aging, in radians per second; zero for a crease that never ages.
+    ///
+    /// The rest angle creeps by this rate times the hyperbolic sine of the moment over the aging
+    /// moment.
+    pub aging_rate: f64,
 }
 
 impl Crease {
@@ -32,12 +42,18 @@ impl Crease {
     /// creased sheets measure, from Lechenault, Thiria and Adda-Bedia, 2014. Paper pressed flat
     /// springs back to 36°, from Farain, 2020, so the yield moment is the stiffness times that
     /// angle. Pressing harder closes a fold no further, so the crease does not harden.
+    ///
+    /// Paper held folded sets 5.7° deeper for each tenfold of the hold, from Farain, 2020, which
+    /// gives the aging moment. Folds measured by Jules et al., 2020, begin to relax after about a
+    /// second, which gives the aging rate.
     #[must_use]
     pub const fn kami() -> Self {
         Self {
             stiffness: 9.0e-3,
             yield_moment: 5.65e-3,
             hardening: 0.0,
+            aging_moment: 3.89e-4,
+            aging_rate: 4.25e-8,
         }
     }
 
@@ -54,7 +70,9 @@ impl Crease {
             self.yield_moment > 0.0,
             "positive, or infinite for a crease that never yields",
         )?;
-        non_negative("hardening", self.hardening)
+        non_negative("hardening", self.hardening)?;
+        positive("aging moment", self.aging_moment)?;
+        non_negative("aging rate", self.aging_rate)
     }
 }
 
@@ -103,7 +121,7 @@ pub struct Sheet {
     material: Material,
     creases: Vec<Option<Crease>>,
     rest_angles: Vec<f64>,
-    /// The rotation each crease has yielded through, in radians.
+    /// The rotation each crease has yielded and crept through, in radians.
     rotations: Vec<f64>,
     triangles: Vec<RestTriangle>,
     plates: Vec<RestPlate>,
@@ -199,7 +217,7 @@ impl Sheet {
     /// Makes an interior edge a sharp crease, changes its crease, or with `None` makes it plain
     /// paper again.
     ///
-    /// Plain paper has yielded through no rotation, so a crease made there starts unhardened.
+    /// Plain paper has flowed through no rotation, so a crease made there starts unhardened.
     ///
     /// # Errors
     ///
@@ -220,8 +238,8 @@ impl Sheet {
         Ok(())
     }
 
-    /// The rotation the crease along an interior edge has yielded through, in radians; zero for
-    /// plain paper.
+    /// The rotation the crease along an interior edge has yielded and crept through, in radians;
+    /// zero for plain paper.
     ///
     /// # Errors
     ///

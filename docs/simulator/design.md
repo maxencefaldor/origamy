@@ -58,6 +58,7 @@ A sheet of kami, the thin paper most origami uses, sets the scales below.
 | Width of a crease | S₀ | about 0.5 mm |
 | Stiffness of a crease | κ ≈ D / 200h | 9 mN·m/m/rad |
 | Springback of a crease pressed flat | M_y / κ | about 36° |
+| Deeper set of a crease held longer | (m* / κ) ln 10 per tenfold of the hold | about 5.7° |
 | Friction of paper on paper | μ | 0.17 to 0.44 sliding, 0.33 to 0.61 at rest |
 | Terminal velocity of a sheet falling flat | √(2ρhg / ρₐC) | 0.91 m/s |
 
@@ -173,11 +174,13 @@ The simulator models it the same way:
   Bending within the band costs a reduced stiffness, about its rest curvature.
 - **Plasticity.**
   When the bending moment in the band passes a yield moment, the rest curvature moves toward the current curvature.
-  Hardening raises the yield moment with the rotation the crease has yielded through.
+  Hardening raises the yield moment with the rotation the crease has yielded and crept through.
   Pressing a fold flat therefore makes it rest more closed; releasing it lets it spring back to its rest angle.
   The springback is the yield moment over the stiffness, 36° for paper.
 - **Aging.**
-  The rest curvature relaxes slowly toward the current one, logarithmically in time, as folded paper does.
+  Below the yield moment, the rest curvature creeps toward the current one at the rate ω sinh(m / m*), as thermally activated flow does.
+  A held fold therefore loses moment logarithmically in time, and sets deeper the longer it is held.
+  Quasi-static steps span no time, so creases yield in them but do not age.
 - **A precrease.**
   A crease folded flat, then pressed flat again, yields both ways.
   Released, it rises by its springback toward the side it was folded to.
@@ -321,7 +324,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction |
 | Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
-| Crease | Band width, stiffness, yield moment, hardening, aging rate |
+| Crease | Band width, stiffness, yield moment, hardening, aging moment and aging rate |
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
@@ -468,6 +471,7 @@ The simulator is excellent when it passes all of these, in CI:
 | A fold pressed flat, then released | Measured springback | Opening between 30° and 40°, the measured scatter |
 | A fold turned short of or past its yield angle, then released | Perfect plasticity | Springs back whole, or by its yield angle, within 10⁻⁶ rad |
 | A precrease pressed flat again, then released | Perfect plasticity | Rises by its yield angle, within 10⁻⁶ rad |
+| A fold held for 1, 10 and 100 s, then released | Logarithmic aging, and paper's 5.7° a decade | Springback within 0.002 rad of the law; a decade within 5% of 5.7° |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
 | The crane, folded by hand from the square | origamy's exact layer orders | Same layer order at every flat state, no crossing |
@@ -496,7 +500,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 3 are done, and phase 4 has its plastic creases.
+Phases 0 to 3 are done, and phase 4 has creases that yield and age.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -574,6 +578,7 @@ A research track runs alongside, with ambitious targets:
 | Friction | Lagged, smoothed Coulomb friction in the incremental potential | Friction forces applied after each step, which stick and slip at large time steps; exact Coulomb constraints, which are not smooth |
 | Air | Quadratic drag across the sheet, as a potential | Damping proportional to mass, which slows paper alike in every direction, even in a vacuum |
 | Crease plasticity | The variational update, inside each time step | A return mapping after each step, which lags yielding by a step |
+| Crease aging | Thermally activated creep, Eyring's law, in the same update | A spectrum of relaxation times, which ages a briefly pressed fold only over the press's own time |
 
 ## 9. References
 
@@ -591,5 +596,7 @@ A research track runs alongside, with ambitious targets:
 - [The mechanical response of a creased sheet](https://arxiv.org/abs/1404.1243), by Frédéric Lechenault, Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2014.
 - [Relaxation constant in the folding of thin viscoelastic sheets](https://arxiv.org/abs/1905.09220), by Kasra Farain, Physical Review Applied, 2020.
 - [The variational formulation of viscoplastic constitutive updates](https://resolver.caltech.edu/CaltechAUTHORS:20171213-091546263), by Michael Ortiz and Laurent Stainier, Computer Methods in Applied Mechanics and Engineering, 1999.
+- [Relaxation Mechanisms in the Unfolding of Thin Sheets](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.107.025506), by Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2011.
+- [Plasticity and Aging of Folded Elastic Sheets](https://arxiv.org/abs/2004.11825), by Théo Jules, Frédéric Lechenault and Mokhtar Adda-Bedia, arXiv, 2020.
 - [Local Mechanical Description of an Elastic Fold](https://arxiv.org/pdf/1808.04892), by Théo Jules, Frédéric Lechenault and Mokhtar Adda-Bedia, Soft Matter, 2019.
 - [Relaxation Mechanisms in the Unfolding of Thin Sheets](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.107.025506), by Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2011.

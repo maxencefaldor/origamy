@@ -280,8 +280,8 @@ impl PySheet {
         self.0.rest_angle(edge).map_err(value_error)
     }
 
-    /// The rotation the crease along an interior edge has yielded through, in radians; zero
-    /// for plain paper.
+    /// The rotation the crease along an interior edge has yielded and crept through, in
+    /// radians; zero for plain paper.
     ///
     /// Raises:
     ///     ValueError: When the edge is not an interior edge of the sheet.

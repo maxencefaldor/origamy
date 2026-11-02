@@ -152,7 +152,8 @@ class Crease(_Parameters):
     The paper bends there alone, about the dihedral's rest angle, instead of with the
     plate around it. Past its yield moment, the crease yields further, and its rest
     angle follows the fold. Released, the crease springs back by its moment over its
-    stiffness. The defaults are kami's.
+    stiffness. Below its yield moment, the crease ages: its rest angle creeps toward the
+    fold, faster the larger its moment. The defaults are kami's.
     """
 
     stiffness: Positive = 9.0e-3
@@ -170,9 +171,25 @@ class Crease(_Parameters):
     """
 
     hardening: NonNegative = 0.0
-    """The rise of the yield moment per radian the crease yields through, in N·m/m/rad.
+    """The rise of the yield moment per radian the crease flows through, in N·m/m/rad.
 
     Pressing harder closes a fold of paper no further, so the default is zero.
+    """
+
+    aging_moment: Positive = 3.89e-4
+    """The moment per length that multiplies the rate of aging by e, in N·m/m.
+
+    A crease held at an angle loses this moment for each factor e its hold time grows
+    by. Paper held folded sets 5.7° deeper for each tenfold of the hold, which gives the
+    default.
+    """
+
+    aging_rate: NonNegative = 4.25e-8
+    """The rate of aging, in radians per second; zero for a crease that never ages.
+
+    The rest angle creeps by this rate times the hyperbolic sine of the moment over the
+    aging moment. Held at its yield moment, a crease of the defaults begins to relax
+    after about a second.
     """
 
     @classmethod
@@ -180,7 +197,7 @@ class Crease(_Parameters):
         """A crease in kami.
 
         Returns:
-            The crease of the stiffness, yield moment and hardening measured for paper.
+            The crease of the stiffness, yield, hardening and aging measured for paper.
         """
         return cls()
 

@@ -527,6 +527,7 @@ impl Simulation {
                 start: &start,
                 predicted: &predicted,
                 inertia,
+                elapsed: elapsed(dt),
                 slips: &slips,
                 normals: &normals,
             };
@@ -693,6 +694,7 @@ impl Simulation {
                         sheet.lengths()[d],
                         sheet.plastic(d),
                         angle,
+                        elapsed(dt),
                     );
                     Some((d, turned.state))
                 })
@@ -908,8 +910,13 @@ impl Simulation {
             }
             for (d, crease) in sheet.creases().iter().enumerate() {
                 if let Some(crease) = crease {
-                    let turned =
-                        crease::turn(crease, sheet.lengths()[d], sheet.plastic(d), angles[d]);
+                    let turned = crease::turn(
+                        crease,
+                        sheet.lengths()[d],
+                        sheet.plastic(d),
+                        angles[d],
+                        incremental.elapsed,
+                    );
                     energy.creases += turned.elastic;
                     energy.yielding += turned.yielding;
                 }
@@ -991,17 +998,26 @@ impl Simulation {
                         (t.map(|v| Some(global(v))), local.gradient, local.hessian)
                     }),
             );
-            bend(sheet, x, &constants.bending, &global, &mut derivatives);
+            bend(
+                sheet,
+                x,
+                &constants.bending,
+                incremental.elapsed,
+                &global,
+                &mut derivatives,
+            );
         }
         derivatives
     }
 }
 
-/// Adds a sheet's bending derivatives at its positions `x`, its vertices numbered by `global`.
+/// Adds a sheet's bending derivatives at its positions `x`, its vertices numbered by `global`,
+/// in a time step that spans `elapsed` seconds.
 fn bend(
     sheet: &Sheet,
     x: &[Point],
     stiffness: &nalgebra::Matrix3<f64>,
+    elapsed: f64,
     global: &(impl Fn(u32) -> u32 + Sync),
     derivatives: &mut Derivatives,
 ) {
@@ -1056,8 +1072,13 @@ fn bend(
                     let mut hessian = sine.hessian * moments[d];
                     let mut gradient = SMatrix::<f64, 12, 1>::zeros();
                     if let Some(crease) = &sheet.creases()[d] {
-                        let turned =
-                            crease::turn(crease, sheet.lengths()[d], sheet.plastic(d), angle.value);
+                        let turned = crease::turn(
+                            crease,
+                            sheet.lengths()[d],
+                            sheet.plastic(d),
+                            angle.value,
+                            elapsed,
+                        );
                         gradient += angle.gradient * turned.moment;
                         hessian += angle.gradient * angle.gradient.transpose() * turned.stiffness
                             + angle.hessian * turned.moment;
@@ -1346,6 +1367,8 @@ struct Incremental<'a> {
     predicted: &'a [Point],
     /// The inertia term's weight, 1 / Δt², or zero for quasi-static steps.
     inertia: f64,
+    /// The time the step spans, in seconds, over which creases age; zero for quasi-static steps.
+    elapsed: f64,
     slips: &'a [Slip],
     /// Each vertex's unit normal at the step's start, along which air drags it.
     normals: &'a [Point],
@@ -1358,6 +1381,7 @@ impl<'a> Incremental<'a> {
             start: x,
             predicted: x,
             inertia: 0.0,
+            elapsed: 0.0,
             slips: &[],
             normals: &[],
         }
@@ -1375,6 +1399,11 @@ struct Search<'a, 'b> {
     safe: f64,
     /// The pairs that may touch along the update.
     pairs: &'b [Pair],
+}
+
+/// The time a time step of length `dt` spans, in seconds: none for a quasi-static step.
+fn elapsed(dt: f64) -> f64 {
+    if dt.is_finite() { dt } else { 0.0 }
 }
 
 /// Every pair of a contact's four vertices, the greater first.
@@ -1486,6 +1515,7 @@ mod tests {
             start,
             predicted: &predicted,
             inertia: 3600.0,
+            elapsed: 1.0 / 60.0,
             slips: &slips,
             normals: &normals,
         };
@@ -1539,7 +1569,7 @@ mod tests {
     #[test]
     fn the_assembly_differentiates_the_elastic_potential() {
         // A creased sheet folded off its rest angle, curved off its rest curvature, and
-        // stretched along x into its strain barrier. The crease yields, and hardens.
+        // stretched along x into its strain barrier. The crease yields, hardens and ages.
         let mut sheet =
             Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
         let at = |i: u32, j: u32| j * 4 + i;
@@ -1551,6 +1581,7 @@ mod tests {
                     Some(Crease {
                         yield_moment: 1e-3,
                         hardening: 2e-3,
+                        aging_rate: 0.1,
                         ..Crease::kami()
                     }),
                 )

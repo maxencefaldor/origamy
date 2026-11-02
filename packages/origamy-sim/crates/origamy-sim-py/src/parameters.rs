@@ -131,13 +131,17 @@ impl Parameters for Crease {
             stiffness: field(model, "stiffness")?,
             yield_moment: field(model, "yield_moment")?,
             hardening: field(model, "hardening")?,
+            aging_moment: field(model, "aging_moment")?,
+            aging_rate: field(model, "aging_rate")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("stiffness", self.stiffness)?;
         fields.set_item("yield_moment", self.yield_moment)?;
-        fields.set_item("hardening", self.hardening)
+        fields.set_item("hardening", self.hardening)?;
+        fields.set_item("aging_moment", self.aging_moment)?;
+        fields.set_item("aging_rate", self.aging_rate)
     }
 }
 
