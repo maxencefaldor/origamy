@@ -16,7 +16,7 @@ from typing import Final
 
 from origamy.field import Number
 from origamy.geometry import Line, Point, bounds
-from origamy.space import Form, Shaped, Turn, Vector, apply
+from origamy.space import Form, Motion, Shaped, Turn, Vector, apply, rotate, same
 from origamy.state import State
 
 type Flat = tuple[float, float]
@@ -158,19 +158,78 @@ def stacking(state: State) -> list[int]:
         return sorted(below, key=lambda f: len(below[f]))
 
 
-def heights(state: State) -> list[int]:
-    """How high each face lies: the most layers stacked under it, where it overlaps.
+GAP: Final = 0.0015
+"""The height between layers in pictures and the viewer, as a share of the unit."""
 
-    Faces that overlap lie at different heights, the upper higher. A face lies only as
-    high as the paper under it needs, so faces side by side in one layer lie level.
+
+@dataclass(frozen=True, slots=True)
+class Layers:
+    """How a picture parts the layers of paper, in gaps between layers.
+
+    Faces that lie in one plane in space stack in it, each as high as the faces under
+    it need. A stack that shaping turned out of the plane then shifts so that its
+    crease meets the face it turned from, at that face's height.
     """
+
+    heights: tuple[int, ...]
+    """How many layers lie under each face, in its own stack."""
+    shifts: tuple[Vector, ...]
+    """How far each face's stack shifts in space."""
+
+
+def layers(paper: Shaped) -> Layers:
+    """How a picture parts the layers of a paper, flat or shaped."""
+    state = paper.state
+    form = paper.form or Form.flat(len(state.faces))
+    stacks = _stacks(form)
     below: dict[int, set[int]] = {f: set() for f in range(len(state.faces))}
     for upper, lower in state.above:
-        below[upper].add(lower)
+        if stacks[upper] == stacks[lower]:
+            below[upper].add(lower)
     height = [0] * len(state.faces)
     for face in stacking(state):
         height[face] = max((height[g] + 1 for g in below[face]), default=0)
-    return height
+    lifts = [
+        tuple(height[f] * c for c in rotate(form.motions[f], (0.0, 0.0, 1.0)))
+        for f in range(len(state.faces))
+    ]
+    turned = [(f, g) for f, g in state.creases.values() if stacks[f] != stacks[g]]
+    shift = {max(set(stacks), key=stacks.count): (0.0, 0.0, 0.0)}
+    while True:
+        found = [
+            (a, b)
+            for f, g in turned
+            for a, b in ((f, g), (g, f))
+            if stacks[a] in shift and stacks[b] not in shift
+        ]
+        if not found:
+            break
+        a, b = found[0]
+        base = shift[stacks[a]]
+        shift[stacks[b]] = tuple(
+            s + la - lb for s, la, lb in zip(base, lifts[a], lifts[b], strict=True)
+        )
+    still = (0.0, 0.0, 0.0)
+    return Layers(
+        tuple(height),
+        tuple(_vector(shift.get(stacks[f], still)) for f in range(len(state.faces))),
+    )
+
+
+def _stacks(form: Form) -> list[int]:
+    """Which stack each face lies in: faces that one rigid motion puts in space."""
+    kinds: list[Motion] = []
+    stacks = []
+    for motion in form.motions:
+        kind = next((k for k, m in enumerate(kinds) if same(m, motion)), len(kinds))
+        if kind == len(kinds):
+            kinds.append(motion)
+        stacks.append(kind)
+    return stacks
+
+
+def _vector(values: Sequence[float]) -> Vector:
+    return values[0], values[1], values[2]
 
 
 def pattern_view(
@@ -248,8 +307,6 @@ def _dot(a: Vector, b: Vector) -> float:
 
 _TILT: Final = (0.35, -0.75, 0.75)
 """Where the 3D viewer's eye first sits, from the paper's center: in front, above."""
-_GAP: Final = 0.002
-"""The height between layers in a picture of shaped paper, as a share of its unit."""
 _TINY: Final = 1e-9
 """How small a length or area of a picture of shaped paper counts as none."""
 
@@ -335,18 +392,28 @@ class _Solid:
 
 
 def _solids(paper: Shaped, look: Look) -> list[_Solid]:
-    """Each face in space, lifted above the layers below it as it lay flat."""
+    """Each face in space, its layers parted as a picture parts them."""
     state = paper.state
     form = paper.form or Form.flat(len(state.faces))
-    gap = float(look.unit) * _GAP
-    solids = [_Solid((), (), (0.0, 0.0, 1.0))] * len(state.faces)
-    for face, height in enumerate(heights(state)):
+    gap = float(look.unit) * GAP
+    parted = layers(paper)
+    solids = []
+    for face, (height, shift) in enumerate(
+        zip(parted.heights, parted.shifts, strict=True)
+    ):
         motion = form.motions[face]
         corners = tuple(
-            apply(motion, (*p.floats(), height * gap)) for p in state.folded[face]
+            tuple(
+                c + s * gap
+                for c, s in zip(
+                    apply(motion, (*p.floats(), height * gap)), shift, strict=True
+                )
+            )
+            for p in state.folded[face]
         )
         normal = form.normal(face, flipped=state.flips(face))
-        solids[face] = _Solid(corners, tuple(map(look.eye.project, corners)), normal)
+        points = tuple(_vector(c) for c in corners)
+        solids.append(_Solid(points, tuple(map(look.eye.project, points)), normal))
     return solids
 
 

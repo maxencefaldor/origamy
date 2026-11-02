@@ -11,7 +11,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const GAP = 0.0015; // height between layers, as a share of the paper's size
 const DURATION = 1100; // milliseconds a step's motion takes
 const STROKES = {
   M: { color: "#c0392b", dash: "7 3 1.5 3", width: 1.6 },
@@ -166,15 +165,20 @@ function rotation({ point, direction: [x, y, z], angle }, share) {
 }
 
 /** Where a face's corners are, in 3D, at a share `t` of its move. */
-function motion(step, face, t, size, together) {
+function motion(step, face, t, gap, together) {
   const corners = step.faces[face].map((v) => step.vertices[v]);
   const before = step.before[face];
   const after = step.places[face];
-  const z0 = step.heightBefore[face] * GAP * size;
-  const z1 = step.height[face] * GAP * size;
-  if (step.turn) return turning(step, face, corners, t, z0, z1);
+  const z0 = step.heightBefore[face] * gap;
+  const z1 = step.height[face] * gap;
+  // A stack turned out of the plane shifts to meet the paper it turned from.
+  const [s0, s1] = [step.shiftBefore[face], step.shift[face]];
+  const shift = s0.map((s, k) => (s + (s1[k] - s) * t) * gap);
   const shaped = step.path.length ? along(step, face, t) : step.motions?.[face] ?? STILL;
-  return flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
+  const points = step.turn
+    ? turning(step, face, corners, t, z0, z1)
+    : flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
+  return points.map((p) => p.map((c, k) => c + shift[k]));
 }
 
 /** Where a flex has moved a face at a share `t` of it, between the forms it passes. */
@@ -334,7 +338,7 @@ class Stage {
     this.line = null;
     if (step.line) {
       const [[x0, y0], [x1, y1]] = step.line;
-      const top = (Math.max(...step.height) + 2) * GAP * this.size;
+      const top = (Math.max(...step.height) + 2) * this.build.gap * this.size;
       let ends = [[x0, y0, top], [x1, y1, top]];
       if (step.turn) {
         // A turn in space draws its axis, as long as the line across the paper.
@@ -359,7 +363,7 @@ class Stage {
     const together = step.moved.length === step.faces.length ? true : null;
     const eased = t < 1 ? 0.5 - Math.cos(Math.PI * t) / 2 : 1;
     this.faces.forEach((face, index) => {
-      const points = motion(step, index, eased, this.size, together);
+      const points = motion(step, index, eased, this.build.gap * this.size, together);
       const positions = face.geometry.attributes.position;
       const outline = face.outline.attributes.position;
       points.forEach(([x, y, z], i) => {

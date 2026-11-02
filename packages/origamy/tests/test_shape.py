@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from origamy import Line, Paper, Point, service
-from origamy.draw import Eye
+from origamy.draw import Eye, layers
 from origamy.paper import RefusedError
-from origamy.space import Form, Shaped, fold_angles
+from origamy.space import Form, Shaped, apply, fold_angles, same
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 SPINE = Line.through(("1/2", 0), ("1/2", 1))
@@ -116,6 +116,28 @@ def test_a_tilt_turns_the_whole_paper() -> None:
     with pytest.raises(RefusedError) as caught:
         paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/2", 0), angle=90)
     assert caught.value.refusal.rule == "flap-on-line"
+
+
+def test_a_turned_flap_meets_the_layer_it_turned_from_in_pictures() -> None:
+    folded = runpy.run_path(str(EXAMPLES / "flapping_bird.py"))["fold"]()
+    state, form = folded.state, folded.form
+    parted = layers(Shaped(state, form))
+
+    def where(face: int, vertex: int) -> tuple[float, ...]:
+        flat = (*state.folded_point(face, vertex).floats(), parted.heights[face])
+        lifted = apply(form.motions[face], flat)
+        return tuple(c + s for c, s in zip(lifted, parted.shifts[face], strict=True))
+
+    # Heights count in gaps between layers here, so a gap is one unit.
+    apart = [
+        max(abs(a - b) for a, b in zip(where(f, v), where(g, v), strict=True))
+        for edge, (f, g) in state.creases.items()
+        if not same(form.motions[f], form.motions[g])
+        for v in edge
+    ]
+    assert apart
+    assert max(apart) < 3
+    assert max(parted.heights) > 5
 
 
 @pytest.fixture(scope="module")
