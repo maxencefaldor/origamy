@@ -7,6 +7,8 @@
 //! which is one step of implicit Euler: inertia, elasticity and gravity balance at the minimum.
 //! An infinite time step drops inertia, so the step finds the rest the forces lead to.
 
+use std::cell::OnceCell;
+
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
@@ -422,7 +424,8 @@ impl Simulation {
         let inertia = if dt.is_finite() { 1.0 / (dt * dt) } else { 0.0 };
         let mut x = start.clone();
         let mut energy = self.energy_at(&x, &predicted, inertia);
-        let rigidity = self.rigidity()?;
+        // The retraction's system is factorized once a time step needs it.
+        let rigidity = OnceCell::new();
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
         while iterations < self.settings.iteration_limit {
             iterations += 1;
@@ -488,11 +491,11 @@ impl Simulation {
     /// A Newton update moves vertices along straight lines, so turning paper stretches it.
     /// Where a fraction of the update fails, its retraction, refitted to the update's rotations
     /// without stretch, is tried before a shorter fraction.
-    fn line_search(
-        &self,
+    fn line_search<'a>(
+        &'a self,
         x: &[Point],
         direction: &[f64],
-        search: &Search,
+        search: &Search<'a>,
     ) -> Option<(Vec<Point>, Energy)> {
         let scale = 1e-12 * size(&self.energy_at(x, search.predicted, search.inertia));
         let accepts = |energy: &Energy, fraction: f64| {
@@ -507,10 +510,12 @@ impl Simulation {
             if accepts(&trial_energy, fraction) {
                 return Some((trial, trial_energy));
             }
-            let retracted = self.retract(&trial, search.rigidity);
-            let retracted_energy = self.energy_at(&retracted, search.predicted, search.inertia);
-            if accepts(&retracted_energy, fraction) {
-                return Some((retracted, retracted_energy));
+            if let Ok(rigidity) = search.rigidity.get_or_init(|| self.rigidity()) {
+                let retracted = self.retract(&trial, rigidity);
+                let retracted_energy = self.energy_at(&retracted, search.predicted, search.inertia);
+                if accepts(&retracted_energy, fraction) {
+                    return Some((retracted, retracted_energy));
+                }
             }
             fraction *= 0.5;
         }
@@ -772,7 +777,7 @@ impl Simulation {
 struct Search<'a> {
     predicted: &'a [Point],
     inertia: f64,
-    rigidity: &'a Factor<'a>,
+    rigidity: &'a OnceCell<Result<Factor<'a>, SingularError>>,
     energy: f64,
     slope: f64,
 }
