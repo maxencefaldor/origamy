@@ -46,7 +46,7 @@ def test_a_crease_folds_a_square_to_its_rest_angle() -> None:
         simulation.hold(0, vertex)
     report = simulation.step()
     assert report.converged
-    # Each Newton update is refitted to its rotations, so a large turn takes few steps.
+    # Updates are refitted to their rotations, so a large turn takes few iterations.
     assert report.iterations <= 10
     assert report.greatest_strain < 1e-9
     assert simulation.fold_angles(0) == pytest.approx([1.0], abs=1e-6)
