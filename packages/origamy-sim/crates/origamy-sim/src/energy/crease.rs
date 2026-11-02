@@ -329,4 +329,23 @@ mod tests {
             assert!(turned.state.rotation > 0.0 && turned.yielding > 0.0);
         }
     }
+
+    #[test]
+    fn a_band_of_lines_turns_yields_and_ages_as_its_sharp_crease() {
+        // The sharp crease turns through a fold, a hold and a release; each of a band's four
+        // lines turns through a quarter of it. The band carries the same moment and energy.
+        let lines = std::num::NonZeroU32::new(4).unwrap();
+        let line = AGING.band(lines);
+        let (mut sharp, mut band) = (Plastic::default(), Plastic::default());
+        for angle in [0.5, 1.2, 2.0, 2.0, 1.0, -0.5] {
+            let whole = turn(&AGING, 0.01, sharp, angle, 0.05);
+            let part = turn(&line, 0.01, band, 0.25 * angle, 0.05);
+            assert!((part.moment / whole.moment - 1.0).abs() < 1e-12);
+            let energy = |t: &Turn| t.elastic + t.yielding;
+            assert!((4.0 * energy(&part) / energy(&whole) - 1.0).abs() < 1e-12);
+            assert!((4.0 * part.state.rest - whole.state.rest).abs() < 1e-12);
+            (sharp, band) = (whole.state, part.state);
+        }
+        assert!(sharp.rotation > 1.0);
+    }
 }

@@ -1,5 +1,7 @@
 //! Physics benchmarks: the simulator against known solutions, each with its acceptance threshold.
 
+use std::num::NonZeroU32;
+
 use origamy_sim::{
     Air, Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness, Table,
 };
@@ -728,5 +730,107 @@ fn a_fold_of_kami_held_longer_springs_back_less() {
     assert!(
         (decade / 5.7 - 1.0).abs() < 0.05,
         "a decade of holding sets {decade}° deeper"
+    );
+}
+
+/// Where a point at `x` along the flat strip lies once a crease band of `lines` folds to `fold`.
+///
+/// The point lies along the strip, and up from it.
+///
+/// Each line turns by its share of the fold, so the band bends as a polygon of facets.
+fn fold_band(x: f64, lines: &[f64], fold: f64) -> [f64; 2] {
+    let share = fold / f64::from(u32::try_from(lines.len()).unwrap());
+    let [mut along, mut up] = [x.min(lines[0]), 0.0];
+    for (i, &line) in lines.iter().enumerate() {
+        let next = lines.get(i + 1).copied().unwrap_or(f64::INFINITY);
+        if x <= line {
+            break;
+        }
+        let turn = share * f64::from(u32::try_from(i + 1).unwrap());
+        let length = x.min(next) - line;
+        along += length * turn.cos();
+        up += length * turn.sin();
+    }
+    [along, up]
+}
+
+#[test]
+fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
+    // A strip 6 cm by 5 mm has cells 5 mm long, and five lines of edges 0.1 mm apart across its
+    // middle. The lines make a crease band 0.4 mm wide. A hand folds the band fully flat, its far
+    // half 0.3 mm over its near half, as a sharp crease cannot for the thickness. Released, the
+    // band springs back to the 36° that paper measures, as its sharp crease would.
+    let (rows, width) = (10, 0.005);
+    let lines: Vec<f64> = (0..5).map(|i| 0.03 + 1e-4 * (f64::from(i) - 2.0)).collect();
+    let mut columns: Vec<f64> = (0..6).map(|i| 0.005 * f64::from(i)).collect();
+    columns.extend(&lines);
+    columns.extend((7..13).map(|i| 0.005 * f64::from(i)));
+    let count = u32::try_from(columns.len()).unwrap();
+    let at = |i: u32, j: u32| j * count + i;
+    let rest: Vec<[f64; 2]> = (0..=rows)
+        .flat_map(|j| {
+            columns
+                .iter()
+                .map(move |&x| [x, width * f64::from(j) / f64::from(rows)])
+        })
+        .collect();
+    let triangles: Vec<[u32; 3]> = (0..rows)
+        .flat_map(|j| {
+            (0..count - 1).flat_map(move |i| {
+                [
+                    [at(i, j), at(i + 1, j), at(i + 1, j + 1)],
+                    [at(i, j), at(i + 1, j + 1), at(i, j + 1)],
+                ]
+            })
+        })
+        .collect();
+    let mut sheet = Sheet::new(Mesh::new(rest, triangles).unwrap(), Material::kami()).unwrap();
+    let band = Crease::kami().band(NonZeroU32::new(5).unwrap());
+    let edges: Vec<[u32; 2]> = (6..11)
+        .flat_map(|i| (0..rows).map(move |j| [at(i, j), at(i, j + 1)]))
+        .collect();
+    for &edge in &edges {
+        sheet.set_crease(edge, Some(band)).unwrap();
+    }
+    let settings = Settings {
+        gravity: [0.0; 3],
+        time_step: f64::INFINITY,
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let flat = simulation.positions(0).to_vec();
+    for v in 0..flat.len() {
+        simulation.hold(0, v, true);
+    }
+    for fold in ramp(0.0, std::f64::consts::PI, 32) {
+        let folded: Vec<[f64; 3]> = flat
+            .iter()
+            .map(|&[x, y, z]| {
+                let [along, up] = fold_band(x, &lines, fold);
+                [along, y, z + up]
+            })
+            .collect();
+        simulation.set_positions(0, &folded).unwrap();
+        assert!(simulation.step().unwrap().converged);
+    }
+    for (v, &[x, _, _]) in flat.iter().enumerate() {
+        simulation.hold(0, v, x <= lines[0]);
+    }
+    let report = simulation.step().unwrap();
+    assert!(report.converged, "{report:?}");
+    let dihedrals = simulation.sheets()[0].mesh().dihedrals();
+    let fold: f64 = dihedrals
+        .iter()
+        .zip(simulation.fold_angles(0))
+        .filter(|(d, _)| edges.contains(&d.edge))
+        .map(|(_, angle)| angle)
+        .sum::<f64>()
+        / f64::from(rows);
+    let opening = std::f64::consts::PI - fold;
+    let springback = Crease::kami().yield_moment / Crease::kami().stiffness;
+    assert!(
+        (opening - springback).abs() < 1e-6,
+        "the band opens to {}°",
+        opening.to_degrees()
     );
 }

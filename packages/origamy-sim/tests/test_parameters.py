@@ -185,6 +185,18 @@ def test_the_defaults_are_the_cores() -> None:
     assert Crease.kami() == Crease()
 
 
+def test_a_band_spreads_a_crease_over_lines_in_series() -> None:
+    crease = Crease(hardening=1e-3)
+    assert crease.band(1) == crease
+    assert crease.band(4) == Crease(
+        stiffness=4 * crease.stiffness,
+        hardening=4e-3,
+        aging_rate=crease.aging_rate / 4,
+    )
+    with pytest.raises(ValueError, match="lines is 0, but it must be at least 1"):
+        crease.band(0)
+
+
 def test_a_refused_parameter_is_named() -> None:
     with pytest.raises(
         ValidationError, match=r"thickness\n  Input should be greater than 0"

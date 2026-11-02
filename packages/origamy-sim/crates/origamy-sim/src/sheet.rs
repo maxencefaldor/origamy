@@ -1,5 +1,7 @@
 //! A sheet of paper: its rest mesh, its material and its creases.
 
+use std::num::NonZeroU32;
+
 use crate::energy::bending::RestPlate;
 use crate::energy::crease::Plastic;
 use crate::energy::membrane::RestTriangle;
@@ -54,6 +56,24 @@ impl Crease {
             hardening: 0.0,
             aging_moment: 3.89e-4,
             aging_rate: 4.25e-8,
+        }
+    }
+
+    /// The crease of each of `lines` parallel lines of edges that spread this crease into a
+    /// crease band.
+    ///
+    /// The lines turn in series, each by a `lines`-th of the band's turn, under one moment. Each
+    /// line therefore takes `lines` times the stiffness and hardening, and a `lines`-th of the
+    /// aging rate, at the same yield and aging moments. With each line resting at a `lines`-th of
+    /// the rest angle, the band turns, yields and ages as this sharp crease does.
+    #[must_use]
+    pub fn band(&self, lines: NonZeroU32) -> Self {
+        let n = f64::from(lines.get());
+        Self {
+            stiffness: n * self.stiffness,
+            hardening: n * self.hardening,
+            aging_rate: self.aging_rate / n,
+            ..*self
         }
     }
 

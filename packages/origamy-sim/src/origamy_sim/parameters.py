@@ -201,6 +201,36 @@ class Crease(_Parameters):
         """
         return cls()
 
+    def band(self, lines: int) -> Self:
+        """The crease of each of `lines` parallel lines spreading it into a crease band.
+
+        The lines turn in series, each by a `lines`-th of the band's turn, under one
+        moment. Each line takes `lines` times the stiffness and hardening, and a
+        `lines`-th of the aging rate, at the same yield and aging moments. Each line
+        rests at a `lines`-th of the rest angle. The band then turns, yields and ages
+        as this crease does.
+
+        Args:
+            lines: How many lines of edges the band spreads over, at least 1.
+
+        Returns:
+            The crease of each line.
+
+        Raises:
+            ValueError: When `lines` is less than 1.
+        """
+        if lines < 1:
+            message = f"lines is {lines}, but it must be at least 1"
+            raise ValueError(message)
+        return self.model_validate(
+            {
+                **self.model_dump(),
+                "stiffness": lines * self.stiffness,
+                "hardening": lines * self.hardening,
+                "aging_rate": self.aging_rate / lines,
+            }
+        )
+
 
 class Solver(_Parameters):
     """How the solver minimizes each time step: Newton's method with a line search."""

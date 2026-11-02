@@ -139,7 +139,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | mesh | A sheet's rest geometry: its flat shape, as counterclockwise triangles |
 | rest position | Where a vertex lies in the flat sheet, in meters |
 | dihedral | An interior edge of a mesh with its two triangles, where the sheet bends |
-| crease band | The strip along a crease where the paper has yielded, about half a millimeter wide |
+| crease band | The strip along a crease where the paper has yielded, a few tenths of a millimeter wide: parallel lines of edges that share the crease's turn |
 | sharp crease | A crease band narrowed onto mesh edges, for coarse meshes |
 | springback | The angle a released crease opens by: its yield moment over its stiffness |
 | plastic rotation | The rotation a crease has yielded and crept through, which hardening reads |

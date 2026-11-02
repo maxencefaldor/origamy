@@ -19,7 +19,7 @@ Every physical and numerical quantity is an input, in SI units, with a documente
 
 ## Status
 
-Phases 0 to 3 of the plan are done: the foundations, the elastic sheet, contact with real thickness, and friction and dynamics.
+Phases 0 to 4 of the plan are done: the foundations, the elastic sheet, contact with real thickness, friction and dynamics, and paper's creases.
 A sheet stretches, bends and folds along sharp creases, under gravity and held vertices, in implicit or quasi-static time steps.
 Paper never comes closer than its thickness to paper or to the table.
 Coulomb friction holds paper on paper and on the table, and air drags paper moving across its surface.
@@ -39,9 +39,10 @@ Benchmarks hold it to known solutions:
 - A sheet falling flat through air follows implicit Euler within 10 nm/s, to its terminal velocity of 0.91 m/s within 0.1%.
 - A crease of kami pressed flat springs back to an opening of 38°, within the measured 30° to 40°.
 - A fold held ten times longer sets about 5.7° deeper, as paper measures.
+- A crease band pressed fully flat springs back to 36°, exactly as its sharp crease would.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Phase 4 is under way: creases yield, spring back and age, and crease bands come next.
+Hands come next, in phase 5: rigid bodies on paths, grips and forces.
 
 ## Install
 

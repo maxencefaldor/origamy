@@ -169,7 +169,7 @@ Measurements describe a crease as a band of width S₀, about half a millimeter,
 The simulator models it the same way:
 
 - **Geometry.**
-  A crease is a band of the mesh along a crease line, a few elements wide.
+  A crease band is a few parallel lines of mesh edges along a crease line, a tenth of a millimeter apart.
 - **Elasticity.**
   Bending within the band costs a reduced stiffness, about its rest curvature.
 - **Plasticity.**
@@ -188,6 +188,10 @@ The simulator models it the same way:
 
 At coarse resolution, a crease band narrows to a sharp crease on mesh edges, with the same rest angle and an equivalent stiffness.
 Both levels share one definition, so a model can run coarse for speed and fine for close views.
+The lines of a band of n turn in series, each by an n-th of the band's turn, under one moment.
+Each line therefore takes n times the crease's stiffness and hardening, and an n-th of its aging rate.
+Each line rests at an n-th of the crease's rest angle.
+The band then turns, yields and ages exactly as its sharp crease does, and wraps round the layers inside it as a sharp crease cannot.
 
 A time step yields each crease by the variational update of plasticity.
 Within the step, a crease's energy is the least, over how far it yields, of its elastic energy and the work that yielding takes.
@@ -324,7 +328,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction |
 | Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
-| Crease | Band width, stiffness, yield moment, hardening, aging moment and aging rate |
+| Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
@@ -471,6 +475,7 @@ The simulator is excellent when it passes all of these, in CI:
 | A fold pressed flat, then released | Measured springback | Opening between 30° and 40°, the measured scatter |
 | A fold turned short of or past its yield angle, then released | Perfect plasticity | Springs back whole, or by its yield angle, within 10⁻⁶ rad |
 | A precrease pressed flat again, then released | Perfect plasticity | Rises by its yield angle, within 10⁻⁶ rad |
+| A crease band pressed fully flat, then released | Its sharp crease, and paper's 36° | Opening within 10⁻⁶ rad of the sharp crease's springback |
 | A fold held for 1, 10 and 100 s, then released | Logarithmic aging, and paper's 5.7° a decade | Springback within 0.002 rad of the law; a decade within 5% of 5.7° |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -500,7 +505,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 3 are done, and phase 4 has creases that yield and age.
+Phases 0 to 4 are done.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -544,13 +549,17 @@ Phase 3 adds these findings:
   Real air reaches only the outer layers, so a stack of n layers falls √n times faster.
   Shielding the layers that contact covers is left for later.
 
-Phase 4 adds this finding:
+Phase 4 adds these findings:
 
 - **How far a sharp crease closes.**
   Pressed flat, the cells beside a sharp crease meet a thickness apart where their diagonals cross, 2.5 mm from the crease in 5 mm cells.
   The crease therefore stops about 0.03 rad short of flat.
   Pressed to 0.04 rad short, kami's crease springs back to an opening of 38°.
-  A crease band wraps round the layers inside it instead, so it closes fully.
+  A crease band of five lines 0.1 mm apart wraps round instead: pressed fully flat, it springs back to 36°.
+- **Aging's one measurement.**
+  Farain's constant for paper, 5.7, comes without a unit, and the simulator reads it as degrees per tenfold of the hold.
+  Read per factor of e instead, folds of kami would set 13° deeper a decade.
+  A measurement of paper's moment relaxation would settle the aging moment.
 
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
