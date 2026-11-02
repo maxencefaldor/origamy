@@ -6,7 +6,7 @@ lies flat. Motions are floats, a 3 by 3 rotation and a shift: they draw and expo
 model, and every check still reads the flat paper.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import atan2, cos, degrees, isclose, pi, sin, sqrt
 from typing import Final
@@ -136,12 +136,18 @@ def placements(state: State, form: Form | None) -> list[Motion]:
     ]
 
 
-def crease_angles(state: State, placed: Sequence[Motion]) -> dict[Edge, float]:
+def crease_angles(
+    state: State,
+    placed: Sequence[Motion],
+    sense: Callable[[int, int], str] | None = None,
+) -> dict[Edge, float]:
     """Each crease's fold angle in radians, valleys positive, from the paper's front.
 
     The angle is the turn about the crease, on the crease pattern, that takes one of
-    its faces to where the other lies. A fold pressed flat reads its assignment.
+    its faces to where the other lies. A fold pressed flat reads ``sense``, which
+    says how two faces meet; by default, as they meet in ``state``.
     """
+    meet = sense or state.sense
     angles = {}
     for edge, (f, g) in state.creases.items():
         _, normal = hinge(state, edge, g)
@@ -151,7 +157,7 @@ def crease_angles(state: State, placed: Sequence[Motion]) -> dict[Edge, float]:
             across[2], sum(a * b for a, b in zip(across, normal, strict=True))
         )
         if abs(abs(angle) - pi) < _TOLERANCE:
-            angle = {"V": pi, "M": -pi}.get(state.assignment(edge), angle)
+            angle = {"V": pi, "M": -pi}.get(meet(f, g), angle)
         angles[edge] = angle
     return angles
 

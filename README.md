@@ -56,7 +56,7 @@ The [cup example](examples/cup.py) folds a traditional paper cup with exact cons
 ## Viewer
 
 Every build also writes a standalone page, such as `square.html`, that replays the fold in 3D.
-It shows the crease pattern beside the folded paper, animates each step, and lets people orbit, view from above or below, and see through the layers.
+It shows the crease pattern beside the folded paper, animates each step with the paper whole, bends each folded edge round, and lets people orbit, view from above or below, and see through the layers.
 Hovering a face lights it in both views, and each step names its script line and its facts.
 
 ![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](docs/images/viewer.png)

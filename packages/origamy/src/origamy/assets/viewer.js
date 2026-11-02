@@ -1,6 +1,9 @@
 // Copyright 2026 Maxence Faldor
 // The origamy viewer: replays a build step by step in 3D, beside its crease pattern.
 //
+// Paper bends where it folds: a crease whose two faces lie apart, as layers of a stack do,
+// draws as a rounded bend between them, so a folded edge reads as one sheet turning round.
+//
 // Each step holds every face's place before and after it, as 2D isometries. A face
 // whose move turns it over makes a half turn about the move's axis, lifted toward the
 // side it lands on; any other face glides. Layers sit a small gap apart, each as high as the
@@ -12,6 +15,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const DURATION = 1100; // milliseconds a step's motion takes
+const BEND = 8; // segments in the half turn a bend makes
 const STROKES = {
   M: { color: "#c0392b", dash: "7 3 1.5 3", width: 1.6 },
   V: { color: "#2c6fbb", dash: "6 3", width: 1.6 },
@@ -143,6 +147,16 @@ const compose = (a, b) => [
   a[0] * b[4] + a[1] * b[5] + a[4], a[2] * b[4] + a[3] * b[5] + a[5],
 ];
 
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (v) => {
+  const length = Math.hypot(...v) || 1;
+  return v.map((c) => c / length);
+};
+const mean = (points) => [0, 1, 2].map((k) => points.reduce((s, p) => s + p[k], 0) / points.length);
+/** The way the front of a face looks, from its corners, counterclockwise on the crease pattern. */
+const normal = (points) => unit(cross(points[1].map((c, k) => c - points[0][k]), points[2].map((c, k) => c - points[0][k])));
+
 // Rigid motions of space as a 3 by 3 rotation, row by row, then a shift.
 const STILL = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 const move = (m, [x, y, z]) => [
@@ -175,15 +189,18 @@ function motion(step, face, t, gap, together) {
   const [s0, s1] = [step.shiftBefore[face], step.shift[face]];
   const shift = s0.map((s, k) => (s + (s1[k] - s) * t) * gap);
   const shaped = step.path.length ? along(step, face, t) : step.motions?.[face] ?? STILL;
+  // A path holds the paper whole as its creases turn together: faces ride its forms.
   const points = step.turn
     ? turning(step, face, corners, t, z0, z1)
-    : flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
+    : step.path.length
+      ? corners.map((p) => move(shaped, [...apply(after, p), z0 + (z1 - z0) * t]))
+      : flat(step, face, corners, before, after, t, z0 + (z1 - z0) * t, together).map((p) => move(shaped, p));
   return points.map((p) => p.map((c, k) => c + shift[k]));
 }
 
 /** Where a flex has moved a face at a share `t` of it, between the forms it passes. */
 function along(step, face, t) {
-  const forms = [step.motionsBefore?.[face] ?? STILL, ...step.path.map((m) => m[face]), step.motions[face]];
+  const forms = [step.motionsBefore?.[face] ?? STILL, ...step.path.map((m) => m[face]), step.motions?.[face] ?? STILL];
   const at = t * (forms.length - 1);
   const k = Math.min(forms.length - 2, Math.floor(at));
   return blend(forms[k], forms[k + 1], at - k);
@@ -333,6 +350,18 @@ class Stage {
       this.paper.add(group);
       return { geometry, outline, edge, front, back };
     });
+    const strip = Array.from({ length: BEND }, (_, k) => [2 * k, 2 * k + 1, 2 * k + 3, 2 * k, 2 * k + 3, 2 * k + 2]).flat();
+    this.bends = step.creases.map(([u, w, f, g]) => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array((BEND + 1) * 6), 3));
+      geometry.setIndex(strip);
+      const front = new THREE.Mesh(geometry, this.materials.front);
+      const back = new THREE.Mesh(geometry, this.materials.back);
+      front.userData.face = back.userData.face = f;
+      this.paper.add(front, back);
+      const corners = [step.faces[f].indexOf(u), step.faces[f].indexOf(w), step.faces[g].indexOf(u), step.faces[g].indexOf(w)];
+      return { geometry, front, back, f, g, corners };
+    });
     this.place(animate ? 0 : 1);
     if (this.line) this.scene.remove(this.line);
     this.line = null;
@@ -362,7 +391,7 @@ class Stage {
     // When every face moves, the whole paper turns as one.
     const together = step.moved.length === step.faces.length ? true : null;
     const eased = t < 1 ? 0.5 - Math.cos(Math.PI * t) / 2 : 1;
-    this.faces.forEach((face, index) => {
+    const placed = this.faces.map((face, index) => {
       const points = motion(step, index, eased, this.build.gap * this.size, together);
       const positions = face.geometry.attributes.position;
       const outline = face.outline.attributes.position;
@@ -373,8 +402,54 @@ class Stage {
       positions.needsUpdate = outline.needsUpdate = true;
       face.geometry.computeVertexNormals();
       face.geometry.computeBoundingSphere();
+      return points;
     });
+    for (const bend of this.bends) this.bendAt(bend, placed);
     if (this.line) this.line.visible = t >= 1;
+  }
+
+  /** Draw a crease as the half turn its paper makes from one face to the other. */
+  bendAt(bend, placed) {
+    const [P, Q] = [placed[bend.f], placed[bend.g]];
+    const [fu, fw, gu, gw] = bend.corners;
+    const ends = [[P[fu], Q[gu]], [P[fw], Q[gw]]];
+    const apart = Math.max(...ends.map(([a, b]) => Math.hypot(...b.map((c, k) => c - a[k]))));
+    const shown = apart > 1e-6 * this.size;
+    bend.front.visible = bend.back.visible = shown;
+    if (!shown) return;
+    const along = unit(P[fw].map((c, k) => c - P[fu][k]));
+    // Each face lies inward of the crease; the paper bends round on the side away from both.
+    const inward = (points, a, b) => {
+      const middle = a.map((c, k) => (c + b[k]) / 2);
+      const toward = mean(points).map((c, k) => c - middle[k]);
+      return unit(toward.map((c, k) => c - dot(toward, along) * along[k]));
+    };
+    const [inF, inG] = [inward(P, P[fu], P[fw]), inward(Q, Q[gu], Q[gw])];
+    const outward = inF.map((c, k) => -(c + inG[k]));
+    const curved = Math.hypot(...outward) > 0.5;
+    const positions = bend.geometry.attributes.position;
+    ends.forEach(([a, b], end) => {
+      const rise = b.map((c, k) => c - a[k]);
+      const radius = Math.hypot(...rise) / 2;
+      const up = unit(rise);
+      const out = unit(outward.map((c, k) => c - dot(outward, up) * up[k]));
+      for (let i = 0; i <= BEND; i++) {
+        const angle = (Math.PI * i) / BEND;
+        const point = curved
+          ? a.map((c, k) => (c + b[k]) / 2 - radius * Math.cos(angle) * up[k] + radius * Math.sin(angle) * out[k])
+          : a.map((c, k) => c + (rise[k] * i) / BEND);
+        positions.setXYZ(2 * i + end, ...point);
+      }
+    });
+    positions.needsUpdate = true;
+    bend.geometry.computeVertexNormals();
+    bend.geometry.computeBoundingSphere();
+    // The bend shows the paper's front on the side face f shows it.
+    const start = curved ? unit(outward) : unit(ends[0][1].map((c, k) => c - ends[0][0][k]));
+    const facing = dot(cross(along, start), normal(P));
+    const [front, back] = facing >= 0 ? [this.materials.front, this.materials.back] : [this.materials.back, this.materials.front];
+    bend.front.material = front;
+    bend.back.material = back;
   }
 
   animate(now) {
@@ -400,18 +475,22 @@ class Stage {
     right.normalize();
     const up = new THREE.Vector3().crossVectors(toward, right);
     const half = Math.tan((this.camera.fov * Math.PI) / 360);
-    let [across, high, deep] = [this.size / 6, this.size / 6, 0];
-    const corner = new THREE.Vector3();
-    for (const face of this.faces ?? []) {
+    const corners = (this.faces ?? []).flatMap((face) => {
       const positions = face.geometry.attributes.position;
-      for (let i = 0; i < positions.count; i++) {
-        corner.fromBufferAttribute(positions, i).sub(center);
-        across = Math.max(across, Math.abs(corner.dot(right)));
-        high = Math.max(high, Math.abs(corner.dot(up)));
-        deep = Math.max(deep, corner.dot(toward));
-      }
+      return Array.from({ length: positions.count }, (_, i) => new THREE.Vector3().fromBufferAttribute(positions, i));
+    });
+    // Center the paper as the eye sees it, across and up.
+    for (const axis of [right, up]) {
+      const reach = corners.map((c) => c.clone().sub(center).dot(axis));
+      if (reach.length) center.addScaledVector(axis, (Math.min(...reach) + Math.max(...reach)) / 2);
     }
-    const distance = Math.max(across / (half * this.camera.aspect), high / half) * 1.1 + deep;
+    // A corner nearer the eye needs the eye as much farther back as it lies nearer.
+    let distance = (this.size / 6 / half) * 1.1;
+    for (const corner of corners) {
+      const offset = corner.clone().sub(center);
+      const fit = Math.max(Math.abs(offset.dot(right)) / (half * this.camera.aspect), Math.abs(offset.dot(up)) / half);
+      distance = Math.max(distance, fit * 1.1 + offset.dot(toward));
+    }
     this.controls.target.copy(center);
     this.camera.position.copy(center).addScaledVector(toward, distance);
     this.controls.update();

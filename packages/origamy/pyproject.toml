@@ -21,7 +21,12 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
   "Typing :: Typed",
 ]
-dependencies = ["playwright>=1.64", "pydantic>=2.14", "pydantic-settings>=2.15"]
+dependencies = [
+    "numpy>=2.3",
+    "playwright>=1.64",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.15",
+]
 
 [project.urls]
 Source = "https://github.com/maxencefaldor/origamy"

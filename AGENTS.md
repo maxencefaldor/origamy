@@ -43,7 +43,7 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
 ## Conventions
 
 - **Tools:** the standard, official tool in each category: uv, ruff, ty, rumdl, pytest with Hypothesis, pydantic and pydantic-settings, and Playwright.
-  Add a dependency only when it is high-quality and used well; the kernel uses the standard library alone.
+  Add a dependency only when it is high-quality and used well; the exact kernel uses the standard library alone, and numpy serves the numeric solvers that shape paper in space.
 - **Format and lint:** [maxencefaldor/toolchain](https://github.com/maxencefaldor/toolchain): ruff's default format, every ruff rule, every ty rule as an error, and Markdown one sentence per line.
   A rule is switched off only in `pyproject.toml`, as narrowly as it can be, with its reason beside it.
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
@@ -65,6 +65,7 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
 - **Fold scripts run in their own process** (`origamy.runner`), never in the command line.
 - **Pictures are first-class feedback:** every build draws the crease pattern, the folded paper and an x-ray, and every step.
 - **The viewer** is `assets/viewer.js` and `assets/viewer.css`, written into one HTML page with the build as data.
+  It draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
   It loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
 - **Tests:** every rule gets a case that states it.
   Geometry and folding get property tests.

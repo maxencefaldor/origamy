@@ -142,7 +142,10 @@ class State:
         """
         if edge in self.border:
             return "B"
-        f, g = self.creases[edge]
+        return self.sense(*self.creases[edge])
+
+    def sense(self, f: int, g: int) -> str:
+        """How two faces joined at a crease meet: ``V``, ``M`` or ``F``, as there."""
         if self.faces[f].place == self.faces[g].place:
             return "F"
         lower = g if self.is_above(f, g) else f

@@ -18,6 +18,7 @@ from pathlib import Path
 from string import Template
 from typing import Any, Final
 
+from origamy import flex
 from origamy.draw import GAP, Eye, across, folded_box, layers
 from origamy.geometry import Isometry, Line
 from origamy.paper import Step
@@ -32,6 +33,12 @@ THREE_PACKAGE: Final = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/"
 """The three.js package on jsDelivr, which the viewer loads."""
 
 type Data = dict[str, Any]
+
+_COLLAPSES: Final = frozenset({"collapse", "reverse", "petal"})
+"""The actions that turn many creases at once, which the viewer follows as a flex."""
+
+_FRAMES: Final = 12
+"""How many parts the viewer divides a collapse's path into."""
 
 _PAGE: Final = Template("""<!doctype html>
 <html lang="en">
@@ -116,6 +123,21 @@ def _step(step: Step, previous: Step | None) -> Data:
         heights = tuple(old.heights[p] for p in parents)
         shifts = tuple(old.shifts[p] for p in parents)
         form_before = previous.form and previous.form.carried(previous.state, state)
+    path = [form.motions for form in step.path]
+    if previous is not None and step.action in _COLLAPSES and not form_before:
+        # A collapse turns many creases at once: follow them as rigid origami, so the
+        # paper stays whole on its way, where a rigid motion takes it there. A face
+        # that turns over on the way starts its layer gap on its other side.
+        forms = flex.path(previous.state, state, _FRAMES)
+        if forms is not None:
+            form_before, path = forms[0], [form.motions for form in forms[1:]]
+            turned = [
+                previous.state.flips(p) != state.flips(f)
+                for f, p in enumerate(previous.state.parents(state))
+            ]
+            heights = tuple(
+                -h if t else h for h, t in zip(heights, turned, strict=True)
+            )
     turn = step.turn
     source = str(step.source.site) if step.source else None
     return {
@@ -132,13 +154,14 @@ def _step(step: Step, previous: Step | None) -> Data:
         "shiftBefore": shifts,
         "motions": step.form.motions if step.form else None,
         "motionsBefore": form_before.motions if form_before else None,
-        "path": [form.motions for form in step.path],
+        "path": path,
         "turn": (
             {"point": turn.point, "direction": turn.direction, "angle": turn.angle}
             if turn
             else None
         ),
         "edges": [[u, v, state.assignment((u, v))] for u, v in sorted(state.edges)],
+        "creases": [[u, w, f, g] for (u, w), (f, g) in sorted(state.creases.items())],
         "moved": sorted(step.moved),
         "line": _segment(step.line, state) if step.line else None,
         "flap": step.flap.floats() if step.flap else None,

@@ -14,7 +14,10 @@ from dataclasses import dataclass
 from math import atan2, ceil, cos, pi, radians, sin, sqrt
 from typing import Final
 
+import numpy as np
+
 from origamy.actions import Outcome
+from origamy.geometry import center, intersection
 from origamy.rules import RefusalError
 from origamy.space import (
     Form,
@@ -43,6 +46,11 @@ _FRAMES: Final = 8
 """How many parts the forms a flex passes through divide its path into."""
 _TOUCH: Final = 1e-7
 """How far faces may reach through each other and only touch, as floats tell."""
+_RANK: Final = 1e-9
+"""How small a share of the largest singular value counts as none in a correction.
+
+Paper pressed flat turns its creases about axes that all lie in one plane, so the
+corrections there have directions that move nothing to first order."""
 _SMALL: Final = 1e-6
 """A turn too small, in radians, to find its axis from, by floats."""
 
@@ -90,6 +98,9 @@ def flex(paper: Shaped, targets: Mapping[Edge, float], fixed: int) -> Outcome:
             raise RefusalError(
                 msg, rule="turns-through-paper", faces=faces, state=state
             )
+        if step == 1:
+            first = _form(state, _place(state, creases, angles, fixed, placed[fixed]))
+            _leave_stacks(paper, first)
         if step in marks or step == count:
             frames.append(list(angles))
     origin = placed[fixed]
@@ -108,6 +119,36 @@ def flex(paper: Shaped, targets: Mapping[Edge, float], fixed: int) -> Outcome:
         f for f, motion in enumerate(form.motions) if not same(motion, old.motions[f])
     )
     return Outcome(state, moved, form, path=path)
+
+
+def _leave_stacks(paper: Shaped, first: Form) -> None:
+    """Refuse a flex that starts by turning a layer into the layers it lies on.
+
+    Faces stacked in one plane part as the flex begins: wherever two overlap, the
+    upper must not move below the lower, measured across their plane.
+    """
+    state = paper.state
+    form = paper.form or Form.flat(len(state.faces))
+    sunk = set()
+    for upper, lower in state.above:
+        if not same(form.motions[upper], form.motions[lower]):
+            continue
+        common = intersection(state.folded[upper], state.folded[lower])
+        x, y = center(common).floats()
+        across = rotate(form.motions[upper], (0.0, 0.0, 1.0))
+        rise = _dot(
+            _minus(
+                apply(first.motions[upper], (x, y, 0.0)),
+                apply(first.motions[lower], (x, y, 0.0)),
+            ),
+            across,
+        )
+        if rise < -_TOUCH:
+            sunk.update((upper, lower))
+    if sunk:
+        faces = tuple(sorted(sunk))
+        msg = f"faces {_ids(faces)} turn into the layers they lie on"
+        raise RefusalError(msg, rule="turns-through-paper", faces=faces, state=state)
 
 
 def _crossing(state: State, world: Sequence[Motion]) -> tuple[int, int] | None:
@@ -196,6 +237,37 @@ def _ids(faces: Sequence[int]) -> str:
     return ", ".join(str(f) for f in faces)
 
 
+def path(before: State, after: State, frames: int) -> tuple[Form, ...] | None:
+    """The forms flat paper passes through as a step turns its creases together.
+
+    Each crease turns from its angle before the step to its angle after it, and every
+    loop of creases stays closed, as rigid origami. The forms are motions from where
+    faces lie after the step: where they lay before it, then one per share of the
+    way. No forms come back when no face keeps its place, or when no rigid motion
+    follows the creases.
+    """
+    parents = before.parents(after)
+    start = [embedding(before.faces[p].place) for p in parents]
+    end = [embedding(face.place) for face in after.faces]
+    root = next((f for f in range(len(end)) if same(start[f], end[f])), None)
+    if root is None:
+        return None
+    creases = sorted(after.creases)
+    begin = crease_angles(
+        after, start, lambda f, g: before.sense(parents[f], parents[g])
+    )
+    finish = crease_angles(after, end)
+    loops = _loops(after, {edge: i for i, edge in enumerate(creases)})
+    forms = [_form(after, start)]
+    for frame in range(1, frames):
+        share = frame / frames
+        angles = [begin[e] + (finish[e] - begin[e]) * share for e in creases]
+        if not _close(loops, angles, set()):
+            return None
+        forms.append(_form(after, _place(after, creases, angles, root, end[root])))
+    return tuple(forms)
+
+
 def _form(state: State, world: Sequence[Motion]) -> Form:
     """The form of paper whose faces lie in space where ``world`` puts them."""
     return Form(
@@ -245,75 +317,65 @@ def _middle(state: State, face: int) -> tuple[float, float]:
 
 
 def _close(loops: Sequence[_Loop], angles: list[float], driven: set[int]) -> bool:
-    """Turn the free creases as little as closes every loop; whether it does."""
+    """Turn the free creases as little as closes every loop; whether it does.
+
+    Each correction is Newton's: the smallest turns of the free creases that close
+    every loop to first order, as least squares find them.
+    """
+    free = sorted({c for loop in loops for c in loop.creases} - driven)
+    column = {crease: i for i, crease in enumerate(free)}
     for _ in range(_TRIES):
-        residuals, columns = _linearize(loops, angles, driven)
-        if max((abs(r) for r in residuals), default=0.0) < _CLOSED:
+        residuals, jacobian = _linearize(loops, angles, column)
+        if not residuals.size or float(np.max(np.abs(residuals))) < _CLOSED:
             return True
-        change = _least_change(residuals, columns, len(residuals))
-        for crease, delta in change.items():
+        if not free:
+            return False
+        change = np.linalg.lstsq(jacobian, residuals, rcond=_RANK)[0]
+        for crease, delta in zip(free, change.tolist(), strict=True):
             angles[crease] -= delta
     return False
 
 
 def _linearize(
-    loops: Sequence[_Loop], angles: Sequence[float], driven: set[int]
-) -> tuple[list[float], dict[int, list[tuple[int, Vector]]]]:
-    """How far each loop stays open, and how each free crease's turn moves it."""
-    residuals: list[float] = []
-    columns: dict[int, list[tuple[int, Vector]]] = {}
-    for row, loop in enumerate(loops):
-        product: Sequence[float] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-        for crease, direction in zip(loop.creases, loop.directions, strict=True):
-            if crease not in driven:
-                columns.setdefault(crease, []).append((row, rotate(product, direction)))
-            product = _times(product, _rotation(direction, angles[crease]))
-        residuals.extend(_log(product))
-    return residuals, columns
+    loops: Sequence[_Loop], angles: Sequence[float], column: Mapping[int, int]
+) -> tuple[np.ndarray, np.ndarray]:
+    """How far each loop stays open, and how each free crease's turn moves it.
 
-
-def _least_change(
-    residuals: Sequence[float],
-    columns: Mapping[int, list[tuple[int, Vector]]],
-    size: int,
-) -> dict[int, float]:
-    """The smallest turns of the free creases that close every loop, to first order.
-
-    The turns solve J x = r with the least |x|, as x = Jᵀ y with J Jᵀ y = r, which
-    conjugate gradients solve without ever forming J Jᵀ.
+    Turning crease i of a loop by a little turns the loop's product by as much about
+    the crease's direction, carried by the turns before it.
     """
+    residuals = np.zeros(3 * len(loops))
+    jacobian = np.zeros((3 * len(loops), len(column)))
+    for row, loop in enumerate(loops):
+        product = np.eye(3)
+        for crease, direction in zip(loop.creases, loop.directions, strict=True):
+            axis = np.asarray(direction)
+            if crease in column:
+                jacobian[3 * row : 3 * row + 3, column[crease]] += product @ axis
+            product = product @ _matrix(axis, angles[crease])
+        residuals[3 * row : 3 * row + 3] = _log(product)
+    return residuals, jacobian
 
-    def transpose(y: Sequence[float]) -> dict[int, float]:
-        return {
-            crease: sum(
-                sum(y[3 * row + k] * w[k] for k in range(3)) for row, w in entries
-            )
-            for crease, entries in columns.items()
-        }
 
-    def product(y: Sequence[float]) -> list[float]:
-        out = [1e-12 * value for value in y]
-        for crease, x in transpose(y).items():
-            for row, w in columns[crease]:
-                for k in range(3):
-                    out[3 * row + k] += w[k] * x
-        return out
+def _matrix(axis: np.ndarray, angle: float) -> np.ndarray:
+    """The turn by ``angle`` about a unit axis, as a matrix."""
+    x, y, z = axis
+    cross = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
+    return np.eye(3) + sin(angle) * cross + (1 - cos(angle)) * (cross @ cross)
 
-    y = [0.0] * size
-    r = list(residuals)
-    p = list(r)
-    rr = sum(v * v for v in r)
-    for _ in range(4 * size + 10):
-        if rr < _CLOSED * _CLOSED * 1e-4:
-            break
-        ap = product(p)
-        step = rr / max(sum(a * b for a, b in zip(p, ap, strict=True)), 1e-300)
-        y = [a + step * b for a, b in zip(y, p, strict=True)]
-        r = [a - step * b for a, b in zip(r, ap, strict=True)]
-        new = sum(v * v for v in r)
-        p = [a + (new / rr) * b for a, b in zip(r, p, strict=True)]
-        rr = new
-    return transpose(y)
+
+def _log(rotation: np.ndarray) -> np.ndarray:
+    """A rotation as its axis times its angle."""
+    skew = np.array(
+        [
+            rotation[2, 1] - rotation[1, 2],
+            rotation[0, 2] - rotation[2, 0],
+            rotation[1, 0] - rotation[0, 1],
+        ]
+    )
+    angle = atan2(float(np.linalg.norm(skew)), float(np.trace(rotation)) - 1)
+    scale = 0.5 if angle < _SMALL else angle / (2 * max(sin(angle), _SMALL))
+    return scale * skew
 
 
 def _place(
@@ -367,31 +429,4 @@ def _rotation(direction: Vector, angle: float) -> tuple[float, ...]:
         t * x * z - s * y,
         t * y * z + s * x,
         t * z * z + c,
-    )
-
-
-def _times(a: Sequence[float], b: Sequence[float]) -> tuple[float, ...]:
-    return tuple(
-        sum(a[3 * i + k] * b[3 * k + j] for k in range(3))
-        for i in range(3)
-        for j in range(3)
-    )
-
-
-def _log(rotation: Sequence[float]) -> Vector:
-    """A rotation as its axis times its angle."""
-    trace = rotation[0] + rotation[4] + rotation[8]
-    angle = atan2(
-        sqrt(
-            (rotation[7] - rotation[5]) ** 2
-            + (rotation[2] - rotation[6]) ** 2
-            + (rotation[3] - rotation[1]) ** 2
-        ),
-        trace - 1,
-    )
-    scale = 0.5 if angle < _SMALL else angle / (2 * max(sin(angle), _SMALL))
-    return (
-        scale * (rotation[7] - rotation[5]),
-        scale * (rotation[2] - rotation[6]),
-        scale * (rotation[3] - rotation[1]),
     )
