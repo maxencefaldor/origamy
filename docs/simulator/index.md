@@ -1,0 +1,1 @@
+--8<-- "packages/origamy-sim/README.md"

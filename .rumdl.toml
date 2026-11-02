@@ -45,9 +45,12 @@ format = ["ruff:format"]
 [global]
 flavor = "mkdocs"
 
+# The simulator's runs page frames each run's viewer in an <iframe>.
 [MD033]
-allowed-elements = ["div"]
+allowed-elements = ["div", "iframe"]
 
-# The gallery links to the 3D viewers that docs/gallery.py writes when the docs are published.
+# The gallery links to the 3D viewers that docs/gallery.py writes when the docs are published, and
+# the simulator's overview includes the package's README, which opens with its own heading.
 [per-file-ignores]
 "docs/gallery.md" = ["MD057"]
+"docs/simulator/index.md" = ["MD041"]

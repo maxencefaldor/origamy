@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>origamy-sim run</title>
+<style>
+/* A recorded run of the simulator: the paper over its table, a timeline, and the step's figures. */
+:root {
+  --front: #c8553d;
+  --back: #f2ede4;
+  --valley: #2c6fbb;
+  --mountain: #c0392b;
+  --ink: #232323;
+  --quiet: #6b6b6b;
+  --line: #dedbd4;
+  --panel: #ffffff;
+  --stage: #eeebe5;
+  --table: #c9bfae;
+  --table-line: #b3a893;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  color-scheme: light;
+}
+:root[data-scheme="dark"] {
+  --ink: #e9e4da;
+  --quiet: #a59e93;
+  --line: #3f3c38;
+  --panel: #232220;
+  --stage: #1b1a18;
+  --table: #4a4237;
+  --table-line: #5c5345;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); }
+.run { display: grid; gap: 10px; }
+.stage { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--stage); }
+canvas { display: block; width: 100%; aspect-ratio: 16 / 9; }
+.status { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: var(--quiet); }
+.status[hidden] { display: none; }
+.hint { position: absolute; right: 10px; bottom: 8px; font-size: 12px; color: var(--quiet); pointer-events: none; }
+.controls { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: center; }
+button { font: inherit; color: var(--ink); cursor: pointer; }
+.play { min-width: 76px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--front); background: var(--front); color: #fff; font-weight: 600; }
+.speeds { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.speeds button { border: 0; background: transparent; padding: 6px 9px; font-variant-numeric: tabular-nums; }
+.speeds button + button { border-left: 1px solid var(--line); }
+.speeds button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.scrub { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; min-width: 0; }
+.scrub input { width: 100%; accent-color: var(--front); }
+.scrub output { min-width: 9ch; text-align: right; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.readout { background: var(--panel); padding: 8px 12px; display: grid; min-width: 0; }
+.readout span { font-size: 12px; color: var(--quiet); }
+.readout b { font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--valley); outline-offset: 2px; }
+@media (max-width: 560px) {
+  .controls { grid-template-columns: auto 1fr; }
+  .scrub { grid-column: 1 / -1; }
+  canvas { aspect-ratio: 4 / 3; }
+}
+</style>
+<script type="importmap">
+{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div class="run">
+  <div class="stage">
+    <canvas id="view" aria-label="The simulated paper in 3D"></canvas>
+    <div class="status" id="status">Loading the run…</div>
+    <div class="hint">Drag to orbit, scroll to zoom</div>
+  </div>
+  <div class="controls">
+    <button class="play" id="play" type="button">Play</button>
+    <div class="speeds" role="group" aria-label="Playback speed" id="speeds">
+      <button type="button" data-speed="1">1×</button>
+      <button type="button" data-speed="0.25">¼×</button>
+      <button type="button" data-speed="0.05">1⁄20×</button>
+    </div>
+    <label class="scrub"><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Frame"><output id="frame">0 / 0</output></label>
+  </div>
+  <div class="readouts" id="readouts"></div>
+</div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// The run's name comes from the address, as viewer.html?run=stack, and its frames from <name>.json.
+const name = new URLSearchParams(location.search).get("run");
+const status = document.getElementById("status");
+const fail = (message) => { status.hidden = false; status.textContent = message; };
+
+// The page follows the docs' color scheme when it sits in their frame, and the system's otherwise.
+function scheme() {
+  let docs = null;
+  try { docs = window.parent !== window ? window.parent.document.body.getAttribute("data-md-color-scheme") : null; } catch { docs = null; }
+  const dark = docs ? docs === "slate" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.scheme = dark ? "dark" : "light";
+}
+scheme();
+
+let run;
+try {
+  const response = await fetch(`${encodeURIComponent(name)}.json`);
+  if (!response.ok) throw new Error(`${response.status}`);
+  run = await response.json();
+} catch {
+  fail("This run has not been recorded: docs/simulator.py records it.");
+  throw new Error(`no run ${name}`);
+}
+
+const canvas = document.getElementById("view");
+let renderer;
+try {
+  // A logarithmic depth buffer keeps layers a paper thickness apart in their true order.
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+} catch {
+  fail("This browser could not start WebGL, so the run cannot show.");
+  throw new Error("no WebGL");
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+status.hidden = true;
+
+const css = (property) => getComputedStyle(document.documentElement).getPropertyValue(property).trim();
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.1, 10000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5650, 1.5));
+const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun, sun.target);
+
+// Positions arrive in meters as float32, and the scene draws in millimeters.
+const raw = new Float32Array(Uint8Array.from(atob(run.positions), (c) => c.charCodeAt(0)).buffer);
+const n = run.vertices;
+const last = run.frames - 1;
+const positions = new Float32Array(n * 3);
+const geometry = new THREE.BufferGeometry();
+geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+geometry.setIndex(run.triangles);
+const front = new THREE.MeshStandardMaterial({ color: css("--front"), side: THREE.FrontSide, roughness: 0.85 });
+const back = new THREE.MeshStandardMaterial({ color: css("--back"), side: THREE.BackSide, roughness: 0.9 });
+front.shadowSide = back.shadowSide = THREE.DoubleSide;
+const paperFront = new THREE.Mesh(geometry, front);
+const paperBack = new THREE.Mesh(geometry, back);
+paperFront.castShadow = paperBack.castShadow = true;
+scene.add(paperFront, paperBack);
+
+const creaseCount = run.creases.length;
+const creasePositions = new Float32Array(creaseCount * 6);
+const creaseColors = new Float32Array(creaseCount * 6);
+const creaseGeometry = new THREE.BufferGeometry();
+creaseGeometry.setAttribute("position", new THREE.BufferAttribute(creasePositions, 3));
+creaseGeometry.setAttribute("color", new THREE.BufferAttribute(creaseColors, 3));
+const valley = new THREE.Color(css("--valley")), mountain = new THREE.Color(css("--mountain"));
+run.creases.forEach(([, , sign], j) => {
+  const color = sign > 0 ? valley : mountain;
+  creaseColors.set([color.r, color.g, color.b, color.r, color.g, color.b], 6 * j);
+});
+scene.add(new THREE.LineSegments(creaseGeometry, new THREE.LineBasicMaterial({ vertexColors: true })));
+
+// Every frame's bounds frame the camera, the light and the table.
+const bounds = new THREE.Box3();
+const corner = new THREE.Vector3();
+for (let i = 0; i < raw.length; i += 3) bounds.expandByPoint(corner.set(raw[i], raw[i + 1], raw[i + 2]).multiplyScalar(1000));
+let table = null;
+if (run.table !== null) {
+  const z = run.table * 1000;
+  const margin = 0.25 * Math.max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y) + 10;
+  const [x0, y0, x1, y1] = [bounds.min.x - margin, bounds.min.y - margin, bounds.max.x + margin, bounds.max.y + margin];
+  table = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), new THREE.MeshStandardMaterial({ roughness: 1 }));
+  table.position.set((x0 + x1) / 2, (y0 + y1) / 2, z);
+  table.receiveShadow = true;
+  scene.add(table);
+  bounds.expandByPoint(new THREE.Vector3(x0, y0, z)).expandByPoint(new THREE.Vector3(x1, y1, z));
+}
+
+// A grid of centimeters on the table, drawn into its texture.
+function tableTexture() {
+  const size = 512, cells = 10, c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  g.fillStyle = css("--table");
+  g.fillRect(0, 0, size, size);
+  g.strokeStyle = css("--table-line");
+  g.lineWidth = 2;
+  for (let i = 0; i <= cells; i++) {
+    const at = (i / cells) * size;
+    g.beginPath(); g.moveTo(at, 0); g.lineTo(at, size); g.moveTo(0, at); g.lineTo(size, at); g.stroke();
+  }
+  const texture = new THREE.CanvasTexture(c);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const { width, height } = table.geometry.parameters;
+  texture.repeat.set(width / 100, height / 100);
+  return texture;
+}
+
+function paint() {
+  scheme();
+  renderer.setClearColor(css("--stage"));
+  if (table) {
+    table.material.map?.dispose();
+    table.material.map = tableTexture();
+    table.material.needsUpdate = true;
+  }
+}
+paint();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paint);
+try {
+  if (window.parent !== window) {
+    new MutationObserver(paint).observe(window.parent.document.body, { attributes: true, attributeFilter: ["data-md-color-scheme"] });
+  }
+} catch { /* A frame from another origin keeps the system's scheme. */ }
+
+const center = bounds.getCenter(new THREE.Vector3());
+const size = bounds.getSize(new THREE.Vector3()).length();
+controls.target.copy(center);
+camera.position.copy(center).add(new THREE.Vector3(-0.6, -1.1, 0.8).normalize().multiplyScalar(size * 1.15));
+camera.near = size / 1000;
+camera.far = size * 20;
+camera.updateProjectionMatrix();
+sun.position.copy(center).add(new THREE.Vector3(-0.4, -0.5, 1).normalize().multiplyScalar(size * 1.5));
+sun.target.position.copy(center);
+Object.assign(sun.shadow.camera, { left: -size, right: size, top: size, bottom: -size, near: 0.1, far: size * 4 });
+sun.shadow.camera.updateProjectionMatrix();
+
+// Each readout formats its figure by its unit.
+const superscript = (e) => String(e).replace(/-/g, "⁻").replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+const scientific = (v) => {
+  if (v === 0) return "0";
+  const e = Math.floor(Math.log10(Math.abs(v)));
+  return `${(v / 10 ** e).toFixed(1)}×10${superscript(e)}`;
+};
+const length = (v) => (v < 0 ? "—" : Math.abs(v) >= 1e-3 ? `${(v * 1000).toFixed(1)} mm` : `${(v * 1e6).toFixed(2)} µm`);
+const format = (value, unit) => {
+  if (value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (unit === "m") return length(value);
+  if (unit === "°") return `${value.toFixed(1)}°`;
+  if (unit === "s") return `${value.toFixed(3)} s`;
+  if (unit === "rad") return `${scientific(value)} rad`;
+  return Number.isInteger(value) ? String(value) : scientific(value);
+};
+const readouts = document.getElementById("readouts");
+readouts.replaceChildren(...run.readouts.map(([label]) => {
+  const cell = document.createElement("div");
+  cell.className = "readout";
+  cell.innerHTML = `<span>${label}</span><b>—</b>`;
+  return cell;
+}));
+
+const scrub = document.getElementById("scrub");
+const frameOut = document.getElementById("frame");
+const play = document.getElementById("play");
+
+// Shows the state at a fractional frame, between two recorded frames.
+function show(t) {
+  const at = Math.min(Math.max(t, 0), last);
+  const k = Math.min(Math.floor(at), Math.max(last - 1, 0));
+  const f = last === 0 ? 0 : at - k;
+  const a = k * n * 3, b = Math.min(k + 1, last) * n * 3;
+  for (let i = 0; i < n * 3; i++) positions[i] = 1000 * (raw[a + i] * (1 - f) + raw[b + i] * f);
+  geometry.attributes.position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  run.creases.forEach(([u, v], j) => {
+    creasePositions.set(positions.subarray(3 * u, 3 * u + 3), 6 * j);
+    creasePositions.set(positions.subarray(3 * v, 3 * v + 3), 6 * j + 3);
+  });
+  creaseGeometry.attributes.position.needsUpdate = true;
+  const stats = run.stats[Math.round(at)];
+  run.readouts.forEach(([, key, unit], i) => { readouts.children[i].querySelector("b").textContent = format(stats[key], unit); });
+  scrub.value = String(Math.round((at / Math.max(last, 1)) * 1000));
+  frameOut.textContent = `${Math.round(at)} / ${last}`;
+}
+
+let playhead = 0, speed = 1, rest = 0, visible = true, before = performance.now();
+let playing = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+const label = () => { play.textContent = playing ? "Pause" : "Play"; };
+label();
+play.addEventListener("click", () => { playing = !playing; label(); });
+document.querySelectorAll("#speeds button").forEach((button) => {
+  button.setAttribute("aria-pressed", String(Number(button.dataset.speed) === speed));
+  button.addEventListener("click", () => {
+    speed = Number(button.dataset.speed);
+    document.querySelectorAll("#speeds button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+  });
+});
+scrub.addEventListener("input", () => {
+  playing = false; label();
+  playhead = (Number(scrub.value) / 1000) * last;
+  show(playhead);
+});
+// A run out of sight stops drawing, so many runs on one page cost little.
+new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; }).observe(canvas);
+
+function resize() {
+  const ratio = renderer.getPixelRatio();
+  const { clientWidth: w, clientHeight: h } = canvas;
+  if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(h, 1);
+    camera.updateProjectionMatrix();
+  }
+}
+
+function tick(now) {
+  const elapsed = Math.min((now - before) / 1000, 0.1);
+  before = now;
+  if (visible) {
+    resize();
+    if (playing) {
+      if (playhead >= last) {
+        rest += elapsed;
+        if (rest > 1.5) { playhead = 0; rest = 0; }
+      } else {
+        playhead = Math.min(last, playhead + (elapsed * speed) / run.secondsPerFrame);
+      }
+      show(playhead);
+    }
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(tick);
+}
+
+show(playing ? 0 : last);
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

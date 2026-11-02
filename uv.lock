@@ -12,6 +12,7 @@ members = [
 [manifest.dependency-groups]
 dev = [
     { name = "hypothesis" },
+    { name = "mkdocstrings-python" },
     { name = "origamy", editable = "packages/origamy" },
     { name = "origamy-mcp", editable = "packages/origamy-mcp" },
     { name = "origamy-sim", editable = "packages/origamy-sim" },
@@ -21,6 +22,7 @@ dev = [
     { name = "rumdl" },
     { name = "sympy" },
     { name = "ty" },
+    { name = "zensical" },
 ]
 docs = [
     { name = "mkdocstrings-python" },

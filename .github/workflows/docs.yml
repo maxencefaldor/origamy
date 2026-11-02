@@ -30,13 +30,15 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --group docs
+        run: uv sync
       - name: Check the generated reference pages are current
         run: |
           uv run python docs/reference.py
           git diff --exit-code docs/reference/
       - name: Write the gallery's 3D viewers
         run: uv run python docs/gallery.py
+      - name: Record the simulator's runs
+        run: uv run python docs/simulator.py
       - name: Build
         run: uv run zensical build --clean
       - name: Keep the site for Pages

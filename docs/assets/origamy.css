@@ -454,3 +454,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* A recorded run of the simulator, in its own frame: the stage, its timeline and its figures. */
+.origamy-run {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  min-height: 480px;
+  border: 0;
+}

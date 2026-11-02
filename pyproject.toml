@@ -19,6 +19,8 @@ dev = [
   "ruff",
   "sympy",
   "ty",
+  # The docs' scripts are checked with the code, so development installs their tools too.
+  { include-group = "docs" },
 ]
 docs = ["mkdocstrings-python", "zensical"]
 

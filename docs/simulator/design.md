@@ -360,10 +360,12 @@ packages/origamy-sim/
   crates/origamy-sim/                   the core: geometry, energies, contact, solvers; no Python
   crates/origamy-sim-py/                PyO3 bindings, built into the Python package
   crates/origamy-sim/tests/             physics benchmarks, with references and acceptance thresholds
+  crates/origamy-sim/benches/           Criterion benchmarks of time steps
   src/origamy_sim/                      the Python package: the core's classes, the parameter models, the configuration
   codegen/                              SymPy sources of every energy and the generator of their derivatives
   tests/                                the Python tests
-docs/simulator.md                       this design
+docs/simulator/                         this design, the recorded runs and the Python API
+docs/simulator.py                       the recorder of the runs the docs show
 ```
 
 ### 5.4 Core modules

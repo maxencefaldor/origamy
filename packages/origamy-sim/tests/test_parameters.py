@@ -1,4 +1,5 @@
 # Copyright 2026 Maxence Faldor
+import copy
 import math
 import re
 from collections.abc import Mapping
@@ -176,6 +177,16 @@ def test_a_refused_parameter_is_named() -> None:
         Crease.model_validate({"stiffness": 0.01, "rest_angle": 1.0})
     with pytest.raises(ValidationError, match="Instance is frozen"):
         Settings().time_step = 1  # ty: ignore[invalid-assignment]
+
+
+def test_a_replaced_model_is_validated() -> None:
+    settings = copy.replace(Settings(), time_step=0.01, table=Table(height=-0.1))
+    assert settings.time_step == 0.01
+    assert settings.table == Table(height=-0.1)
+    assert settings.solver == Solver()
+    assert copy.replace(Material(), thickness=1e-4).stiffness == Stiffness()
+    with pytest.raises(ValidationError, match="time_step"):
+        copy.replace(settings, time_step=-1.0)
 
 
 def test_the_core_takes_parameters_as_models_alone() -> None:

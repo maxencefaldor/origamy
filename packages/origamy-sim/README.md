@@ -6,7 +6,7 @@ The simulator models how paper bends, creases, stacks, slides and holds, under h
 Forces act on the paper at every instant, so a fold is performed by fingers and tools rather than prescribed.
 The folding compiler [origamy](https://maxencefaldor.github.io/origamy/) builds on it to fold every model physically.
 
-The [design](https://maxencefaldor.github.io/origamy/simulator/) derives the model from the physics of paper and plans its construction.
+The [design](https://maxencefaldor.github.io/origamy/simulator/design/) derives the model from the physics of paper and plans its construction.
 Five guarantees hold at every instant of every simulation:
 
 - Paper never passes through paper, a finger, a tool or the table.

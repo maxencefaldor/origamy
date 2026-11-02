@@ -15,7 +15,8 @@ uv run ty check                     # types
 uv run rumdl check .                # Markdown
 uv run python docs/reference.py     # the generated reference pages
 uv run python docs/gallery.py       # the gallery's viewers; --thumbnails redraws its cards
-uv run --group docs zensical serve  # the docs site, at http://localhost:8000
+uv run python docs/simulator.py     # the simulator's runs the docs show
+uv run zensical serve              # the docs site, at http://localhost:8000
 uv run python packages/origamy-sim/codegen/generate.py  # the simulator's generated derivatives
 cargo fmt --all                     # format Rust
 cargo test                          # Rust tests of the simulator's core
@@ -46,7 +47,7 @@ Each module imports only from the modules listed before it:
 
 The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each service command, with the same arguments.
 
-The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, designed in `docs/simulator.md`:
+The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, designed in `docs/simulator/design.md`:
 
 | Path | Holds |
 | --- | --- |

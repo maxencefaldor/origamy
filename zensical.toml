@@ -31,7 +31,12 @@ nav = [
     { "Why a compiler" = "agents/why-a-compiler.md" },
   ] },
   { "Gallery" = "gallery.md" },
-  { "Simulator" = "simulator.md" },
+  { "Simulator" = [
+    "simulator/index.md",
+    { "Design" = "simulator/design.md" },
+    { "Runs" = "simulator/runs/index.md" },
+    { "Python API" = "simulator/api.md" },
+  ] },
   { "Reference" = [
     "reference/index.md",
     { "Command line" = "reference/cli.md" },
@@ -104,6 +109,8 @@ pymdownx.tabbed.alternate_style = true
 inventories = ["https://docs.python.org/3/objects.inv"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
+# The compiled core's docstrings live at runtime, from the Rust doc comments; its stub holds the types.
+extensions = ["docs/runtime_docstrings.py:RuntimeDocstrings"]
 show_source = false
 show_root_heading = true
 show_root_full_path = false

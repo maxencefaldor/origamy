@@ -5,7 +5,7 @@
 //! inputs are meshes, materials, moving bodies and forces, in SI units.
 //!
 //! The design, from the physics of paper to the plan of construction, is in
-//! `docs/simulator.md`.
+//! `docs/simulator/design.md`.
 
 #![forbid(unsafe_code)]
 

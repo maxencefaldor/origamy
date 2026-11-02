@@ -34,6 +34,14 @@ class _Parameters(BaseModel):
         frozen=True, extra="forbid", use_attribute_docstrings=True
     )
 
+    @override
+    def __replace__(self, /, **changes: object) -> Self:
+        """A copy with some fields changed, validated as a new model is.
+
+        `copy.replace` calls this method.
+        """
+        return self.model_validate({**self.model_dump(), **changes})
+
 
 class Stiffness(_Parameters):
     """The stiffness of a sheet in its plane, orthotropic about its grain.
