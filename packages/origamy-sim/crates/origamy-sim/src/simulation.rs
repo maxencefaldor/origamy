@@ -15,7 +15,7 @@ use crate::energy::membrane::{self, Stretching};
 use crate::energy::{Barrier, Point, project};
 use crate::material::{ParameterError, finite, positive};
 use crate::sheet::Sheet;
-use crate::system::{Assembly, Pattern, SingularError};
+use crate::system::{Assembly, Factor, Pattern, SingularError};
 
 /// The settings of a simulation: the world it runs in and how its solver works.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -422,6 +422,7 @@ impl Simulation {
         let inertia = if dt.is_finite() { 1.0 / (dt * dt) } else { 0.0 };
         let mut x = start.clone();
         let mut energy = self.energy_at(&x, &predicted, inertia);
+        let rigidity = self.rigidity()?;
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
         while iterations < self.settings.iteration_limit {
             iterations += 1;
@@ -446,6 +447,7 @@ impl Simulation {
             let search = Search {
                 predicted: &predicted,
                 inertia,
+                rigidity: &rigidity,
                 energy: total(&energy),
                 slope,
             };
@@ -482,6 +484,10 @@ impl Simulation {
 
     /// The first point along a Newton update that stays below the strain cap and lowers the
     /// energy enough, with its energy, or `None` when no fraction of the update does.
+    ///
+    /// A Newton update moves vertices along straight lines, so turning paper stretches it.
+    /// Where a fraction of the update fails, its retraction, refitted to the update's rotations
+    /// without stretch, is tried before a shorter fraction.
     fn line_search(
         &self,
         x: &[Point],
@@ -501,9 +507,71 @@ impl Simulation {
             if accepts(&trial_energy, fraction) {
                 return Some((trial, trial_energy));
             }
+            let retracted = self.retract(&trial, search.rigidity);
+            let retracted_energy = self.energy_at(&retracted, search.predicted, search.inertia);
+            if accepts(&retracted_energy, fraction) {
+                return Some((retracted, retracted_energy));
+            }
             fraction *= 0.5;
         }
         None
+    }
+
+    /// The factorized system of the as-rigid-as-possible fit: Σ Ā |F − R|² over triangles,
+    /// with F a triangle's deformation gradient and R its nearest rotation; held vertices stay.
+    fn rigidity(&self) -> Result<Factor<'_>, SingularError> {
+        let mut assembly = Assembly::new(&self.pattern, &self.held);
+        for (s, sheet) in self.sheets.iter().enumerate() {
+            let offset =
+                u32::try_from(self.offsets[s]).expect("a scene counts its vertices in 32 bits");
+            for (t, rest) in sheet.mesh().triangles().iter().zip(sheet.rest_triangles()) {
+                let mut hessian = SMatrix::<f64, 9, 9>::zeros();
+                for (a, ga) in rest.shape.iter().enumerate() {
+                    for (b, gb) in rest.shape.iter().enumerate() {
+                        let weight = rest.area * ga.dot(gb);
+                        for c in 0..3 {
+                            hessian[(3 * a + c, 3 * b + c)] = weight;
+                        }
+                    }
+                }
+                assembly.add(&t.map(|v| Some(v + offset)), &SMatrix::zeros(), &hessian);
+            }
+        }
+        // A faint pull toward the positions being fitted fixes the fit's free translation.
+        let anchor = 1e-9;
+        for vertex in 0..self.positions.len() {
+            let vertex = u32::try_from(vertex).expect("a scene counts its vertices in 32 bits");
+            assembly.add_vertex(vertex, [0.0; 3], anchor);
+        }
+        assembly.factor()
+    }
+
+    /// Positions refitted, as rigid as possible, to the rotations of their triangles: the
+    /// positions nearest to turning each triangle as it turns in `x`, without stretch.
+    fn retract(&self, x: &[Point], rigidity: &Factor) -> Vec<Point> {
+        let mut pull = vec![0.0; 3 * x.len()];
+        for (s, sheet) in self.sheets.iter().enumerate() {
+            let offset = self.offsets[s];
+            for (t, rest) in sheet.mesh().triangles().iter().zip(sheet.rest_triangles()) {
+                let corners = t.map(|v| x[offset + v as usize]);
+                let Some(gap) = membrane::rotation_gap(rest, &corners) else {
+                    continue;
+                };
+                for (a, &v) in t.iter().enumerate() {
+                    let force = gap * rest.shape[a] * rest.area;
+                    let index = 3 * (offset + v as usize);
+                    for c in 0..3 {
+                        pull[index + c] += force[c];
+                    }
+                }
+            }
+        }
+        for (v, &held) in self.held.iter().enumerate() {
+            if held {
+                pull[3 * v..3 * v + 3].fill(0.0);
+            }
+        }
+        moved(x, &rigidity.solve(&pull), 1.0)
     }
 
     /// The energy's terms at positions `x`, with the inertia term in `kinetic`; the strain
@@ -704,6 +772,7 @@ impl Simulation {
 struct Search<'a> {
     predicted: &'a [Point],
     inertia: f64,
+    rigidity: &'a Factor<'a>,
     energy: f64,
     slope: f64,
 }

@@ -225,6 +225,8 @@ Each time step minimizes the incremental potential with a projected Newton metho
   A sparse Cholesky factorization solves each Newton system, with its symbolic analysis reused while the contact set keeps its pattern.
 - **Line search.**
   Backtracking from the longest update that collision detection allows, until the energy decreases enough.
+  Each fraction of the update is tried as it is, then retracted: refitted, as rigid as possible, to its triangles' rotations.
+  The retraction turns paper without stretching it.
 - **Convergence.**
   The largest vertex move of the Newton update falls below a tolerance in meters.
 - **Recovery.**
@@ -401,7 +403,7 @@ Each phase ends when its exit tests pass in CI.
 | 0. Foundations | Package, Rust workspace, Python package, bindings, CI, the rest mesh and its topology | A mesh built from Python reports its edges, dihedrals and boundary, and every check passes in CI |
 | 1. The elastic sheet | Membrane, strain barrier, bending, sharp creases, gravity, held vertices, projected Newton, sparse Cholesky, derivative generation, the validation harness | Derivative, bending, cantilever and Miura benchmarks pass |
 | 2. Contact | Bounding volumes, distances, thickness barrier, exclusions, continuous collision detection, the table | A sheet folds over itself under gravity onto the table with no crossing, and the stack benchmark passes |
-| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps, a retraction for large turns | Sliding, sticking and settling tests match theory, and a flap turns a radian in one quasi-static time step within 20 Newton iterations |
+| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps | Sliding, sticking and settling tests match theory |
 | 4. Paper | Crease bands, plasticity, aging, orthotropy, presets calibrated on published measurements | The springback benchmark passes |
 | 5. Hands | Rigid bodies on paths, grips, forces, pressure | A fingertip folds a sheet in half and creases it, repeatably |
 | 6. Thickening | Physical stacks from exact layer orders | The flat crane thickens with its exact layer order, no crossing, within target time |
@@ -417,9 +419,9 @@ Two findings from phase 1 shape the next phases:
   The cantilever benchmark measures from there, and converges at second order in the cell size.
 - **Large turns in one step.**
   A Newton update moves vertices along straight lines, so turning a flap stretches it.
-  The line search then shortens the update to keep the paper's length.
-  A quasi-static time step that turns a flap by a radian takes over a hundred Newton iterations.
-  Phase 3 adds a retraction: the update's trial positions are refitted, as rigid as possible, to the update's rotations without stretch.
+  The line search alone then shortens the update to keep the paper's length, and a turn of a radian took 136 Newton iterations.
+  The line search now also tries the update's retraction: its positions refitted, as rigid as possible, to its triangles' rotations.
+  The same turn takes 6 iterations, and a turn of 172° takes 9.
 
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

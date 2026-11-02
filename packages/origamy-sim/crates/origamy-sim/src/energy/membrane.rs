@@ -61,6 +61,27 @@ fn strain(rest: &RestTriangle, x: &[Point; 3]) -> (Vector3<f64>, [Point; 2]) {
     (strain, f)
 }
 
+/// R − F for a triangle: its deformation gradient F's gap to the nearest rotation R, both 3 by
+/// 2, or `None` for a triangle collapsed to a line.
+pub(crate) fn rotation_gap(
+    rest: &RestTriangle,
+    x: &[Point; 3],
+) -> Option<nalgebra::Matrix3x2<f64>> {
+    let column =
+        |k: usize| x[0] * rest.shape[0][k] + x[1] * rest.shape[1][k] + x[2] * rest.shape[2][k];
+    let f = nalgebra::Matrix3x2::from_columns(&[column(0), column(1)]);
+    // R = F (FᵀF)^(-1/2), with the square root of a 2 by 2 positive definite matrix in closed
+    // form: √C = (C + √det C I) / √(tr C + 2 √det C).
+    let c = f.transpose() * f;
+    let root_det = c.determinant().max(0.0).sqrt();
+    let scale = (c.trace() + 2.0 * root_det).sqrt();
+    if root_det <= f64::EPSILON * c.trace() || scale <= 0.0 {
+        return None;
+    }
+    let root = (c + nalgebra::Matrix2::identity() * root_det) / scale;
+    Some(f * root.try_inverse()? - f)
+}
+
 /// The squared norm of a Green strain in voigt form.
 fn squared_norm(strain: &Vector3<f64>) -> f64 {
     strain[0] * strain[0] + strain[1] * strain[1] + 0.5 * strain[2] * strain[2]
@@ -211,6 +232,28 @@ mod tests {
                 1e-5,
             );
         }
+    }
+
+    #[test]
+    fn a_turned_triangle_is_its_own_nearest_rotation() {
+        let x = corners(&placed(0.0));
+        assert!(rotation_gap(&rest(), &x).unwrap().abs().max() < 1e-12);
+        // Stretched, its nearest rotation keeps the turn and drops the stretch.
+        let stretched = corners(&placed(0.01));
+        let gap = rotation_gap(&rest(), &stretched).unwrap();
+        assert!(gap.abs().max() > 1e-3);
+        let column = |k: usize| {
+            stretched[0] * rest().shape[0][k]
+                + stretched[1] * rest().shape[1][k]
+                + stretched[2] * rest().shape[2][k]
+        };
+        let rotation = nalgebra::Matrix3x2::from_columns(&[column(0), column(1)]) + gap;
+        assert!(
+            (rotation.transpose() * rotation - nalgebra::Matrix2::identity())
+                .abs()
+                .max()
+                < 1e-12
+        );
     }
 
     #[test]
