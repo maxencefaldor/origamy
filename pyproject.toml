@@ -17,6 +17,7 @@ dev = [
   "pytest-github-actions-annotate-failures",
   "rumdl",
   "ruff",
+  "sympy",
   "ty",
 ]
 docs = ["mkdocstrings-python", "zensical"]
@@ -46,6 +47,9 @@ ignore = [
 # package.
 "docs/*.py" = ["INP001", "T201"]
 "packages/*/src/*/cli.py" = ["T201"] # a command line prints
+# The generator of the simulator's derivative code runs as a script, outside any package, and
+# formats what it writes with rustfmt from the pinned Rust toolchain on the path.
+"packages/origamy-sim/codegen/*.py" = ["INP001", "S603", "S607"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

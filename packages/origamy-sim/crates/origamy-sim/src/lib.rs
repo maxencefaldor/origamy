@@ -9,6 +9,16 @@
 
 #![forbid(unsafe_code)]
 
+mod energy;
+mod generated;
+pub mod material;
 pub mod mesh;
+pub mod sheet;
+pub mod simulation;
+mod system;
 
+pub use material::{Material, ParameterError, Stiffness};
 pub use mesh::{Dihedral, Mesh, MeshError, Vertex};
+pub use sheet::{Crease, Sheet, SheetError};
+pub use simulation::{Energy, Report, Settings, Simulation, StateError};
+pub use system::SingularError;

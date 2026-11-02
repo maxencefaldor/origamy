@@ -11,6 +11,9 @@ keywords = ["origami", "paper", "simulation", "contact", "shells"]
 categories = ["science", "simulation"]
 
 [dependencies]
+faer.workspace = true
+nalgebra.workspace = true
+rayon.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

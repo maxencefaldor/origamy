@@ -41,6 +41,10 @@ jobs:
         run: uv run ty check
       - name: Markdown
         run: uv run rumdl check .
+      - name: Generated code
+        run: |
+          uv run python packages/origamy-sim/codegen/generate.py
+          git diff --exit-code -- packages/origamy-sim/crates/origamy-sim/src/generated
       - name: Format Rust
         run: cargo fmt --all --check
       - name: Lint Rust

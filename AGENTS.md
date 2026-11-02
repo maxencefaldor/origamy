@@ -16,12 +16,13 @@ uv run rumdl check .                # Markdown
 uv run python docs/reference.py     # the generated reference pages
 uv run python docs/gallery.py       # the gallery's viewers; --thumbnails redraws its cards
 uv run --group docs zensical serve  # the docs site, at http://localhost:8000
+uv run python packages/origamy-sim/codegen/generate.py  # the simulator's generated derivatives
 cargo fmt --all                     # format Rust
 cargo test                          # Rust tests of the simulator's core
 PYO3_PYTHON=$PWD/.venv/bin/python cargo clippy --workspace --all-targets -- -D warnings  # lint Rust
 ```
 
-A change is done when all eight checks pass.
+A change is done when every check above passes.
 Plain cargo commands build the simulator's core alone; its bindings compile against Python 3.14, which `PYO3_PYTHON` names.
 To draw with a Chromium you already have, set `ORIGAMY_RENDER_BROWSER` to its executable instead of installing Playwright's.
 
@@ -48,9 +49,10 @@ The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, desi
 
 | Path | Holds |
 | --- | --- |
-| `crates/origamy-sim` | The core, with no Python: meshes now, then energies, contact and solvers |
+| `crates/origamy-sim` | The core, with no Python: meshes, materials, energies and the Newton solver; contact next |
 | `crates/origamy-sim-py` | The bindings, which make the core the module `origamy_sim._core` |
 | `src/origamy_sim` | The Python package, which re-exports the core, and `_core.pyi`, which types it |
+| `codegen` | The SymPy expressions behind the generated derivative code |
 
 The simulator knows nothing of origami: its interface speaks of meshes, materials, bodies and forces.
 
@@ -86,6 +88,8 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   PyO3 and maturin build the bindings, and proptest tests properties.
 - **Physics:** SI units and 64-bit floats.
   Every physical and numerical quantity is an input with a documented default, and a preset, such as kami, is a named set of values.
+- **Derivatives:** every energy has an exact gradient and Hessian.
+  Hard ones are generated from SymPy expressions by `codegen/generate.py`, and CI checks the generated code is current.
 - **Determinism:** derived tables come out sorted, never in hash order, and parallel work sums in a fixed order.
 - **Bindings stay thin:** they convert arrays, call the core and convert back.
   Their doc comments are the Python docstrings, in Google style.

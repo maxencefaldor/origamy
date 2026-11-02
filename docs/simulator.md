@@ -129,7 +129,7 @@ The barrier acts on the norm of the Green strain, which bounds every principal s
 
 The bending energy is the Kirchhoff plate energy, D/2 [(tr K)² − 2(1 − ν) det K] per area, with K a curvature per triangle.
 Each triangle's K comes from the normals at the midpoints of its edges, which tilt by half the dihedral angle there.
-The resulting curvature is exact for paper rolled into a cylinder, on any mesh.
+The resulting curvature is exact for a grid rolled round a cylinder through its vertices.
 The older energy on each interior edge alone depends on the mesh's directions, by up to a factor of 3 on a regular grid.
 
 ### 3.3 Motion: forces through an incremental potential
@@ -342,14 +342,15 @@ docs/simulator.md                       this design
 
 | Module | Holds |
 | --- | --- |
-| `mesh` | Rest geometry, triangles, edges, dihedrals, crease bands, material frames |
-| `material` | Paper presets, orthotropic stiffness, crease and plasticity parameters |
-| `energy` | One module per energy term, each with value, gradient and projected Hessian |
+| `mesh` | Rest geometry: triangles, edges, dihedrals and the boundary |
+| `material` | Thickness, weight, orthotropic stiffness, the strain cap, and presets |
+| `sheet` | A mesh with its material and creases, and the rest data its energies read |
+| `energy` | One module per energy term, each with value, gradient and exact Hessian |
+| `generated` | Derivative code generated from symbolic expressions |
+| `system` | The sparse Newton system in 3 by 3 blocks, and its Cholesky factorization |
+| `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
 | `contact` | Bounding volume hierarchy, distances, barrier, exclusions, continuous collision detection |
 | `body` | Rigid bodies on paths, grips, force fields |
-| `scene` | Sheets, bodies, grips, forces and settings, validated as a whole |
-| `solve` | Incremental potential, projected Newton, sparse Cholesky, line search, time stepping |
-| `report` | Time step reports and invariant checks |
 
 ### 5.5 Engineering standards
 
@@ -375,9 +376,9 @@ The simulator is excellent when it passes all of these, in CI:
 | --- | --- | --- |
 | Gradients and Hessians of every energy | Finite differences | Relative error under 10⁻⁶ |
 | Continuous collision detection | Exhaustive adversarial cases, and a published benchmark | No missed crossing |
-| Pure bending of a strip | A circular arc | Curvature error under 1% |
-| A cantilever under gravity | The elastica | Tip deflection error under 1% |
-| Miura-ori folding | Rigid origami | Greatest strain under 10⁻⁴ |
+| Paper rolled round a cylinder | The cylinder | Exact curvature on a grid through its vertices |
+| A cantilever under gravity | The elastica | Tip deflection error under 0.1% |
+| Miura-ori folding | Rigid origami | Greatest strain under 10⁻⁸, fold angles within 10⁻⁶ rad |
 | A fold pressed flat, then released | Measured springback | Rest angle within measured scatter |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -400,12 +401,25 @@ Each phase ends when its exit tests pass in CI.
 | 0. Foundations | Package, Rust workspace, Python package, bindings, CI, the rest mesh and its topology | A mesh built from Python reports its edges, dihedrals and boundary, and every check passes in CI |
 | 1. The elastic sheet | Membrane, strain barrier, bending, sharp creases, gravity, held vertices, projected Newton, sparse Cholesky, derivative generation, the validation harness | Derivative, bending, cantilever and Miura benchmarks pass |
 | 2. Contact | Bounding volumes, distances, thickness barrier, exclusions, continuous collision detection, the table | A sheet folds over itself under gravity onto the table with no crossing, and the stack benchmark passes |
-| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps | Sliding, sticking and settling tests match theory |
+| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps, a retraction for large turns | Sliding, sticking and settling tests match theory, and a flap turns a radian in one quasi-static time step within 20 Newton iterations |
 | 4. Paper | Crease bands, plasticity, aging, orthotropy, presets calibrated on published measurements | The springback benchmark passes |
 | 5. Hands | Rigid bodies on paths, grips, forces, pressure | A fingertip folds a sheet in half and creases it, repeatably |
 | 6. Thickening | Physical stacks from exact layer orders | The flat crane thickens with its exact layer order, no crossing, within target time |
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
+
+Phases 0 and 1 are done.
+Two findings from phase 1 shape the next phases:
+
+- **Clamps.**
+  Holding two rows of vertices clamps a sheet half a cell inside the second row.
+  The curvature along an edge spreads over the triangles on both its sides.
+  The cantilever benchmark measures from there, and converges at second order in the cell size.
+- **Large turns in one step.**
+  A Newton update moves vertices along straight lines, so turning a flap stretches it.
+  The line search then shortens the update to keep the paper's length.
+  A quasi-static time step that turns a flap by a radian takes over a hundred Newton iterations.
+  Phase 3 adds a retraction: the update's trial positions are refitted, as rigid as possible, to the update's rotations without stretch.
 
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

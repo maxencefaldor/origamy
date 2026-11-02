@@ -15,10 +15,13 @@ repository = "https://github.com/maxencefaldor/origamy"
 
 # Cargo.lock pins every version; `cargo update` moves them to the newest compatible releases.
 [workspace.dependencies]
+faer = "0.24"
+nalgebra = "0.35"
 numpy = "0.30"
 origamy-sim = { path = "packages/origamy-sim/crates/origamy-sim" }
 proptest = "1.12"
 pyo3 = { version = "0.30", features = ["abi3-py314"] }
+rayon = "1.12"
 thiserror = "2"
 
 [workspace.lints.rust]
@@ -32,3 +35,11 @@ pedantic = { level = "deny", priority = -1 }
 inherits = "release"
 codegen-units = 1
 lto = "fat"
+
+# Debug builds still optimize: physics tests run thousands of Newton iterations, and linear
+# algebra unoptimized runs a hundred times slower.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
