@@ -16,14 +16,18 @@ concurrency:
 env:
   UV_LOCKED: "1"
   FORCE_COLOR: "1"
+  CARGO_TERM_COLOR: always
 
 jobs:
   lint:
     name: Format, lint, types and Markdown
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install # the version and components rust-toolchain.toml pins
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -37,6 +41,24 @@ jobs:
         run: uv run ty check
       - name: Markdown
         run: uv run rumdl check .
+      - name: Format Rust
+        run: cargo fmt --all --check
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        env:
+          PYO3_PYTHON: ${{ github.workspace }}/.venv/bin/python # the bindings compile against the project's Python
+
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install # the version and components rust-toolchain.toml pins
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --locked
 
   test:
     name: Tests on Python ${{ matrix.python }}
@@ -50,6 +72,9 @@ jobs:
       UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install # the version and components rust-toolchain.toml pins
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -66,6 +91,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install # the version and components rust-toolchain.toml pins
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true

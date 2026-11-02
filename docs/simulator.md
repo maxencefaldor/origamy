@@ -1,0 +1,445 @@
+# Simulator
+
+The simulator origamy-sim models how sheets of paper bend, crease, stack, slide and hold, under hands, tools, gravity and the table.
+The simulator knows nothing of origami steps.
+The exact folding compiler, origamy, uses it to make each model physical: its 3D shape, its motion between steps, and the hands folding it.
+
+The design below derives the simulator from the physics of paper, states what it guarantees, and plans its construction.
+
+## 1. Goals and guarantees
+
+The simulator aims to be the best there is: the most faithful to real paper, and fast enough to fold a crane in seconds.
+No other origami simulator gives its guarantees.
+
+Five guarantees hold at every instant of every simulation, not only at the frames shown:
+
+1. **No crossing.**
+   Paper never passes through paper, a finger, a tool or the table.
+1. **Real thickness.**
+   The mid-surfaces of two sheets never come closer than one paper thickness.
+   A stack of n layers is therefore n thicknesses tall, and a fold wraps round the layers inside it.
+1. **Bounded stretch.**
+   No piece of paper stretches or shrinks by more than a set strain, half a percent by default; paper bends instead.
+1. **Stated convergence.**
+   Each time step reaches its stated tolerance, or reports that it did not, with the residual it reached.
+   The simulator never returns a wrong state silently.
+1. **Determinism.**
+   The same scene and the same inputs give the same result, bit for bit, on one machine, whatever the number of threads.
+
+Four principles shape the code:
+
+- **One model, many configurations.**
+  Folding, holding, pressing, shaping and puffing are all inputs to one physical model: forces, moving bodies, held points and crease properties.
+  No action has a code path of its own.
+- **Everything is an input.**
+  Every physical and numerical quantity is a parameter with a documented default, from the paper's thickness to a crease's yield moment and the solver's tolerance.
+  A preset, such as kami, is a named set of values, never a code path.
+- **Physics in SI units.**
+  Lengths in meters, forces in newtons, times in seconds.
+- **Exact derivatives.**
+  Every energy comes with its analytic gradient and Hessian, generated from symbolic expressions and checked against finite differences.
+
+## 2. Paper, from first principles
+
+### 2.1 Scales
+
+A sheet of kami, the thin paper most origami uses, sets the scales below.
+
+| Quantity | Symbol | Kami |
+| --- | --- | --- |
+| Thickness | h | 0.07 mm |
+| Mass per area | ρh | 60 g/m² |
+| Young's modulus in the plane | E | about 4 GPa, from 2 to 7 by fiber direction |
+| Poisson's ratio | ν | about 0.3 |
+| Stretching stiffness | Eh | 2.8 × 10⁵ N/m |
+| Bending stiffness | D = Eh³ / 12(1 − ν²) | 1.3 × 10⁻⁴ N·m |
+| Length where stretching and bending balance | √(D / Eh) | 21 µm |
+| Length that gravity bends | (D / ρgh)^(1/3) | 6 cm |
+| Width of a crease | S₀ | about 0.5 mm |
+| Friction of paper on paper | μ | 0.3 to 0.6 |
+
+Six facts follow from these numbers, and each one shapes the model.
+
+1. **Paper bends and does not stretch.**
+   Stretching a 15 cm sheet by 1% costs about 560 times the energy of rolling it round a 5 cm cylinder.
+   The stiffness ratio Eh L² / D is 5 × 10⁷.
+   Paper therefore moves through isometries: its surfaces stay developable, with curvature in one direction only, except at creases and cone points.
+1. **The problem is numerically stiff.**
+   A stiffness ratio of 10⁷ defeats local solvers, such as position-based dynamics or Gauss-Seidel sweeps, which converge slowly on stiff membranes.
+   A global Newton method with a direct sparse solver handles it.
+1. **Gravity matters at model scale.**
+   A flap longer than about 6 cm visibly sags under its own weight.
+1. **Thickness is small but decides how models look.**
+   The 32 layers of a crane's neck stack 2.2 mm tall, 1.5% of the sheet's side.
+   That thickness rounds every fold, separates layers, and sets how far a reverse fold can turn.
+1. **Creases are material, not lines.**
+   A crease is a band about half a millimeter wide where the fibers have yielded.
+   Within it, the paper rests curved, so the fold rests at an angle, and it springs open a little when released.
+1. **Friction holds models together.**
+   Locks, pockets and tucked flaps stay in place by friction.
+
+### 2.2 What the simulator reproduces
+
+| Phenomenon | How |
+| --- | --- |
+| Bending of flat paper | Elastic bending energy of the sheet |
+| Near inextensibility | Stiff stretching energy, capped by a strain barrier |
+| Creases with memory | Plastic crease bands whose rest curvature changes under load |
+| Springback and slow relaxation | Elastic recovery, and aging of the rest curvature over time |
+| Thickness of stacks and folds | Contact that keeps mid-surfaces one thickness apart |
+| No crossing | Barrier contact and collision-checked Newton updates |
+| Locks, pockets, tucks | Friction between sheets, and between sheets and fingers |
+| Sag of large flaps | Gravity |
+| Hands, tools, the table | Moving rigid bodies that touch the paper, and grips that hold it |
+| Paper grain | Orthotropic stiffness, by fiber direction |
+
+Tearing, wetting and heat stay out of scope for now.
+Wet-folding, where moisture softens paper, is a natural later extension of the material model.
+
+## 3. The model
+
+### 3.1 State
+
+The sheet is a triangle mesh of its mid-surface.
+Its state is the position x of every vertex in space, their velocities v, and the plastic state of every crease.
+Each vertex also keeps its place in the flat sheet, the material coordinates, which define rest lengths, rest angles and fiber directions.
+
+### 3.2 Energy
+
+Every behavior of the paper enters as one term of a total energy:
+
+```text
+E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction + E_hands + E_gravity
+```
+
+| Term | Meaning |
+| --- | --- |
+| E_stretch | Hyperelastic membrane energy of each triangle, orthotropic, from E, ν and the fiber direction |
+| E_strain-limit | A smooth barrier on the size of each triangle's strain, growing without bound as the strain nears its cap |
+| E_bend | Plate bending energy of each triangle, from a discrete curvature built from its edges' dihedral angles |
+| E_crease | Bending energy of crease bands, softer than the paper around them, about a rest curvature |
+| E_contact | A barrier on the distance between mid-surface primitives, offset by the thickness |
+| E_friction | Smoothed Coulomb friction between surfaces in contact, lagged per time step |
+| E_hands | Contact with moving bodies, and stiff springs from held vertices to the bodies that hold them |
+| E_gravity | The weight of each vertex's share of the sheet |
+
+The real modulus governs small strains, and the direct solver absorbs the stiffness it brings.
+The barrier makes strains past the cap unreachable, whatever the forces.
+The barrier acts on the norm of the Green strain, which bounds every principal strain and stays smooth where principal stretches coincide.
+
+The bending energy is the Kirchhoff plate energy, D/2 [(tr K)² − 2(1 − ν) det K] per area, with K a curvature per triangle.
+Each triangle's K comes from the normals at the midpoints of its edges, which tilt by half the dihedral angle there.
+The resulting curvature is exact for paper rolled into a cylinder, on any mesh.
+The older energy on each interior edge alone depends on the mesh's directions, by up to a factor of 3 on a regular grid.
+
+### 3.3 Motion: forces through an incremental potential
+
+Forces act on the paper at every instant of a fold, as in real hands.
+The simulator integrates Newton's laws implicitly through the incremental potential of a time step:
+
+```text
+x(n+1) = argmin over x of  ½ (x − x̂)ᵀ M (x − x̂) / Δt²  +  E(x),   with  x̂ = x(n) + Δt v(n)
+```
+
+Minimizing this potential solves one time step of implicit Euler.
+Inertia, elastic forces, contact, friction, gravity and the hands' forces all balance at its minimum.
+Large time steps stay stable, and every force term keeps its physical meaning.
+Dropping the inertia term gives quasi-static motion, for folds slow enough that inertia does not matter.
+
+Energy minimization is therefore how forces are applied, not a replacement for them.
+A fold is a sequence of forces and moving contacts over time, and the paper responds at every time step.
+
+### 3.4 Creases
+
+Measurements describe a crease as a band of width S₀, about half a millimeter, whose rest curvature integrates to the crease's rest angle.
+The simulator models it the same way:
+
+- **Geometry.**
+  A crease is a band of the mesh along a crease line, a few elements wide.
+- **Elasticity.**
+  Bending within the band costs a reduced stiffness, about its rest curvature.
+- **Plasticity.**
+  When the bending moment in the band passes a yield moment, the rest curvature moves toward the current curvature, by return mapping.
+  Pressing a fold flat therefore makes it rest more closed; releasing it lets it spring back to its rest angle.
+- **Aging.**
+  The rest curvature relaxes slowly toward the current one, logarithmically in time, as folded paper does.
+- **A precrease.**
+  A crease folded and unfolded rests nearly flat but stays soft, so the paper refolds there first.
+
+At coarse resolution, a crease band narrows to a sharp crease on mesh edges, with the same rest angle and an equivalent stiffness.
+Both levels share one definition, so a model can run coarse for speed and fine for close views.
+
+### 3.5 Contact with thickness
+
+Contact is the hardest part of simulating origami, and the part where the simulator innovates most.
+
+**The barrier.**
+Each pair of nearby mid-surface primitives, a point and a triangle or two edges, adds a barrier b(d − h) on their distance d.
+The barrier is zero beyond an activation distance, smooth, and grows without bound as d nears the thickness h.
+Mid-surfaces therefore never come closer than h, as in codimensional incremental potential contact.
+
+**Collision-checked updates.**
+Each Newton update is cut short before any primitive would cross the offset surface of another, by continuous collision detection over the whole update.
+The detection is conservative: it may stop an update early, but it never misses a crossing.
+Every state the solver visits, not just every state it returns, is free of crossings.
+
+**Pairs that are not contact.**
+The two sides of a fold meet within the fold's own band.
+Pairs closer along the sheet than the crease band's width do not take the barrier, since their distance is the bend itself.
+
+**Starting from a flat-folded state.**
+Generic simulators cannot start from paper folded flat: its layers coincide, at distance zero, which every barrier forbids.
+The simulator starts instead from the exact layer order that origamy's kernel proves, and thickens the stack.
+A homotopy grows the thickness from nearly zero to h.
+The known order orients the barrier between each overlapping pair, so each layer rises above the layers the kernel puts below it.
+The thickening wraps each fold round the layers inside it, and raises paper where more layers lie under it.
+The result is a physical stack, exactly consistent with the kernel's layer order, and free of crossings from its first instant.
+
+**Faster contact.**
+Offset geometric contact bounds how far each vertex may move without any crossing, with no collision detection over the update.
+The simulator evaluates it as a faster filter in phase 8, and keeps the guarantee whichever filter it uses.
+
+### 3.6 Hands, tools and forces
+
+Folding by hand is a choreography of a few physical actions.
+The simulator provides each as an input to the same model:
+
+| Input | Physics | Uses |
+| --- | --- | --- |
+| Rigid bodies on paths | Moving shapes, such as a fingertip capsule, a bone folder or the table, that touch paper through the contact barrier and friction | Lifting a flap, pushing a reverse fold in, pressing a crease flat |
+| Grips | Stiff springs from a patch of paper to a moving body, made and released over time | Pinching a corner, holding a flap while another moves |
+| Forces | Point, area and pressure loads, constant or varying over time | Pulling a point toward a target, flattening a stack |
+| Crease actuation | A crease's rest curvature and stiffness, set over time | Shaping a model, or self-folding sheets |
+| Gravity | A uniform field | Sag, flaps falling open |
+
+A finger pressing along a fold line yields the crease band there, so creasing comes from pressure, as it does by hand.
+Hands appear in the animations, so a person sees exactly how to fold.
+
+### 3.7 Solver
+
+Each time step minimizes the incremental potential with a projected Newton method:
+
+- **Hessian.**
+  Each energy term contributes its exact Hessian, projected to be positive semi-definite element by element, so every Newton direction descends.
+- **Linear solve.**
+  A sparse Cholesky factorization solves each Newton system, with its symbolic analysis reused while the contact set keeps its pattern.
+- **Line search.**
+  Backtracking from the longest update that collision detection allows, until the energy decreases enough.
+- **Convergence.**
+  The largest vertex move of the Newton update falls below a tolerance in meters.
+- **Recovery.**
+  A time step that does not converge halves and tries again, and reports the failure if it falls below a floor.
+
+The solver is the reference: accurate, robust and the one every guarantee is proved for.
+A second solver, vertex block descent with offset contact, joins in phase 8 for interactive speed on GPUs, minimizing the same energy.
+
+### 3.8 Discretization
+
+- **Meshes that follow creases.**
+  A constrained Delaunay triangulation of the crease pattern makes every crease line a chain of mesh edges, with no angle under 20°.
+- **Grading.**
+  Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
+- **Two levels of detail.**
+  Sharp creases on a coarse mesh run fastest; crease bands on a graded mesh look and behave most like paper.
+- **Precision.**
+  Every quantity is a 64-bit float, and collision detection bounds its own rounding errors.
+
+### 3.9 Parameters
+
+Every quantity below is an input, in SI units, with a documented default.
+A preset fills them all for one paper: the kami preset takes the values of section 2.1.
+Phase 4 calibrates the crease parameters on published measurements.
+
+| Group | Parameters |
+| --- | --- |
+| Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction, strain cap |
+| Crease | Band width, stiffness relative to the sheet, rest angle, yield moment, hardening, springback, aging rate, softening by a precrease |
+| Contact | Friction coefficients of paper on paper and on each body, the barrier's activation distance, the exclusion radius along the sheet |
+| Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
+| World | Gravity, the table's height and friction, damping |
+| Solver | Time step, its floor, tolerance in meters, iteration limit, line search constants |
+
+Each crease takes its own values, so one model can hold sharp and soft creases, or two papers in one sheet.
+
+### 3.10 Outputs
+
+| Output | Content |
+| --- | --- |
+| States | Vertex positions and velocities, crease rest curvatures, as NumPy arrays |
+| Time step reports | Newton iterations, residual, every energy term, greatest strain, least distance between sheets, contacts, and whether the time step converged |
+| Surfaces with thickness | Both faces of the sheet, offset by half the thickness, and its rims, for rendering |
+| glTF 2.0 | Meshes and animations, the standard format for 3D |
+| FOLD 1.2 | Frames with 3D vertex coordinates and fold angles, for origami tools |
+
+## 4. What is new
+
+Existing tools each solve part of the problem.
+
+| Tool | Approach | Missing |
+| --- | --- | --- |
+| Origami Simulator | Bar-and-hinge springs on the GPU, all creases at once | Contact, thickness, plasticity; it lets paper cross paper |
+| MERLIN | Bar-and-hinge analysis with nonlinear solvers | Contact and folding sequences |
+| SWOMPS | Bar-and-hinge with barrier contact and sequential loading | Thin-sheet bending, crease plasticity, hands, speed |
+| IPC, C-IPC, OGC | Guaranteed crossing-free contact for shells and cloth | Paper's creases, plasticity, and flat-folded starts |
+
+The simulator combines and extends them:
+
+1. Guaranteed crossing-free contact at paper's real thickness, for stacks of dozens of layers.
+1. Starting from an exactly known flat-folded state, thickened into a physical stack by homotopy.
+1. Creases as plastic bands, with yield, springback and aging, reducing exactly to sharp creases at coarse resolution.
+1. Hands, tools and grips as ordinary physical inputs, so folds are performed rather than prescribed.
+1. A certificate of physical feasibility: a fold sequence the simulator performs is one real paper allows, without crossing or tearing.
+1. Sensitivities of the final shape to forces and crease angles, by the adjoint method, so agents can optimize a model's look.
+
+## 5. Architecture
+
+### 5.1 Packages
+
+The simulator is a package of the origamy repository, as origamy-mcp is.
+
+| Package | Holds |
+| --- | --- |
+| origamy-sim | The simulator: a Rust core and its Python package |
+| origamy | The exact folding kernel, fold scripts, the command line and the viewer, depending on origamy-sim |
+| origamy-mcp | The MCP server |
+
+One commit can change the simulator and origamy together, under one CI and one lock file.
+The simulator stays general all the same: its interface speaks of meshes, materials, bodies and forces, never of folds or steps.
+
+### 5.2 Language and libraries
+
+The core is Rust, with Python bindings, as in ruff, uv, polars and pydantic-core.
+
+| Choice | Reason |
+| --- | --- |
+| Rust | Compiled speed, memory safety, fearless parallelism and reproducible builds |
+| PyO3 and maturin | The standard bindings and build for Rust in Python, with wheels for every platform |
+| faer | State-of-the-art dense and sparse linear algebra in Rust, including sparse Cholesky |
+| nalgebra | Small fixed-size vectors and matrices for per-element derivatives |
+| rayon | Data parallelism with deterministic reductions |
+| SymPy | Symbolic energies, from which the derivative code is generated |
+
+NumPy alone is fast only for large, regular array operations.
+Contact search, collision detection, sparse assembly and line searches are irregular and branching, so in NumPy they run as Python loops, a hundred times slower.
+JAX compiles and differentiates array programs, but contact sets change size every time step, collision detection branches, and JAX has no fast sparse direct solver.
+JAX suits learned components and experiments later, not the core.
+
+### 5.3 Layout
+
+```text
+Cargo.toml                              the Rust workspace, beside pyproject.toml's uv workspace
+packages/origamy-sim/
+  crates/origamy-sim/                   the core: geometry, energies, contact, solvers; no Python
+  crates/origamy-sim-py/                PyO3 bindings, built into the Python package
+  src/origamy_sim/                      the Python package: typed wrappers, presets, NumPy interop
+  codegen/                              SymPy sources of every energy and the generator of their derivatives
+  validation/                           physics benchmarks, with references and acceptance thresholds
+  tests/                                the Python tests
+docs/simulator.md                       this design
+```
+
+### 5.4 Core modules
+
+| Module | Holds |
+| --- | --- |
+| `mesh` | Rest geometry, triangles, edges, dihedrals, crease bands, material frames |
+| `material` | Paper presets, orthotropic stiffness, crease and plasticity parameters |
+| `energy` | One module per energy term, each with value, gradient and projected Hessian |
+| `contact` | Bounding volume hierarchy, distances, barrier, exclusions, continuous collision detection |
+| `body` | Rigid bodies on paths, grips, force fields |
+| `scene` | Sheets, bodies, grips, forces and settings, validated as a whole |
+| `solve` | Incremental potential, projected Newton, sparse Cholesky, line search, time stepping |
+| `report` | Time step reports and invariant checks |
+
+### 5.5 Engineering standards
+
+- **Lints.**
+  The Rust code passes rustfmt and clippy, with clippy's pedantic group as errors, and the core holds no unsafe code.
+  Python follows origamy's toolchain: ruff with every rule, ty with every rule as an error, rumdl.
+- **Tests.**
+  Unit tests for every function, property tests with proptest and Hypothesis, and finite-difference checks of every gradient and Hessian.
+- **Invariants.**
+  Debug builds assert every guarantee after every time step; release builds report them.
+- **Benchmarks.**
+  Criterion benchmarks cover hot paths, and CI tracks end-to-end timings.
+- **Validation.**
+  Physics benchmarks with references, run in CI, each with an acceptance threshold.
+- **Documentation.**
+  Every public item documented; a guide and an API reference, as for origamy.
+
+## 6. Validation: what excellent means
+
+The simulator is excellent when it passes all of these, in CI:
+
+| Benchmark | Reference | Threshold |
+| --- | --- | --- |
+| Gradients and Hessians of every energy | Finite differences | Relative error under 10⁻⁶ |
+| Continuous collision detection | Exhaustive adversarial cases, and a published benchmark | No missed crossing |
+| Pure bending of a strip | A circular arc | Curvature error under 1% |
+| A cantilever under gravity | The elastica | Tip deflection error under 1% |
+| Miura-ori folding | Rigid origami | Greatest strain under 10⁻⁴ |
+| A fold pressed flat, then released | Measured springback | Rest angle within measured scatter |
+| A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
+| Every time step of every benchmark | The five guarantees | Always |
+| The crane, folded by hand from the square | origamy's exact layer orders | Same layer order at every flat state, no crossing |
+
+Performance targets, on one laptop core:
+
+| Task | Target |
+| --- | --- |
+| A quasi-static time step of a crane-sized mesh, about 5,000 vertices | Under 100 ms |
+| Thickening the flat crane | Under 2 s |
+| Animating one fold, 60 frames | Under 5 s |
+
+## 7. Plan
+
+Each phase ends when its exit tests pass in CI.
+
+| Phase | Builds | Exits when |
+| --- | --- | --- |
+| 0. Foundations | Package, Rust workspace, Python package, bindings, CI, the rest mesh and its topology | A mesh built from Python reports its edges, dihedrals and boundary, and every check passes in CI |
+| 1. The elastic sheet | Membrane, strain barrier, bending, sharp creases, gravity, held vertices, projected Newton, sparse Cholesky, derivative generation, the validation harness | Derivative, bending, cantilever and Miura benchmarks pass |
+| 2. Contact | Bounding volumes, distances, thickness barrier, exclusions, continuous collision detection, the table | A sheet folds over itself under gravity onto the table with no crossing, and the stack benchmark passes |
+| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps | Sliding, sticking and settling tests match theory |
+| 4. Paper | Crease bands, plasticity, aging, orthotropy, presets calibrated on published measurements | The springback benchmark passes |
+| 5. Hands | Rigid bodies on paths, grips, forces, pressure | A fingertip folds a sheet in half and creases it, repeatably |
+| 6. Thickening | Physical stacks from exact layer orders | The flat crane thickens with its exact layer order, no crossing, within target time |
+| 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
+| 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
+
+Phase 7 deletes origamy's rigid 3D layer.
+The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
+Shaping becomes crease actuation and hands; animation becomes simulated motion.
+
+A research track runs alongside, with ambitious targets:
+
+- **Creases that form where paper is pressed,** by plastic localization and adaptive remeshing, so a model need not name its crease lines in advance.
+- **Choreographies found by optimization,** so hands for any move come from the move itself.
+- **Curved folds and wet-folding,** for the models that need them.
+
+## 8. Decisions
+
+| Decision | Chosen | Alternatives |
+| --- | --- | --- |
+| Time stepping | Implicit Euler as an incremental potential | Explicit integration, which needs tiny time steps for stiff paper |
+| Reference solver | Global projected Newton with sparse Cholesky | Local block descent, fast on GPUs but slow to converge on stiff paper |
+| Contact | Thickness barrier with conservative collision-checked updates | Penalty springs, which let paper cross under load |
+| Inextensibility | Real modulus plus a strain barrier | Very stiff springs, ill conditioned; hard constraints, brittle |
+| Creases | Plastic bands, reducing to sharp creases | Sharp creases only, with no width at the fold and no springback |
+| Start from flat folds | Thickening by homotopy along the exact layer order | Random offsets, which can pick the wrong order |
+| Core language | Rust | C++, NumPy, JAX |
+| Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |
+| Derivatives | Generated from symbolic energies | Hand derivation, error prone; runtime autodiff, slow in the hot loop |
+
+## 9. References
+
+- [Fast, Interactive Origami Simulation using GPU Computation](https://erikdemaine.org/papers/OrigamiSimulator_Origami7/paper.pdf), by Amanda Ghassaei, Erik Demaine and Neil Gershenfeld, Origami⁷, 2018.
+- [Bar and hinge models for scalable analysis of origami](https://collaborate.princeton.edu/en/publications/bar-and-hinge-models-for-scalable-analysis-of-origami/), by Evgueni Filipov, Ke Liu, Tomohiro Tachi, Mark Schenk and Glaucio Paulino, International Journal of Solids and Structures, 2017.
+- [SWOMPS, the Sequentially Working Origami Multi-Physics Simulator](https://drsl.engin.umich.edu/software/swomps-package), by Yi Zhu and Evgueni Filipov.
+- [Discrete Shells](https://diglib.eg.org/handle/10.2312/SCA.SCA03.062-067), by Eitan Grinspun, Anil Hirani, Mathieu Desbrun and Peter Schröder, Symposium on Computer Animation, 2003.
+- [Computing discrete shape operators on general meshes](https://doi.org/10.1111/j.1467-8659.2006.00973.x), by Eitan Grinspun, Yotam Gingold, Jason Reisman and Denis Zorin, Computer Graphics Forum, 2006.
+- [Incremental Potential Contact](https://research.adobe.com/publication/incremental-potential-contact-intersection-and-inversion-free-large-deformation-dynamics), by Minchen Li, Zachary Ferguson, Teseo Schneider, Timothy Langlois, Denis Zorin, Daniele Panozzo, Chenfanfu Jiang and Danny Kaufman, ACM Transactions on Graphics, 2020.
+- [Codimensional Incremental Potential Contact](https://research.adobe.com/publication/codimensional-incremental-potential-contact), by Minchen Li, Danny Kaufman and Chenfanfu Jiang, ACM Transactions on Graphics, 2021.
+- [Offset Geometric Contact](https://graphics.cs.utah.edu/research/projects/ogc/), by Anka He Chen, Jerry Hsu, Ziheng Liu, Miles Macklin, Yin Yang and Cem Yuksel, ACM Transactions on Graphics, 2025.
+- [Local Mechanical Description of an Elastic Fold](https://arxiv.org/pdf/1808.04892), by Théo Jules, Frédéric Lechenault and Mokhtar Adda-Bedia, Soft Matter, 2019.
+- [Relaxation Mechanisms in the Unfolding of Thin Sheets](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.107.025506), by Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2011.

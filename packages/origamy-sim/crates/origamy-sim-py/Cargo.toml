@@ -1,0 +1,25 @@
+[package]
+name = "origamy-sim-py"
+description = "Python bindings of origamy-sim."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+# An extension module links against Python only when Python loads it, so it has no test binary.
+test = false
+doctest = false
+
+[dependencies]
+numpy.workspace = true
+origamy-sim.workspace = true
+pyo3.workspace = true
+
+[lints]
+workspace = true

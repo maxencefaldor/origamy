@@ -1,0 +1,34 @@
+# The Rust workspace holds the simulator's core and its Python bindings, in packages/origamy-sim.
+[workspace]
+members = ["packages/origamy-sim/crates/*"]
+# Plain cargo commands build the core alone; maturin builds the bindings against a Python.
+default-members = ["packages/origamy-sim/crates/origamy-sim"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+authors = ["Maxence Faldor"]
+repository = "https://github.com/maxencefaldor/origamy"
+
+# Cargo.lock pins every version; `cargo update` moves them to the newest compatible releases.
+[workspace.dependencies]
+numpy = "0.30"
+origamy-sim = { path = "packages/origamy-sim/crates/origamy-sim" }
+proptest = "1.12"
+pyo3 = { version = "0.30", features = ["abi3-py314"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+
+# Published wheels take the slowest build for the fastest code; local builds stay quick.
+[profile.dist]
+inherits = "release"
+codegen-units = 1
+lto = "fat"

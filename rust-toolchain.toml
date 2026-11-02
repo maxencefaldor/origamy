@@ -1,0 +1,5 @@
+# Every machine and CI build with the same compiler, formatter and linter.
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 members = [
     "origamy",
     "origamy-mcp",
+    "origamy-sim",
 ]
 
 [manifest.dependency-groups]
@@ -13,6 +14,7 @@ dev = [
     { name = "hypothesis" },
     { name = "origamy", editable = "packages/origamy" },
     { name = "origamy-mcp", editable = "packages/origamy-mcp" },
+    { name = "origamy-sim", editable = "packages/origamy-sim" },
     { name = "pytest" },
     { name = "pytest-github-actions-annotate-failures" },
     { name = "ruff" },
@@ -751,6 +753,16 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3" },
     { name = "origamy", editable = "packages/origamy" },
 ]
+
+[[package]]
+name = "origamy-sim"
+source = { editable = "packages/origamy-sim" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.3" }]
 
 [[package]]
 name = "packaging"

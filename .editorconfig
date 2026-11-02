@@ -11,3 +11,6 @@ indent_size = 4
 
 [*.{toml,yaml,yml,json,md}]
 indent_size = 2
+
+[*.rs]
+indent_size = 4

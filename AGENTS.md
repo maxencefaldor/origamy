@@ -1,12 +1,12 @@
 # Working on origamy
 
-The repository holds origamy, a compiler for origami, built for AI agents.
+The repository holds origamy, a compiler for origami, built for AI agents, and origamy-sim, the physical simulator of paper it builds on.
 The README says what origamy does; the rules below say how to change it.
 
 ## Commands
 
 ```sh
-uv sync                             # install Python 3.14 and every tool from uv.lock
+uv sync                             # install Python 3.14 and every tool from uv.lock, and build the simulator's core
 uv run playwright install chromium  # the browser origamy draws in, once per machine
 uv run pytest                       # tests; warnings are errors
 uv run ruff format                  # format
@@ -16,9 +16,13 @@ uv run rumdl check .                # Markdown
 uv run python docs/reference.py     # the generated reference pages
 uv run python docs/gallery.py       # the gallery's viewers; --thumbnails redraws its cards
 uv run --group docs zensical serve  # the docs site, at http://localhost:8000
+cargo fmt --all                     # format Rust
+cargo test                          # Rust tests of the simulator's core
+PYO3_PYTHON=$PWD/.venv/bin/python cargo clippy --workspace --all-targets -- -D warnings  # lint Rust
 ```
 
-A change is done when all five checks pass.
+A change is done when all eight checks pass.
+Plain cargo commands build the simulator's core alone; its bindings compile against Python 3.14, which `PYO3_PYTHON` names.
 To draw with a Chromium you already have, set `ORIGAMY_RENDER_BROWSER` to its executable instead of installing Playwright's.
 
 ## Architecture
@@ -39,6 +43,16 @@ Each module imports only from the modules listed before it:
 1. `service`, `cli`: every command defined once, and the command line that adapts it.
 
 The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each service command, with the same arguments.
+
+The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, designed in `docs/simulator.md`:
+
+| Path | Holds |
+| --- | --- |
+| `crates/origamy-sim` | The core, with no Python: meshes now, then energies, contact and solvers |
+| `crates/origamy-sim-py` | The bindings, which make the core the module `origamy_sim._core` |
+| `src/origamy_sim` | The Python package, which re-exports the core, and `_core.pyi`, which types it |
+
+The simulator knows nothing of origami: its interface speaks of meshes, materials, bodies and forces.
 
 ## Conventions
 
@@ -67,9 +81,21 @@ The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each se
 - **The viewer** is `assets/viewer.js` and `assets/viewer.css`, written into one HTML page with the build as data.
   It draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
   It loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
+- **Rust:** `rust-toolchain.toml` pins the toolchain, and `Cargo.lock` every crate.
+  rustfmt formats, clippy's pedantic group lints as errors, and the core forbids unsafe code.
+  PyO3 and maturin build the bindings, and proptest tests properties.
+- **Physics:** SI units and 64-bit floats.
+  Every physical and numerical quantity is an input with a documented default, and a preset, such as kami, is a named set of values.
+- **Determinism:** derived tables come out sorted, never in hash order, and parallel work sums in a fixed order.
+- **Bindings stay thin:** they convert arrays, call the core and convert back.
+  Their doc comments are the Python docstrings, in Google style.
+  A core error is a typed value naming the element at fault, and Python sees it as a `ValueError` with the same message.
+  `_core.pyi` types every class of `_core`, and a test holds the two together.
+- **Indices:** 32-bit in the core, and 64-bit integer arrays in Python, so arithmetic on them never wraps.
 - **Tests:** every rule gets a case that states it.
   Geometry and folding get property tests.
   Pictures get a test that checks real pixels.
+  Every energy of the simulator gets finite-difference checks of its gradient and Hessian.
 
 ## Vocabulary
 
@@ -98,6 +124,13 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | fold script | A Python file whose `fold()` returns a `Paper`; "script" for short |
 | build | One run of a fold script: its steps reported, drawn and exported |
 | x-ray | A picture of every layer at once, darker where more layers lie |
+| sheet | A piece of paper in a simulation |
+| mesh | A sheet's rest geometry: its flat shape, as counterclockwise triangles |
+| rest position | Where a vertex lies in the flat sheet, in meters |
+| dihedral | An interior edge of a mesh with its two triangles, where the sheet bends |
+| crease band | The strip along a crease where the paper has yielded, about half a millimeter wide |
+| sharp crease | A crease band narrowed onto mesh edges, for coarse meshes |
+| time step | One interval of simulated time: a minimization of the incremental potential |
 
 Spell American English: color, center.
 

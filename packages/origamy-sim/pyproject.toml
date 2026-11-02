@@ -1,0 +1,47 @@
+[project]
+name = "origamy-sim"
+description = "A physical simulator of paper sheets: bending, creases, thickness, contact and hands."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Maxence Faldor" }]
+keywords = ["origami", "paper", "simulation", "physics", "contact", "thin-shells"]
+requires-python = ">=3.14"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Physics",
+  "Typing :: Typed",
+]
+dependencies = ["numpy>=2.3"]
+# The version is the Rust workspace's, in the repository's Cargo.toml.
+dynamic = ["version"]
+
+[project.urls]
+Source = "https://github.com/maxencefaldor/origamy"
+Issues = "https://github.com/maxencefaldor/origamy/issues"
+
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "crates/origamy-sim-py/Cargo.toml"
+python-source = "src"
+module-name = "origamy_sim._core"
+
+[tool.uv]
+# uv rebuilds the compiled core whenever its Rust sources or manifests change.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "crates/**/Cargo.toml" },
+  { file = "crates/**/*.rs" },
+  { file = "../../Cargo.toml" },
+  { file = "../../Cargo.lock" },
+]
