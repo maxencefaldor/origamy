@@ -16,7 +16,7 @@ uv run rumdl check .                # Markdown
 uv run python docs/reference.py     # the generated reference pages
 uv run python docs/gallery.py       # the gallery's viewers; --thumbnails redraws its cards
 uv run python docs/simulator.py     # the simulator's runs the docs show
-uv run zensical serve              # the docs site, at http://localhost:8000
+uv run zensical serve               # the docs site, at http://localhost:8000
 uv run python packages/origamy-sim/codegen/generate.py  # the simulator's generated derivatives
 cargo fmt --all                     # format Rust
 cargo test                          # Rust tests of the simulator's core
