@@ -14,6 +14,7 @@ from origamy_sim import (
     Sheet,
     Simulation,
     SingularError,
+    Solver,
     Table,
 )
 
@@ -159,6 +160,47 @@ def test_a_crease_folded_past_its_yield_moment_springs_back_short_of_the_fold() 
     crease = simulation.sheet(0)
     assert crease.rest_angle((0, 2)) == pytest.approx(fold - springback)
     assert crease.plastic_rotation((0, 2)) == pytest.approx(fold - springback)
+
+
+def test_a_hand_carries_held_vertices_and_feels_the_weight() -> None:
+    mesh = Mesh.grid(4, 4, SIDE, SIDE)
+    # The hand feels the forces the solve leaves, so a tight tolerance balances them.
+    # Hanging from flat takes many iterations.
+    solver = Solver(tolerance=1e-12, iteration_limit=1000)
+    settings = Settings(time_step=math.inf, solver=solver)
+    simulation = Simulation([Sheet(mesh)], settings)
+    edge = np.flatnonzero(mesh.rest[:, 0] > SIDE - 1e-9)
+    simulation.hold(0, edge)
+    lifted = simulation.positions(0)[edge] + [0.0, 0.0, 0.01]
+    simulation.move_held(0, edge, lifted)
+    assert simulation.step().converged
+    assert simulation.positions(0)[edge] == pytest.approx(lifted, abs=1e-12)
+    weight = 0.06 * SIDE * SIDE * 9.81
+    forces = simulation.hold_forces(0)
+    assert forces[:, 2].sum() == pytest.approx(weight, rel=1e-6)
+    assert not forces[simulation.held(0) == 0].any()
+    with pytest.raises(
+        ValueError, match="vertex 0 is not held, so no hold can move it"
+    ):
+        simulation.move_held(0, [edge[0], 0], np.zeros((2, 3)))
+    with pytest.raises(ValueError, match="2 vertices were given, but 1 positions"):
+        simulation.move_held(0, edge[:2], np.zeros((1, 3)))
+
+
+def test_forces_on_every_vertex_equal_to_its_weight_hold_a_sheet_up() -> None:
+    simulation = Simulation([Sheet(SQUARE)], Settings(time_step=0.01, air=None))
+    # Each vertex carries a third of the area of each triangle round it.
+    areas = np.array([2, 1, 2, 1]) * SIDE * SIDE / 6
+    up = np.outer(areas * 0.06 * 9.81, [0.0, 0.0, 1.0])
+    simulation.set_forces(0, [0, 1, 2, 3], up)
+    assert simulation.forces(0) == pytest.approx(up)
+    simulation.set_pressure(0, 0.0)
+    for _ in range(5):
+        assert simulation.step().converged
+    assert simulation.velocities(0) == pytest.approx(np.zeros((4, 3)), abs=1e-9)
+    assert simulation.pressure(0) == 0.0
+    with pytest.raises(ValueError, match="pressure is inf, but it must be finite"):
+        simulation.set_pressure(0, math.inf)
 
 
 def test_creases_and_rest_angles_lie_along_interior_edges() -> None:

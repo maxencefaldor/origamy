@@ -26,6 +26,8 @@ Coulomb friction holds paper on paper and on the table, and air drags paper movi
 A time step that does not converge retries as two half steps.
 Creases yield past their yield moment and spring back when released, as paper's creases do.
 Held folds age: they lose moment logarithmically in time, and set deeper the longer they are held.
+Hands carry held vertices within each time step, so paper never crosses paper on the way, and each hand reports the force it exerts.
+Point forces and pressure load the paper.
 Benchmarks hold it to known solutions:
 
 - A cantilever bent by its own weight to 30% of its length matches the elastica within 0.1%.
@@ -40,9 +42,10 @@ Benchmarks hold it to known solutions:
 - A crease of kami pressed flat springs back to an opening of 38°, within the measured 30° to 40°.
 - A fold held ten times longer sets about 5.7° deeper, as paper measures.
 - A crease band pressed fully flat springs back to 36°, exactly as its sharp crease would.
+- A hand lifting a sheet by its edge carries its weight within 10⁻⁶, and one pulling it across the table feels Coulomb's friction within 1%.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Hands come next, in phase 5: rigid bodies on paths, grips and forces.
+Phase 5 is under way: hands carry held vertices, and rigid bodies and grips come next.
 
 ## Install
 

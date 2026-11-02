@@ -117,7 +117,7 @@ Each vertex also keeps its place in the flat sheet, the material coordinates, wh
 Every behavior of the paper enters as one term of a total energy:
 
 ```text
-E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_friction + E_drag + E_hands + E_gravity
+E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_friction + E_drag + E_loads + E_hands + E_gravity
 ```
 
 | Term | Meaning |
@@ -130,7 +130,8 @@ E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_
 | E_contact | A barrier on the distance between mid-surface primitives, offset by the thickness |
 | E_friction | Smoothed Coulomb friction between paper and paper, and between paper and the table, lagged per time step |
 | E_drag | Quadratic air drag on each vertex's patch of paper, across the sheet, lagged per time step |
-| E_hands | Contact with moving bodies, and stiff springs from held vertices to the bodies that hold them |
+| E_loads | Point forces on vertices, and pressure on each sheet's front along its normals from the step's start |
+| E_hands | Contact with moving bodies, and the augmented Lagrangian that carries each moving hold to its target |
 | E_gravity | The weight of each vertex's share of the sheet |
 
 The real modulus governs small strains, and the direct solver absorbs the stiffness it brings.
@@ -271,12 +272,21 @@ The simulator provides each as an input to the same model:
 | --- | --- | --- |
 | Rigid bodies on paths | Moving shapes, such as a fingertip capsule, a bone folder or the table, that touch paper through the contact barrier and friction | Lifting a flap, pushing a reverse fold in, pressing a crease flat |
 | Grips | Stiff springs from a patch of paper to a moving body, made and released over time | Pinching a corner, holding a flap while another moves |
-| Forces | Point, area and pressure loads, constant or varying over time | Pulling a point toward a target, flattening a stack |
+| Holds | Held vertices fixed where they lie, or carried to a target over each time step | Holding a corner, carrying a flap over |
+| Forces | Point forces and pressure, constant or varying over time | Pulling a point toward a target, flattening a stack |
 | Crease actuation | A crease's rest curvature and stiffness, set over time | Shaping a model, or self-folding sheets |
 | Gravity | A uniform field | Sag, flaps falling open |
 
 A finger pressing along a fold line yields the crease band there, so creasing comes from pressure, as it does by hand.
 Hands appear in the animations, so a person sees exactly how to fold.
+
+**Moving holds.**
+A hold moves its vertex within a time step, so collision detection covers the vertex's path, and the paper around it follows.
+The vertex joins the solve, pulled to its target by the augmented Lagrangian of incremental potential contact.
+A stiff spring pulls the vertex, and each round of minimization raises a force on every hold short of its target.
+The step converges only once every hold lies within the tolerance of its target.
+A hold that contact blocks, such as a hand pushing paper into the table, never converges, so the step halves and then reports the failure.
+Each hold reports the force it exerts: the force that balances every other force on its vertex.
 
 ### 3.8 Solver
 
@@ -332,7 +342,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
-| Solver | Time step, the shortest time step, the lags of friction, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
+| Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
 
 Each crease takes its own values, so one model can hold sharp and soft creases, or two papers in one sheet.
 
@@ -346,7 +356,7 @@ A pydantic-settings configuration reads the parameters from a YAML file and the 
 
 | Output | Content |
 | --- | --- |
-| States | Vertex positions and velocities, crease rest curvatures, as NumPy arrays |
+| States | Vertex positions and velocities, crease rest curvatures, and the force each hold exerts, as NumPy arrays |
 | Time step reports | Newton iterations, time steps taken, residual, every energy term, greatest strain, least distance between sheets, contacts, and whether the time step converged |
 | Surfaces with thickness | Both faces of the sheet, offset by half the thickness, and its rims, for rendering |
 | glTF 2.0 | Meshes and animations, the standard format for 3D |
@@ -477,6 +487,10 @@ The simulator is excellent when it passes all of these, in CI:
 | A precrease pressed flat again, then released | Perfect plasticity | Rises by its yield angle, within 10⁻⁶ rad |
 | A crease band pressed fully flat, then released | Its sharp crease, and paper's 36° | Opening within 10⁻⁶ rad of the sharp crease's springback |
 | A fold held for 1, 10 and 100 s, then released | Logarithmic aging, and paper's 5.7° a decade | Springback within 0.002 rad of the law; a decade within 5% of 5.7° |
+| A sheet hanging from a hand, then lifted | Statics: the hand carries the weight | The hand reaches its target within 10⁻¹² m, and carries the weight within 10⁻⁶ |
+| A sheet pulled across the table by a hand | Coulomb's law: the friction coefficient times the weight the table bears | Pull within 1% |
+| A hand pushing paper into the table | No crossing | The step reports that it did not converge, with paper above the table |
+| Pressure pulling a sheet with its weight per area, and twice that | Newton's laws | The sheet stays still, or rises at g, within 10⁻⁷ m/s |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
 | The crane, folded by hand from the square | origamy's exact layer orders | Same layer order at every flat state, no crossing |
@@ -505,7 +519,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 4 are done.
+Phases 0 to 4 are done, and phase 5 has moving holds and loads.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -588,6 +602,7 @@ A research track runs alongside, with ambitious targets:
 | Air | Quadratic drag across the sheet, as a potential | Damping proportional to mass, which slows paper alike in every direction, even in a vacuum |
 | Crease plasticity | The variational update, inside each time step | A return mapping after each step, which lags yielding by a step |
 | Crease aging | Thermally activated creep, Eyring's law, in the same update | A spectrum of relaxation times, which ages a briefly pressed fold only over the press's own time |
+| Moving holds | The augmented Lagrangian inside each time step, as in incremental potential contact | Moving held vertices between steps, which collision detection cannot follow |
 
 ## 9. References
 

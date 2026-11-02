@@ -154,6 +154,8 @@ impl Parameters for Solver {
             iteration_limit: field(model, "iteration_limit")?,
             lags: field(model, "lags")?,
             shortest_step: field(model, "shortest_step")?,
+            hold_stiffness: field(model, "hold_stiffness")?,
+            hold_rounds: field(model, "hold_rounds")?,
             trust_radius: field(model, "trust_radius")?,
             sufficient_decrease: field(model, "sufficient_decrease")?,
             backtracking: field(model, "backtracking")?,
@@ -166,6 +168,8 @@ impl Parameters for Solver {
         fields.set_item("iteration_limit", self.iteration_limit)?;
         fields.set_item("lags", self.lags)?;
         fields.set_item("shortest_step", self.shortest_step)?;
+        fields.set_item("hold_stiffness", self.hold_stiffness)?;
+        fields.set_item("hold_rounds", self.hold_rounds)?;
         fields.set_item("trust_radius", self.trust_radius)?;
         fields.set_item("sufficient_decrease", self.sufficient_decrease)?;
         fields.set_item("backtracking", self.backtracking)?;

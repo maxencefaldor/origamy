@@ -19,7 +19,7 @@ use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
 use crate::energy::{Point, Project};
-use crate::parameter::ParameterError;
+use crate::parameter::{ParameterError, finite};
 use crate::settings::Settings;
 use crate::sheet::Sheet;
 use crate::system::{Assembly, Factor, Pattern, SingularError};
@@ -45,6 +45,9 @@ pub struct Energy {
     pub friction: f64,
     /// The work air drag does against the paper over the time step.
     pub drag: f64,
+    /// The potential energy of the point forces, zero at the origin, and the work pressure
+    /// does over the time step.
+    pub loads: f64,
     /// The potential energy of gravity, zero at the origin.
     pub gravity: f64,
     /// The kinetic energy.
@@ -59,7 +62,7 @@ impl Energy {
     }
 
     /// Every term, in a fixed order.
-    fn terms(&self) -> [f64; 10] {
+    fn terms(&self) -> [f64; 11] {
         // The destructuring names every field, so a new term cannot be left out of the total.
         let Self {
             stretching,
@@ -70,6 +73,7 @@ impl Energy {
             contact,
             friction,
             drag,
+            loads,
             gravity,
             kinetic,
         } = *self;
@@ -82,6 +86,7 @@ impl Energy {
             contact,
             friction,
             drag,
+            loads,
             gravity,
             kinetic,
         ]
@@ -95,17 +100,21 @@ struct Potential {
     energy: Energy,
     /// The inertia term ½ (x − x̂)ᵀ M (x − x̂) / Δt².
     inertia: f64,
+    /// The augmented Lagrangian that pulls each moving held vertex to its target.
+    holding: f64,
 }
 
 impl Potential {
     /// The incremental potential.
     fn total(&self) -> f64 {
-        self.energy.total() + self.inertia
+        self.energy.total() + self.inertia + self.holding
     }
 
     /// The size of the terms, for telling a change from rounding.
     fn size(&self) -> f64 {
-        self.energy.terms().iter().map(|t| t.abs()).sum::<f64>() + self.inertia.abs()
+        self.energy.terms().iter().map(|t| t.abs()).sum::<f64>()
+            + self.inertia.abs()
+            + self.holding.abs()
     }
 }
 
@@ -173,6 +182,12 @@ pub enum StateError {
     /// The positions bring paper closer than its thickness to itself or to the table.
     #[error("the positions bring paper closer than its thickness to itself or to the table")]
     Overlapping,
+    /// A vertex to move is not held.
+    #[error("vertex {vertex} is not held, so no hold can move it")]
+    NotHeld {
+        /// The vertex.
+        vertex: usize,
+    },
 }
 
 /// Sheets in space, stepped through time.
@@ -184,6 +199,16 @@ pub struct Simulation {
     positions: Vec<[f64; 3]>,
     velocities: Vec<[f64; 3]>,
     held: Vec<bool>,
+    /// Where each moving held vertex goes over the next time step.
+    targets: Vec<Option<Point>>,
+    /// The held vertices that stay where they are over the time step being solved.
+    fixed: Vec<bool>,
+    /// The point force on each vertex, in newtons.
+    forces: Vec<[f64; 3]>,
+    /// The force each hold exerted on its vertex at the end of the last time step, in newtons.
+    hold_forces: Vec<[f64; 3]>,
+    /// The pressure on each sheet's front, in pascals.
+    pressures: Vec<f64>,
     time: f64,
     pattern: Pattern,
     pairs: Vec<(u32, u32)>,
@@ -232,6 +257,11 @@ impl Simulation {
         Ok(Self {
             velocities: vec![[0.0; 3]; positions.len()],
             held: vec![false; positions.len()],
+            targets: vec![None; positions.len()],
+            fixed: vec![false; positions.len()],
+            forces: vec![[0.0; 3]; positions.len()],
+            hold_forces: vec![[0.0; 3]; positions.len()],
+            pressures: vec![0.0; sheets.len()],
             sheets,
             offsets,
             settings,
@@ -430,9 +460,129 @@ impl Simulation {
         let range = self.range(sheet);
         assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
         self.held[range.start + vertex] = held;
+        self.targets[range.start + vertex] = None;
         if held {
             self.velocities[range.start + vertex] = [0.0; 3];
         }
+    }
+
+    /// Moves held vertices of a sheet, each to its position, over the next time step, as a hand
+    /// carries them.
+    ///
+    /// The vertices move within the step, so collision detection covers their paths, and the
+    /// paper around them follows. The step converges only once every vertex reaches its position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateError::NotHeld`] when a vertex is not held, and [`StateError::NotFinite`]
+    /// when a coordinate is not finite. A refused move changes nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet or the sheet no such vertex.
+    pub fn move_held(
+        &mut self,
+        sheet: usize,
+        moves: &[(usize, [f64; 3])],
+    ) -> Result<(), StateError> {
+        let range = self.range(sheet);
+        for &(vertex, position) in moves {
+            assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
+            if !self.held[range.start + vertex] {
+                return Err(StateError::NotHeld { vertex });
+            }
+            if !position.iter().all(|c| c.is_finite()) {
+                return Err(StateError::NotFinite { vertex });
+            }
+        }
+        for &(vertex, position) in moves {
+            self.targets[range.start + vertex] = Some(Point::from(position));
+        }
+        Ok(())
+    }
+
+    /// The force each hold exerted on each vertex of a sheet at the end of the last time step.
+    ///
+    /// The forces are in newtons, and zero where a vertex is free.
+    /// The force balances every other force on the vertex, to within the forces the solver's
+    /// tolerance leaves.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn hold_forces(&self, sheet: usize) -> &[[f64; 3]] {
+        &self.hold_forces[self.range(sheet)]
+    }
+
+    /// The point force on each vertex of a sheet, in newtons.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn forces(&self, sheet: usize) -> &[[f64; 3]] {
+        &self.forces[self.range(sheet)]
+    }
+
+    /// Sets the point forces on vertices of a sheet, in newtons, each until set again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateError::NotFinite`] when a component is not finite. A refused force
+    /// changes nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet or the sheet no such vertex.
+    pub fn set_forces(
+        &mut self,
+        sheet: usize,
+        forces: &[(usize, [f64; 3])],
+    ) -> Result<(), StateError> {
+        let range = self.range(sheet);
+        for &(vertex, force) in forces {
+            assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
+            if !force.iter().all(|c| c.is_finite()) {
+                return Err(StateError::NotFinite { vertex });
+            }
+        }
+        for &(vertex, force) in forces {
+            self.forces[range.start + vertex] = force;
+        }
+        Ok(())
+    }
+
+    /// The pressure on a sheet's front, in pascals.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn pressure(&self, sheet: usize) -> f64 {
+        self.pressures[sheet]
+    }
+
+    /// Sets the pressure on a sheet's front, in pascals, until set again.
+    ///
+    /// The pressure pushes each patch of the sheet against its normal at the start of each time
+    /// step; a negative pressure pulls.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParameterError`] when the pressure is not finite.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    pub fn set_pressure(&mut self, sheet: usize, pressure: f64) -> Result<(), ParameterError> {
+        assert!(
+            sheet < self.sheets.len(),
+            "the simulation has no sheet {sheet}"
+        );
+        finite("pressure", pressure)?;
+        self.pressures[sheet] = pressure;
+        Ok(())
     }
 
     /// The simulation's energy now.
@@ -458,7 +608,9 @@ impl Simulation {
     /// to the table. A refused step leaves the state as it was.
     pub fn step(&mut self) -> Result<Report, StepError> {
         let dt = self.settings.time_step;
-        self.advance(dt)
+        let report = self.advance(dt)?;
+        self.targets.fill(None);
+        Ok(report)
     }
 
     /// Advances the simulation by `dt`, halving the time step wherever it does not converge,
@@ -476,10 +628,18 @@ impl Simulation {
             self.velocities.clone(),
             self.time,
             self.sheets.clone(),
+            self.targets.clone(),
         );
-        let halves = self
-            .advance(half)
-            .and_then(|first| Ok((first, self.advance(half)?)));
+        // The first half carries each moving hold halfway, and the second the rest of the way.
+        for (target, &position) in self.targets.iter_mut().zip(&self.positions) {
+            if let Some(target) = target {
+                *target = (*target + Point::from(position)) * 0.5;
+            }
+        }
+        let halves = self.advance(half).and_then(|first| {
+            self.targets.clone_from(&saved.4);
+            Ok((first, self.advance(half)?))
+        });
         match halves {
             Ok((first, second)) => Ok(Report {
                 converged: first.converged && second.converged,
@@ -488,7 +648,13 @@ impl Simulation {
                 ..second
             }),
             Err(error) => {
-                (self.positions, self.velocities, self.time, self.sheets) = saved;
+                (
+                    self.positions,
+                    self.velocities,
+                    self.time,
+                    self.sheets,
+                    self.targets,
+                ) = saved;
                 Err(error)
             }
         }
@@ -514,6 +680,23 @@ impl Simulation {
         let inertia = if dt.is_finite() { 1.0 / (dt * dt) } else { 0.0 };
         let mut slips = self.slips(&start);
         let normals = self.normals(&start);
+        // A moving held vertex is free in the solve, pulled to its target; the others stay.
+        self.fixed = self
+            .held
+            .iter()
+            .zip(&self.targets)
+            .map(|(&held, target)| held && target.is_none())
+            .collect();
+        let mut holds: Vec<Option<Hold>> = self
+            .targets
+            .iter()
+            .map(|target| {
+                target.map(|target| Hold {
+                    target,
+                    multiplier: Point::zeros(),
+                })
+            })
+            .collect();
         let mut solve = Solve {
             x: start.clone(),
             potential: Potential::default(),
@@ -522,6 +705,7 @@ impl Simulation {
             update: f64::INFINITY,
         };
         let mut iterations = 0;
+        let mut holding = vec![Point::zeros(); start.len()];
         for lag in 0..self.settings.solver.lags {
             let incremental = Incremental {
                 start: &start,
@@ -530,11 +714,27 @@ impl Simulation {
                 elapsed: elapsed(dt),
                 slips: &slips,
                 normals: &normals,
+                holds: &[],
+                stiffness: 0.0,
             };
-            solve = self.minimize(solve.x, &incremental)?;
+            solve = self.carry(solve.x, &incremental, &mut holds)?;
             iterations += solve.iterations;
             let settled = lag > 0 && solve.iterations <= 1;
-            if !solve.converged || slips.is_empty() || settled {
+            let last = lag + 1 == self.settings.solver.lags;
+            if !solve.converged || slips.is_empty() || settled || last {
+                // A hold exerts the force every other term of the potential leaves on its
+                // vertex, in the lag the step ends with.
+                if self.held.contains(&true) {
+                    let near = self.candidates(&solve.x, &solve.x);
+                    let gradient = self
+                        .derivatives(&solve.x, &incremental, &near)
+                        .gradient(solve.x.len());
+                    holding = gradient
+                        .iter()
+                        .zip(&self.held)
+                        .map(|(g, &held)| if held { *g } else { Point::zeros() })
+                        .collect();
+                }
                 break;
             }
             slips = self.slips(&solve.x);
@@ -543,7 +743,75 @@ impl Simulation {
             start,
             solve,
             iterations,
+            holding,
         })
+    }
+
+    /// The minimum of a time step's incremental potential with each moving held vertex at its
+    /// target, from `x`.
+    ///
+    /// The augmented Lagrangian of incremental potential contact carries the holds. A stiff
+    /// spring pulls each hold to its target, and each round of minimization raises a force on
+    /// every hold short of it. The solve converges only once every hold lies within the tolerance
+    /// of its target.
+    fn carry(
+        &self,
+        mut x: Vec<Point>,
+        terms: &Incremental,
+        holds: &mut [Option<Hold>],
+    ) -> Result<Solve, StepError> {
+        let solver = self.settings.solver;
+        let stiffness = solver.hold_stiffness * self.stiffest();
+        let mut iterations = 0;
+        for _ in 0..solver.hold_rounds {
+            let incremental = Incremental {
+                holds,
+                stiffness,
+                ..*terms
+            };
+            let solve = self.minimize(x, &incremental)?;
+            iterations += solve.iterations;
+            let gap = holds
+                .iter()
+                .zip(&solve.x)
+                .filter_map(|(hold, p)| hold.map(|hold| (p - hold.target).norm()))
+                .fold(0.0, f64::max);
+            if !solve.converged || gap <= solver.tolerance {
+                return Ok(Solve {
+                    iterations,
+                    ..solve
+                });
+            }
+            for (hold, p) in holds.iter_mut().zip(&solve.x) {
+                if let Some(hold) = hold {
+                    hold.multiplier -= (p - hold.target) * stiffness;
+                }
+            }
+            x = solve.x;
+        }
+        let mut solve = self.minimize(
+            x,
+            &Incremental {
+                holds,
+                stiffness,
+                ..*terms
+            },
+        )?;
+        solve.iterations += iterations;
+        solve.converged = false;
+        Ok(solve)
+    }
+
+    /// The largest stretching stiffness of any sheet, Young's modulus times thickness, in newtons
+    /// per meter.
+    fn stiffest(&self) -> f64 {
+        self.sheets
+            .iter()
+            .map(|sheet| {
+                let material = sheet.material();
+                material.stiffness.along.max(material.stiffness.across) * material.thickness
+            })
+            .fold(0.0, f64::max)
     }
 
     /// The minimum of a time step's incremental potential, by Newton's method from `x`.
@@ -567,12 +835,12 @@ impl Simulation {
             let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
             // definite; elsewhere each element's Hessian is projected to be.
-            let mut assembly = Assembly::new(pattern, &self.held);
+            let mut assembly = Assembly::new(pattern, &self.fixed);
             derivatives.scatter(&mut assembly, false);
             let factor = if let Ok(factor) = assembly.factor() {
                 factor
             } else {
-                assembly = Assembly::new(pattern, &self.held);
+                assembly = Assembly::new(pattern, &self.fixed);
                 derivatives.scatter(&mut assembly, true);
                 assembly.factor().map_err(StepError::Singular)?
             };
@@ -667,7 +935,11 @@ impl Simulation {
             start,
             solve,
             iterations,
+            holding,
         } = attempt;
+        for (force, hold) in self.hold_forces.iter_mut().zip(holding) {
+            *force = (*hold).into();
+        }
         for (i, point) in solve.x.iter().enumerate() {
             let velocity = if dt.is_finite() {
                 (point - start[i]) / dt
@@ -769,9 +1041,9 @@ impl Simulation {
     /// The factorized system of the as-rigid-as-possible fit, which minimizes Σ Ā |F − R|².
     ///
     /// The sum runs over triangles, with F a triangle's deformation gradient and R its nearest
-    /// rotation. Held vertices stay where they are.
+    /// rotation. Held vertices that do not move stay where they are.
     fn rigidity(&self) -> Result<Factor<'_>, SingularError> {
-        let mut assembly = Assembly::new(&self.pattern, &self.held);
+        let mut assembly = Assembly::new(&self.pattern, &self.fixed);
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset =
                 u32::try_from(self.offsets[s]).expect("a scene counts its vertices in 32 bits");
@@ -818,8 +1090,8 @@ impl Simulation {
                 }
             }
         }
-        for (v, &held) in self.held.iter().enumerate() {
-            if held {
+        for (v, &fixed) in self.fixed.iter().enumerate() {
+            if fixed {
                 pull[3 * v..3 * v + 3].fill(0.0);
             }
         }
@@ -831,9 +1103,8 @@ impl Simulation {
     /// The strain barrier is infinite past the strain cap, and contact is infinite where paper
     /// reaches its thickness.
     fn potential(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> Potential {
-        let gravity = Point::from(self.settings.gravity);
         let mut energy = Energy::default();
-        let mut inertia_term = 0.0;
+        let (mut inertia_term, mut holding) = (0.0, 0.0);
         let contact = self.settings.contact;
         let frictions: Vec<f64> = incremental
             .slips
@@ -841,7 +1112,6 @@ impl Simulation {
             .map(|slip| slip.energy(x, incremental.start, contact.stick))
             .collect();
         energy.friction = frictions.iter().sum();
-        let (predicted, inertia) = (incremental.predicted, incremental.inertia);
         let barriers: Vec<f64> = pairs
             .par_iter()
             .map(|pair| {
@@ -861,12 +1131,14 @@ impl Simulation {
             let offset = self.offsets[s];
             let constants = Constants::of(sheet);
             let x = &x[offset..offset + sheet.mesh().vertex_count()];
-            let predicted = &predicted[offset..offset + sheet.mesh().vertex_count()];
             for (v, area) in sheet.areas().iter().enumerate() {
                 let mass = constants.mass_per_area * area;
-                energy.gravity -= mass * gravity.dot(&x[v]);
+                let terms = self.vertex(incremental, s, offset + v, &x[v], *area, mass);
+                energy.gravity += terms.gravity;
+                energy.loads += terms.loads;
+                inertia_term += terms.inertia;
+                holding += terms.holding;
                 if !self.held[offset + v] {
-                    inertia_term += 0.5 * mass * inertia * (x[v] - predicted[v]).norm_squared();
                     if let Some(drag) = self.drag(incremental, offset + v, *area) {
                         let across = (x[v] - incremental.start[offset + v]).dot(&drag.normal);
                         energy.drag += drag.scale * across.abs().powi(3) / 3.0;
@@ -925,13 +1197,13 @@ impl Simulation {
         Potential {
             energy,
             inertia: inertia_term,
+            holding,
         }
     }
 
     /// Every element's gradient and Hessian at positions `x`, with contact between `pairs`.
     fn derivatives(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> Derivatives {
         let contact = self.settings.contact;
-        let (predicted, inertia) = (incremental.predicted, incremental.inertia);
         let mut derivatives = Derivatives {
             pairs: pairs
                 .par_iter()
@@ -961,7 +1233,6 @@ impl Simulation {
                 }
             }
         }
-        let gravity = Point::from(self.settings.gravity);
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset = self.offsets[s];
             let global =
@@ -969,14 +1240,16 @@ impl Simulation {
             let constants = Constants::of(sheet);
             let mesh = sheet.mesh();
             let x = &x[offset..offset + mesh.vertex_count()];
-            let predicted = &predicted[offset..offset + mesh.vertex_count()];
             for (v, area) in sheet.areas().iter().enumerate() {
                 let mass = constants.mass_per_area * area;
-                let force = (x[v] - predicted[v]) * (mass * inertia) - gravity * mass;
+                let terms = self.vertex(incremental, s, offset + v, &x[v], *area, mass);
                 let vertex = u32::try_from(v).expect("a mesh counts its vertices in 32 bits");
                 derivatives
                     .vertices
-                    .push((global(vertex), force.into(), mass * inertia));
+                    .push((global(vertex), terms.gradient.into(), terms.diagonal));
+                if self.held[offset + v] {
+                    continue;
+                }
                 if let Some(drag) = self.drag(incremental, offset + v, *area) {
                     let across = (x[v] - incremental.start[offset + v]).dot(&drag.normal);
                     let gradient = drag.normal * (drag.scale * across.abs() * across);
@@ -1090,6 +1363,49 @@ fn bend(
 }
 
 impl Simulation {
+    /// The terms of the incremental potential at vertex `vertex` of sheet `sheet`, at position
+    /// `p`, with lumped area `area` and mass `mass`.
+    ///
+    /// The terms are the vertex's weight and loads, and either its moving hold or, when free,
+    /// its inertia. A vertex that stays held moves not at all, so its other terms are constant.
+    fn vertex(
+        &self,
+        incremental: &Incremental,
+        sheet: usize,
+        vertex: usize,
+        p: &Point,
+        area: f64,
+        mass: f64,
+    ) -> VertexTerms {
+        let weight = Point::from(self.settings.gravity) * mass;
+        let force = Point::from(self.forces[vertex]);
+        let mut terms = VertexTerms {
+            gravity: -weight.dot(p),
+            loads: -force.dot(p),
+            gradient: -weight - force,
+            ..VertexTerms::default()
+        };
+        // Pressure pushes the patch against its normal from the step's start; its potential is
+        // the work it does over the step.
+        if let Some(normal) = incremental.normals.get(vertex) {
+            let push = normal * (self.pressures[sheet] * area);
+            terms.loads += push.dot(&(p - incremental.start[vertex]));
+            terms.gradient += push;
+        }
+        if let Some(hold) = incremental.hold(vertex) {
+            let (value, gradient, diagonal) = hold.terms(p, incremental.stiffness);
+            terms.holding = value;
+            terms.gradient += gradient;
+            terms.diagonal = diagonal;
+        } else if !self.held[vertex] {
+            let lag = p - incremental.predicted[vertex];
+            terms.inertia = 0.5 * mass * incremental.inertia * lag.norm_squared();
+            terms.gradient += lag * (mass * incremental.inertia);
+            terms.diagonal = mass * incremental.inertia;
+        }
+        terms
+    }
+
     /// The air drag on a vertex with lumped area `area`, in a time step.
     ///
     /// The drag is `None` without air, in quasi-static steps, and for a vertex without a
@@ -1310,6 +1626,35 @@ impl Derivatives {
         scatter_elements(&self.plates, assembly, false);
         scatter_elements(&self.dihedrals, assembly, projected);
     }
+
+    /// The gradient at each of `count` vertices, every vertex free.
+    fn gradient(&self, count: usize) -> Vec<Point> {
+        let mut gradient = vec![Point::zeros(); count];
+        for &(vertex, force, _) in &self.vertices {
+            gradient[vertex as usize] += Point::from(force);
+        }
+        for &(vertex, slope, _) in &self.table {
+            gradient[vertex as usize].z += slope;
+        }
+        gather(&self.pairs, &mut gradient);
+        gather(&self.friction, &mut gradient);
+        gather(&self.drag, &mut gradient);
+        gather(&self.triangles, &mut gradient);
+        gather(&self.plates, &mut gradient);
+        gather(&self.dihedrals, &mut gradient);
+        gradient
+    }
+}
+
+/// Adds elements' gradients to each vertex's.
+fn gather<const N: usize, const D: usize>(elements: &[Element<N, D>], gradient: &mut [Point]) {
+    for (stencil, local, _) in elements {
+        for (i, vertex) in stencil.iter().enumerate() {
+            if let Some(v) = vertex {
+                gradient[*v as usize] += local.fixed_rows::<3>(3 * i);
+            }
+        }
+    }
 }
 
 /// Fills an assembly with elements, their Hessians projected in parallel when `projected`.
@@ -1340,12 +1685,16 @@ struct Drag {
     scale: f64,
 }
 
-/// A time step solved but not yet taken: where it starts, where its last lag's solve ended, and
-/// the Newton iterations of all its lags.
+/// A time step solved but not yet taken.
+///
+/// The attempt keeps where the step starts and where its last lag's solve ended. The attempt
+/// also keeps the Newton iterations of all its lags, and the forces of its holds.
 struct Attempt {
     start: Vec<Point>,
     solve: Solve,
     iterations: usize,
+    /// The force each hold exerts on its vertex at the solution; zero where the vertex is free.
+    holding: Vec<Point>,
 }
 
 /// Where Newton's method ended a time step's minimization, and how.
@@ -1358,10 +1707,10 @@ struct Solve {
     update: f64,
 }
 
-/// The terms of a time step's incremental potential that the step holds fixed.
+/// The terms of a time step's incremental potential that a minimization holds fixed.
 ///
 /// The terms are where the step starts, where inertia carries each vertex, each contact's
-/// friction and each vertex's normal.
+/// friction, each vertex's normal and each moving hold.
 struct Incremental<'a> {
     start: &'a [Point],
     predicted: &'a [Point],
@@ -1370,12 +1719,18 @@ struct Incremental<'a> {
     /// The time the step spans, in seconds, over which creases age; zero for quasi-static steps.
     elapsed: f64,
     slips: &'a [Slip],
-    /// Each vertex's unit normal at the step's start, along which air drags it.
+    /// Each vertex's unit normal at the step's start, along which air drags it and pressure
+    /// pushes it.
     normals: &'a [Point],
+    /// Each vertex's moving hold, if any, indexed by vertex.
+    holds: &'a [Option<Hold>],
+    /// The stiffness of the spring that pulls each moving hold to its target, in newtons per
+    /// meter.
+    stiffness: f64,
 }
 
 impl<'a> Incremental<'a> {
-    /// The terms of no time step: positions `x` alone, without inertia or friction.
+    /// The terms of no time step: positions `x` alone, without inertia, friction or holds.
     fn still(x: &'a [Point]) -> Self {
         Self {
             start: x,
@@ -1384,7 +1739,47 @@ impl<'a> Incremental<'a> {
             elapsed: 0.0,
             slips: &[],
             normals: &[],
+            holds: &[],
+            stiffness: 0.0,
         }
+    }
+
+    /// A vertex's moving hold, if any.
+    fn hold(&self, vertex: usize) -> Option<Hold> {
+        self.holds.get(vertex).copied().flatten()
+    }
+}
+
+/// One vertex's terms of the incremental potential, with their gradient and the diagonal of their
+/// Hessian.
+#[derive(Clone, Copy, Debug, Default)]
+struct VertexTerms {
+    gravity: f64,
+    loads: f64,
+    inertia: f64,
+    holding: f64,
+    gradient: Point,
+    diagonal: f64,
+}
+
+/// A held vertex moving over a time step: where it goes, and the force the augmented Lagrangian
+/// has raised to bring it there.
+#[derive(Clone, Copy, Debug)]
+struct Hold {
+    target: Point,
+    multiplier: Point,
+}
+
+impl Hold {
+    /// The augmented Lagrangian at position `p`, with spring stiffness `k`: its value, its
+    /// gradient and the diagonal of its Hessian.
+    fn terms(&self, p: &Point, k: f64) -> (f64, Point, f64) {
+        let gap = p - self.target;
+        (
+            0.5 * k * gap.norm_squared() - self.multiplier.dot(&gap),
+            gap * k - self.multiplier,
+            k,
+        )
     }
 }
 
@@ -1503,7 +1898,8 @@ mod tests {
     /// incremental potential and of the gradient, to a relative tolerance.
     ///
     /// The time step starts at `start`, where friction is lagged, and inertia carries every
-    /// vertex about a millimeter from there.
+    /// vertex about a millimeter from there. Every fifth vertex moves on a hold toward a target
+    /// a little away.
     fn check(simulation: &Simulation, x: &[Point], start: &[Point], step: f64) {
         let predicted: Vec<Point> = start
             .iter()
@@ -1511,6 +1907,16 @@ mod tests {
             .collect();
         let slips = simulation.slips(start);
         let normals = simulation.normals(start);
+        let holds: Vec<Option<Hold>> = start
+            .iter()
+            .enumerate()
+            .map(|(v, p)| {
+                (v % 5 == 0).then(|| Hold {
+                    target: p + wobble(v + 11, 1e-5),
+                    multiplier: wobble(v + 13, 1e-3),
+                })
+            })
+            .collect();
         let incremental = Incremental {
             start,
             predicted: &predicted,
@@ -1518,6 +1924,8 @@ mod tests {
             elapsed: 1.0 / 60.0,
             slips: &slips,
             normals: &normals,
+            holds: &holds,
+            stiffness: 50.0,
         };
         let pairs = simulation.candidates(x, x);
         let pattern = Pattern::new(
@@ -1591,7 +1999,12 @@ mod tests {
                 .set_rest_angle([at(2, j), at(2, j + 1)], -0.2)
                 .unwrap();
         }
-        let simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        let mut simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        // A hand pushes one vertex, and air presses on the sheet's front.
+        simulation
+            .set_forces(0, &[(5, [0.01, -0.02, 0.03])])
+            .unwrap();
+        simulation.set_pressure(0, 30.0).unwrap();
         let fold = nalgebra::Rotation3::from_axis_angle(&Vector3::y_axis(), -0.5);
         let x: Vec<Point> = simulation
             .positions

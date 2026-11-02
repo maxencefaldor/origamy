@@ -834,3 +834,185 @@ fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
         opening.to_degrees()
     );
 }
+
+/// A square of kami `side` meters wide, in `cells` by `cells` cells, and the vertices of its edge
+/// at x = `side`.
+fn square_with_edge(cells: u32, side: f64) -> (Sheet, Vec<usize>) {
+    let mesh = Mesh::grid(cells, cells, side, side).unwrap();
+    let edge = (0..mesh.rest().len())
+        .filter(|&v| mesh.rest()[v][0] > side - 1e-9)
+        .collect();
+    (Sheet::new(mesh, Material::kami()).unwrap(), edge)
+}
+
+/// The total force of a sheet's holds, in newtons.
+fn total_hold_force(simulation: &Simulation) -> [f64; 3] {
+    simulation
+        .hold_forces(0)
+        .iter()
+        .fold([0.0; 3], |[a, b, c], [x, y, z]| [a + x, b + y, c + z])
+}
+
+#[test]
+fn a_hand_holding_a_sheet_by_its_edge_carries_its_weight() {
+    // A square of kami hangs from a hand along one edge, at rest and as the hand lifts it 2 cm
+    // in one quasi-static step. The hand carries the whole weight, and reaches where it goes.
+    // The hand feels the forces the solve leaves, so a tight tolerance balances them.
+    let (sheet, edge) = square_with_edge(8, 0.05);
+    let settings = Settings {
+        time_step: f64::INFINITY,
+        solver: Solver {
+            iteration_limit: 1000,
+            tolerance: 1e-12,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    for &v in &edge {
+        simulation.hold(0, v, true);
+    }
+    let weight = Material::kami().mass_per_area * 0.05 * 0.05 * 9.81;
+    for lift in [0.0, 0.02] {
+        let moves: Vec<(usize, [f64; 3])> = edge
+            .iter()
+            .map(|&v| {
+                let [x, y, z] = simulation.positions(0)[v];
+                (v, [x, y, z + lift])
+            })
+            .collect();
+        simulation.move_held(0, &moves).unwrap();
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "{report:?}");
+        for &v in &edge {
+            let z = simulation.positions(0)[v][2];
+            assert!((z - lift).abs() < 1e-12, "the hand holds a vertex at {z} m");
+        }
+        let [x, y, z] = total_hold_force(&simulation);
+        assert!(
+            (z / weight - 1.0).abs() < 1e-6 && x.abs().max(y.abs()) < 1e-6 * weight,
+            "the hand carries [{x}, {y}, {z}] N of a {weight} N weight"
+        );
+    }
+}
+
+#[test]
+fn a_hand_pulling_a_sheet_across_the_table_feels_its_friction() {
+    // A hand pulls a square of kami across the table by its far edge at 3 cm/s, holding the edge
+    // just clear of the table. Once the square slides steadily, the hand pulls with Coulomb's
+    // force. That force is the friction coefficient times the weight the table bears.
+    let (sheet, edge) = square_with_edge(8, 0.05);
+    let kami = Material::kami();
+    let rest = 0.5 * kami.thickness + 0.5 * Contact::default().gap;
+    let dt = 1.0 / 120.0;
+    let settings = Settings {
+        time_step: dt,
+        table: Some(Table::default()),
+        solver: Solver {
+            tolerance: 1e-12,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let clear = rest + Contact::default().gap;
+    let lying: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .enumerate()
+        .map(|(v, &[x, y, _])| [x, y, if edge.contains(&v) { clear } else { rest }])
+        .collect();
+    simulation.set_positions(0, &lying).unwrap();
+    for &v in &edge {
+        simulation.hold(0, v, true);
+    }
+    for _ in 0..30 {
+        assert!(simulation.step().unwrap().converged);
+    }
+    let weight = kami.mass_per_area * 0.05 * 0.05 * 9.81;
+    for step in 0..60 {
+        let moves: Vec<(usize, [f64; 3])> = edge
+            .iter()
+            .map(|&v| {
+                let [x, y, z] = simulation.positions(0)[v];
+                (v, [x + 0.03 * dt, y, z])
+            })
+            .collect();
+        simulation.move_held(0, &moves).unwrap();
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "step {step}: {report:?}");
+        assert!(report.least_gap > 0.0, "step {step}: {report:?}");
+    }
+    let [pull, _, carried] = total_hold_force(&simulation);
+    let coulomb = Table::default().friction * (weight - carried);
+    assert!(carried > 0.0 && carried < 0.5 * weight);
+    assert!(
+        (pull / coulomb - 1.0).abs() < 0.01,
+        "the hand pulls with {pull} N, Coulomb's law says {coulomb}"
+    );
+}
+
+#[test]
+fn a_hand_cannot_push_paper_through_the_table() {
+    // A hand pushes a vertex of a square lying on the table a millimeter down into it. The
+    // table stops the vertex, so the step halves to its shortest and reports its failure. The
+    // paper stays above the table.
+    let (sheet, edge) = square_with_edge(4, 0.05);
+    let kami = Material::kami();
+    let rest = 0.5 * kami.thickness + 0.5 * Contact::default().gap;
+    let dt = 1.0 / 60.0;
+    let settings = Settings {
+        time_step: dt,
+        table: Some(Table::default()),
+        solver: Solver {
+            shortest_step: 0.4 * dt,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let lying: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x, y, rest])
+        .collect();
+    simulation.set_positions(0, &lying).unwrap();
+    let pushed = edge[0];
+    simulation.hold(0, pushed, true);
+    let [x, y, z] = simulation.positions(0)[pushed];
+    simulation
+        .move_held(0, &[(pushed, [x, y, z - 1e-3])])
+        .unwrap();
+    let report = simulation.step().unwrap();
+    assert!(!report.converged && report.substeps == 2, "{report:?}");
+    assert!(report.least_gap > 0.0, "{report:?}");
+}
+
+#[test]
+fn pressure_equal_to_its_weight_holds_a_sheet_up() {
+    // Pressure pulling on a sheet's front with its weight per area holds a sheet still: 0.59 Pa
+    // for kami. Double the pressure, and the sheet rises at g.
+    let kami = Material::kami();
+    let sheet = Sheet::new(Mesh::grid(4, 4, 0.1, 0.1).unwrap(), kami).unwrap();
+    let dt = 0.01;
+    let settings = Settings {
+        time_step: dt,
+        air: None,
+        ..Settings::default()
+    };
+    for (times, rise) in [(1.0, 0.0), (2.0, 9.81)] {
+        let mut simulation = Simulation::new(vec![sheet.clone()], settings).unwrap();
+        simulation
+            .set_pressure(0, -times * kami.mass_per_area * 9.81)
+            .unwrap();
+        for _ in 0..10 {
+            assert!(simulation.step().unwrap().converged);
+        }
+        for [vx, vy, vz] in simulation.velocities(0) {
+            assert!(
+                vx.abs().max(vy.abs()) < 1e-9 && (vz - rise * 0.1).abs() < 1e-7,
+                "the sheet moves at [{vx}, {vy}, {vz}] m/s"
+            );
+        }
+    }
+}

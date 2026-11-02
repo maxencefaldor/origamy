@@ -34,6 +34,15 @@ pub struct Solver {
     ///
     /// A time step whose solve fails retries as two time steps of half its length.
     pub shortest_step: f64,
+    /// The stiffness of the spring that pulls a moving held vertex to its target.
+    ///
+    /// The stiffness is a multiple of the stiffest sheet's stretching stiffness, Young's modulus
+    /// times thickness.
+    pub hold_stiffness: f64,
+    /// The most rounds of the augmented Lagrangian that carries moving held vertices.
+    ///
+    /// Each round minimizes the step, then raises the force on every hold short of its target.
+    pub hold_rounds: usize,
     /// The longest move of any vertex a time step's first Newton update may take, in meters.
     ///
     /// A longer update shrinks to this trust radius. An update shrunk and then taken whole
@@ -141,13 +150,16 @@ impl Default for Settings {
 impl Default for Solver {
     /// A tolerance of 10 nm within 200 iterations, and a line search that halves updates. The
     /// trust radius is a quarter meter, about the size of a sheet of origami paper. Friction
-    /// lags up to three times a step, and a step halves down to 10 µs.
+    /// lags up to three times a step, and a step halves down to 10 µs. A moving hold pulls a
+    /// hundred times harder than the paper stretches, for up to ten rounds.
     fn default() -> Self {
         Self {
             tolerance: 1e-8,
             iteration_limit: 200,
             lags: 3,
             shortest_step: 1e-5,
+            hold_stiffness: 100.0,
+            hold_rounds: 10,
             trust_radius: 0.25,
             sufficient_decrease: 1e-4,
             backtracking: 0.5,
@@ -219,6 +231,17 @@ impl Solver {
         )]
         require("lags", self.lags as f64, self.lags > 0, "at least 1")?;
         positive("shortest step", self.shortest_step)?;
+        positive("hold stiffness", self.hold_stiffness)?;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the count only appears in a message"
+        )]
+        require(
+            "hold rounds",
+            self.hold_rounds as f64,
+            self.hold_rounds > 0,
+            "at least 1",
+        )?;
         positive("trust radius", self.trust_radius)?;
         fraction("sufficient decrease", self.sufficient_decrease)?;
         fraction("backtracking", self.backtracking)?;

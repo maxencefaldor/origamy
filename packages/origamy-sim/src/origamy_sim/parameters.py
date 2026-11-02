@@ -254,6 +254,21 @@ class Solver(_Parameters):
     A time step whose solve fails retries as two time steps of half its length.
     """
 
+    hold_stiffness: Positive = 100.0
+    """The stiffness of the spring that pulls a moving held vertex to its target.
+
+    The stiffness is a multiple of the stiffest sheet's stretching stiffness, Young's
+    modulus times thickness. The default pulls a hundred times harder than paper
+    stretches.
+    """
+
+    hold_rounds: Annotated[int, Field(gt=0)] = 10
+    """The most rounds of the augmented Lagrangian that carries moving held vertices.
+
+    Each round minimizes the step, then raises the force on every hold short of its
+    target.
+    """
+
     trust_radius: Positive = 0.25
     """The longest vertex move of a time step's first Newton update, in meters.
 

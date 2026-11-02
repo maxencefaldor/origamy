@@ -336,6 +336,9 @@ struct PyEnergy {
     friction: f64,
     /// The work air drag does against the paper over the time step.
     drag: f64,
+    /// The potential energy of the point forces, zero at the origin, and the work pressure
+    /// does over the time step.
+    loads: f64,
     /// The potential energy of gravity, zero at the origin.
     gravity: f64,
     /// The kinetic energy.
@@ -353,6 +356,7 @@ impl From<Energy> for PyEnergy {
             contact: e.contact,
             friction: e.friction,
             drag: e.drag,
+            loads: e.loads,
             gravity: e.gravity,
             kinetic: e.kinetic,
         }
@@ -373,6 +377,7 @@ impl PyEnergy {
             contact: self.contact,
             friction: self.friction,
             drag: self.drag,
+            loads: self.loads,
             gravity: self.gravity,
             kinetic: self.kinetic,
         }
@@ -381,7 +386,7 @@ impl PyEnergy {
 
     fn __repr__(&self) -> String {
         format!(
-            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, yielding={:?}, contact={:?}, friction={:?}, drag={:?}, gravity={:?}, kinetic={:?})",
+            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, yielding={:?}, contact={:?}, friction={:?}, drag={:?}, loads={:?}, gravity={:?}, kinetic={:?})",
             self.stretching,
             self.strain_barrier,
             self.bending,
@@ -390,6 +395,7 @@ impl PyEnergy {
             self.contact,
             self.friction,
             self.drag,
+            self.loads,
             self.gravity,
             self.kinetic
         )
@@ -622,25 +628,108 @@ impl PySimulation {
     ///     IndexError: When the simulation has no such sheet, or the sheet no such vertex.
     #[pyo3(signature = (sheet, vertices, *, held = true))]
     fn hold(&mut self, sheet: usize, vertices: &Bound<'_, PyAny>, held: bool) -> PyResult<()> {
-        self.check(sheet)?;
-        let count = self.0.positions(sheet).len();
-        let vertices = entries("vertices", vertices)?
-            .into_iter()
-            .map(|vertex| {
-                usize::try_from(vertex)
-                    .ok()
-                    .filter(|&v| v < count)
-                    .ok_or_else(|| {
-                        PyIndexError::new_err(format!(
-                            "the sheet has {count} vertices, so no vertex {vertex}"
-                        ))
-                    })
-            })
-            .collect::<PyResult<Vec<_>>>()?;
-        for vertex in vertices {
+        for vertex in self.vertices(sheet, vertices)? {
             self.0.hold(sheet, vertex, held);
         }
         Ok(())
+    }
+
+    /// Moves held vertices of a sheet, each to its position, over the next time step, as a
+    /// hand carries them.
+    ///
+    /// The vertices move within the step, so collision detection covers their paths, and the
+    /// paper around them follows. The step converges only once every vertex reaches its
+    /// position.
+    ///
+    /// Args:
+    ///     sheet: The sheet.
+    ///     vertices: A vertex, or an integer array of n vertices.
+    ///     positions: Where each vertex goes, in meters, of shape (n, 3).
+    ///
+    /// Raises:
+    ///     TypeError: When the vertices are not integers.
+    ///     IndexError: When the simulation has no such sheet, or the sheet no such vertex.
+    ///     ValueError: When a vertex is not held, or a position is not finite. A refused move
+    ///         changes nothing.
+    fn move_held(
+        &mut self,
+        sheet: usize,
+        vertices: &Bound<'_, PyAny>,
+        positions: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let moves = self.pairs(sheet, vertices, "positions", positions)?;
+        self.0.move_held(sheet, &moves).map_err(value_error)
+    }
+
+    /// The force each hold exerted on its vertex at the end of the last time step, of shape
+    /// (n, 3).
+    ///
+    /// The forces are in newtons, and zero where a vertex is free.
+    ///
+    /// The force balances every other force on the vertex, to within the forces the solver's
+    /// tolerance leaves.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn hold_forces<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: usize,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        self.check(sheet)?;
+        Ok(array(py, self.0.hold_forces(sheet).iter().copied()))
+    }
+
+    /// The point force on each vertex of a sheet, in newtons, of shape (n, 3).
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn forces<'py>(&self, py: Python<'py>, sheet: usize) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        self.check(sheet)?;
+        Ok(array(py, self.0.forces(sheet).iter().copied()))
+    }
+
+    /// Sets the point forces on vertices of a sheet, in newtons, each until set again.
+    ///
+    /// Args:
+    ///     sheet: The sheet.
+    ///     vertices: A vertex, or an integer array of n vertices.
+    ///     forces: The force on each vertex, in newtons, of shape (n, 3).
+    ///
+    /// Raises:
+    ///     TypeError: When the vertices are not integers.
+    ///     IndexError: When the simulation has no such sheet, or the sheet no such vertex.
+    ///     ValueError: When a force is not finite. A refused force changes nothing.
+    fn set_forces(
+        &mut self,
+        sheet: usize,
+        vertices: &Bound<'_, PyAny>,
+        forces: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let forces = self.pairs(sheet, vertices, "forces", forces)?;
+        self.0.set_forces(sheet, &forces).map_err(value_error)
+    }
+
+    /// The pressure on a sheet's front, in pascals.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn pressure(&self, sheet: usize) -> PyResult<f64> {
+        self.check(sheet)?;
+        Ok(self.0.pressure(sheet))
+    }
+
+    /// Sets the pressure on a sheet's front, in pascals, until set again.
+    ///
+    /// The pressure pushes each patch of the sheet against its normal at the start of each
+    /// time step; a negative pressure pulls.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    ///     ValueError: When the pressure is not finite.
+    fn set_pressure(&mut self, sheet: usize, pressure: f64) -> PyResult<()> {
+        self.check(sheet)?;
+        self.0.set_pressure(sheet, pressure).map_err(value_error)
     }
 
     /// The dihedral angle along each interior edge of a sheet, in radians.
@@ -706,6 +795,45 @@ impl PySimulation {
                 "the simulation has {count} sheets, so no sheet {sheet}"
             )))
         }
+    }
+
+    /// Vertices of a sheet, from a vertex or an integer array of them.
+    fn vertices(&self, sheet: usize, vertices: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
+        self.check(sheet)?;
+        let count = self.0.positions(sheet).len();
+        entries("vertices", vertices)?
+            .into_iter()
+            .map(|vertex| {
+                usize::try_from(vertex)
+                    .ok()
+                    .filter(|&v| v < count)
+                    .ok_or_else(|| {
+                        PyIndexError::new_err(format!(
+                            "the sheet has {count} vertices, so no vertex {vertex}"
+                        ))
+                    })
+            })
+            .collect()
+    }
+
+    /// Vertices of a sheet, each with its row of `rows`, named `name`.
+    fn pairs(
+        &self,
+        sheet: usize,
+        vertices: &Bound<'_, PyAny>,
+        name: &str,
+        values: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<(usize, [f64; 3])>> {
+        let vertices = self.vertices(sheet, vertices)?;
+        let values = rows::<f64, 3>(name, values)?;
+        if vertices.len() != values.len() {
+            return Err(PyValueError::new_err(format!(
+                "{} vertices were given, but {} {name}",
+                vertices.len(),
+                values.len()
+            )));
+        }
+        Ok(vertices.into_iter().zip(values).collect())
     }
 }
 

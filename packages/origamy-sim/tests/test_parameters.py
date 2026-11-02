@@ -113,10 +113,12 @@ def settings_data() -> st.SearchStrategy[dict[str, Any]]:
                 {
                     "iteration_limit": st.integers(-2, 2),
                     "lags": st.integers(-2, 2),
+                    "hold_rounds": st.integers(-2, 2),
                     **dict.fromkeys(
                         (
                             "tolerance",
                             "shortest_step",
+                            "hold_stiffness",
                             "trust_radius",
                             "sufficient_decrease",
                             "backtracking",
