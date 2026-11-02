@@ -130,6 +130,8 @@ The barrier acts on the norm of the Green strain, which bounds every principal s
 The bending energy is the Kirchhoff plate energy, D/2 [(tr K)² − 2(1 − ν) det K] per area, with K a curvature per triangle.
 Each triangle's K comes from the normals at the midpoints of its edges, which tilt by half the dihedral angle there.
 The resulting curvature is exact for a grid rolled round a cylinder through its vertices.
+A boundary edge has no neighbor, so the plate reads the paper as flat across it.
+A triangle on a free edge therefore bends through its interior edges alone.
 The older energy on each interior edge alone depends on the mesh's directions, by up to a factor of 3 on a regular grid.
 Every dihedral has a rest angle, zero by default, and the plate's rest curvature comes from those angles alike.
 Paper can therefore rest curved, as a sheet taken off a roll does, and a crease rests at its dihedral's angle.
@@ -248,7 +250,8 @@ Each time step minimizes the incremental potential with a projected Newton metho
 - **Convergence.**
   The largest vertex move of the Newton update falls below a tolerance in meters.
 - **Recovery.**
-  A time step that does not converge halves and tries again, and reports the failure if it falls below a floor.
+  From phase 3, a time step that does not converge halves and tries again, and reports the failure if it falls below a floor.
+  Until then, the step reports that it did not converge.
 
 The solver is the reference: accurate, robust and the one every guarantee is proved for.
 A second solver, vertex block descent with offset contact, joins in phase 8 for interactive speed on GPUs, minimizing the same energy.
