@@ -19,7 +19,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
   "Typing :: Typed",
 ]
-dependencies = ["numpy>=2.3"]
+dependencies = ["numpy>=2.3", "pydantic>=2.14", "pydantic-settings[yaml]>=2.16"]
 # The version is the Rust workspace's, in the repository's Cargo.toml.
 dynamic = ["version"]
 

@@ -1,16 +1,17 @@
 //! Bending: the plate energy of each triangle from a discrete curvature, and sharp creases.
 //!
-//! A triangle's curvature comes from the normals at the midpoints of its edges, each the mean of
-//! the normals of the two triangles along that edge. The normal at an edge tilts from the
-//! triangle's by half the dihedral angle there, so the curvature is
+//! A triangle's curvature comes from the normals at the midpoints of its edges. Each is the
+//! mean of the normals of the two triangles along that edge. Each tilts from the triangle's
+//! normal by half the dihedral angle there. Summed over the triangle's edges, the curvature is
 //!
-//! K = Σ (|ē| / Ā) sin(θ / 2) t̄ t̄ᵀ
+//! K = Σ (|ē| / Ā) sin(θ / 2) t̄ t̄ᵀ.
 //!
-//! over the triangle's edges, with ē an edge at rest, t̄ its outward normal in the flat sheet, Ā
-//! the triangle's rest area and θ the dihedral angle. The curvature is exact for paper rolled
-//! round a cylinder through its vertices. The energy is the plate energy ½ Ā Kᵀ D K, with D the
-//! bending stiffness, about a rest curvature. A sharp crease takes no part in its triangles'
-//! curvature: the paper bends there alone, with an energy of its own about its rest angle.
+//! Here ē is an edge at rest, t̄ its outward normal in the flat sheet, Ā the triangle's rest
+//! area and θ the dihedral angle. The curvature is exact for paper rolled round a cylinder
+//! through its vertices. The energy is the plate energy ½ Ā (K − K̄)ᵀ D (K − K̄), with D the
+//! bending stiffness. The rest curvature K̄ comes from each dihedral's rest angle alike. A
+//! sharp crease takes no part in its triangles' curvature. The paper bends there alone, with
+//! an energy of its own about the crease's rest angle.
 
 use nalgebra::{SMatrix, Vector3};
 
@@ -106,8 +107,8 @@ impl RestPlate {
         Self { area, directions }
     }
 
-    /// The matrix P of the plate energy ½ (σ − σ̄)ᵀ P (σ − σ̄) in the half-angle sines of the
-    /// triangle's edges, for the bending stiffness `stiffness` in voigt form.
+    /// The matrix P of the plate energy ½ (σ − σ̄)ᵀ P (σ − σ̄), for the bending stiffness
+    /// `stiffness` in voigt form. Here σ holds the half-angle sines of the triangle's edges.
     pub fn energy_matrix(&self, stiffness: &nalgebra::Matrix3<f64>) -> nalgebra::Matrix3<f64> {
         nalgebra::Matrix3::from_fn(|i, j| {
             self.area * self.directions[i].dot(&(stiffness * self.directions[j]))
@@ -115,8 +116,10 @@ impl RestPlate {
     }
 }
 
-/// The plate energy of a triangle from the half-angle sines of its edges, with its derivatives in
-/// those sines. Edges that take no part, on the boundary or along a sharp crease, are `None`.
+/// The plate energy of a triangle from the half-angle sines of its edges and their rest values,
+/// with its derivatives in the sines.
+///
+/// Edges that take no part, on the boundary or along a sharp crease, are `None`.
 pub(crate) fn plate(
     matrix: &nalgebra::Matrix3<f64>,
     sines: [Option<f64>; 3],
@@ -129,8 +132,10 @@ pub(crate) fn plate(
     (0.5 * deviation.dot(&moment), moment, masked)
 }
 
-/// The energy of a sharp crease of rest length `length`, stiffness `stiffness` per length per
-/// radian and rest angle `rest`, with its derivatives in the dihedral angle.
+/// The energy of a sharp crease, with its derivatives in the dihedral angle.
+///
+/// The crease has rest length `length`, stiffness `stiffness` per length per radian, and rest
+/// angle `rest`.
 pub(crate) fn crease(angle: f64, length: f64, stiffness: f64, rest: f64) -> [f64; 3] {
     let k = stiffness * length;
     let turn = angle - rest;
@@ -235,7 +240,7 @@ mod tests {
 
     #[test]
     fn a_cylinder_through_the_vertices_has_its_exact_curvature() {
-        // A grid cell rolled round the y axis: the dihedral at its vertical edges is the angle
+        // A grid cell rolls round the y axis. The dihedral at its vertical edges is the angle
         // the cell's chord subtends, and the triangle's curvature is exactly the cylinder's.
         let (dx, dy, radius): (f64, f64, f64) = (0.002, 0.003, 0.05);
         let chord = 2.0 * (dx / (2.0 * radius)).asin();

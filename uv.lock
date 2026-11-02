@@ -769,10 +769,16 @@ name = "origamy-sim"
 source = { editable = "packages/origamy-sim" }
 dependencies = [
     { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pydantic-settings", extra = ["yaml"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=2.3" }]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.3" },
+    { name = "pydantic", specifier = ">=2.14" },
+    { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.16" },
+]
 
 [[package]]
 name = "packaging"
@@ -938,6 +944,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d0/31/21d21e0e38a8f5f7a7f0cde22820117b6d17d6bc36f348129527f915d7f4/pydantic_settings-2.16.2.tar.gz", hash = "sha256:3dc08ffabed2bbd5dc2dd55ead7b78b4e4c5cd776aecd04310db5f1224caaf46", size = 309225, upload-time = "2026-10-28T11:14:28.066Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/88/4131c51ff87b7cd7f82a1194d0c0a2b7ca68c72d9da04c3b7e69ab91a79f/pydantic_settings-2.16.2-py3-none-any.whl", hash = "sha256:8d523e5c129b097686bde019bd6109bff53f4c8c3f63f1ddf9933ffa42e5ab4f", size = 81994, upload-time = "2026-10-28T11:14:26.716Z" },
+]
+
+[package.optional-dependencies]
+yaml = [
+    { name = "pyyaml" },
 ]
 
 [[package]]

@@ -1,9 +1,9 @@
 //! Continuous collision detection: the largest fraction of a motion that keeps every pair at
 //! least its thickness apart.
 //!
-//! Additive collision detection, from codimensional incremental potential contact, advances
-//! each pair by steps no longer than its gap divided by the fastest relative motion, so it
-//! never steps past a contact. The detection is conservative: it may stop early, never late.
+//! The method is additive collision detection, from codimensional incremental potential
+//! contact. Each pair advances by steps no longer than its gap over its fastest relative
+//! motion, so it never steps past a contact. The detection may stop early, never late.
 
 use super::{Pair, distance};
 use crate::energy::Point;
@@ -63,17 +63,16 @@ pub(crate) fn pair(pair: &Pair, x: &[Point], displacement: &[Point], thickness: 
     fraction
 }
 
-/// The fraction, at most 1, of a vertex's fall of `drop` toward the table that keeps its half
-/// thickness above the table, from a height `height` over the table.
-pub(crate) fn table(height: f64, drop: f64, half_thickness: f64) -> f64 {
-    let gap = height - half_thickness;
-    if gap <= 0.0 {
+/// The fraction, at most 1, of a vertex's fall of `drop` toward the table that keeps some of
+/// its clearance. The clearance is the vertex's height over the table less its half thickness.
+pub(crate) fn table(clearance: f64, drop: f64) -> f64 {
+    if clearance <= 0.0 {
         return 0.0;
     }
     if drop <= 0.0 {
         return 1.0;
     }
-    ((1.0 - KEEP) * gap / drop).min(1.0)
+    ((1.0 - KEEP) * clearance / drop).min(1.0)
 }
 
 #[cfg(test)]
@@ -131,6 +130,6 @@ mod tests {
         let safe = super::pair(&pair, &x, &fall, 0.1);
         // The point reaches the thickness after 0.45 of the fall.
         assert!(safe > 0.3 && safe < 0.45, "{safe}");
-        assert!((table(1.0, 2.0, 0.1) - 0.405).abs() < 1e-12);
+        assert!((table(0.9, 2.0) - 0.405).abs() < 1e-12);
     }
 }

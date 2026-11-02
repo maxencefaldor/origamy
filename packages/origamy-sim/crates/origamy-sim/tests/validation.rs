@@ -1,6 +1,6 @@
 //! Physics benchmarks: the simulator against known solutions, each with its acceptance threshold.
 
-use origamy_sim::{Crease, Material, Mesh, Settings, Sheet, Simulation, Stiffness};
+use origamy_sim::{Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness};
 
 /// A rectangle of `columns` by `rows` cells of `width` by `height` meters, each split along its
 /// rising diagonal.
@@ -22,9 +22,11 @@ fn grid(columns: u32, rows: u32, width: f64, height: f64) -> Mesh {
     Mesh::new(rest, triangles).unwrap()
 }
 
-/// The tip deflection of a cantilever of length `length` bent by its own weight `weight` per
-/// length, with bending stiffness `stiffness`, from the elastica: EI θ'' = w (L − s) cos θ, with
-/// θ(0) = 0 and θ'(L) = 0, solved by shooting.
+/// The tip deflection of a cantilever bent by its own weight, from the elastica.
+///
+/// The cantilever has length `length`, weight `weight` per length and bending stiffness
+/// `stiffness`. The elastica EI θ'' = w (L − s) cos θ, with θ(0) = 0 and θ'(L) = 0, is solved
+/// by shooting.
 fn elastica(length: f64, weight: f64, stiffness: f64) -> f64 {
     let steps = 20_000;
     let h = length / f64::from(steps);
@@ -75,7 +77,10 @@ fn a_cantilever_sags_under_its_own_weight_as_the_elastica_says() {
     let sheet = Sheet::new(grid(columns, rows, cell, width / f64::from(rows)), material).unwrap();
     let settings = Settings {
         time_step: f64::INFINITY,
-        iteration_limit: 1000,
+        solver: Solver {
+            iteration_limit: 1000,
+            ..Solver::default()
+        },
         ..Settings::default()
     };
     let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
@@ -106,12 +111,59 @@ fn a_cantilever_sags_under_its_own_weight_as_the_elastica_says() {
     );
 }
 
-/// A Miura-ori of `columns` by `rows` parallelograms with sides `side` and `slant` and acute angle
-/// `angle`, folded rigidly by `fold` from 0, flat, up to `angle`, folded flat.
+#[test]
+fn a_strip_curved_at_rest_rolls_into_its_rest_shape() {
+    // Every edge across the strip rests at the same angle. The strip rests as a polygon, each
+    // cell turned by that angle from the one before, a quarter turn in all.
+    let (columns, rows, cell) = (32, 2, 0.002);
+    let turn = std::f64::consts::FRAC_PI_2 / f64::from(columns - 1);
+    let mut sheet = Sheet::new(grid(columns, rows, cell, cell), Material::kami()).unwrap();
+    let at = |i: u32, j: u32| j * (columns + 1) + i;
+    for j in 0..rows {
+        for i in 1..columns {
+            sheet
+                .set_rest_angle([at(i, j), at(i, j + 1)], turn)
+                .unwrap();
+        }
+    }
+    let settings = Settings {
+        gravity: [0.0; 3],
+        time_step: f64::INFINITY,
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    for j in 0..=rows {
+        for i in 0..2 {
+            simulation.hold(0, at(i, j) as usize, true);
+        }
+    }
+    let report = simulation.step().unwrap();
+    assert!(report.converged, "{report:?}");
+    let energy = report.energy;
+    assert!(
+        energy.bending + energy.stretching < 1e-15,
+        "the rest shape keeps {energy:?}"
+    );
+    let mut expected = [0.0, 0.0];
+    for i in 0..=columns {
+        for j in 0..=rows {
+            let [x, _, z] = simulation.positions(0)[at(i, j) as usize];
+            let miss = (x - expected[0]).hypot(z - expected[1]);
+            assert!(miss < 1e-9, "column {i} misses its rest place by {miss} m");
+        }
+        let heading = turn * f64::from(i);
+        expected[0] += cell * heading.cos();
+        expected[1] += cell * heading.sin();
+    }
+}
+
+/// A Miura-ori of `columns` by `rows` parallelograms, folded rigidly by `fold`.
 ///
-/// The folded sheet is the translational surface P(i, j) = A(i) + B(j) of two zigzags: A in the
-/// xz plane, B in the xy plane. Every face is a parallelogram whose angles stay fixed as the
-/// zigzags fold, so the faces turn without bending.
+/// The parallelograms have sides `side` and `slant` and acute angle `angle`. The fold runs
+/// from 0, flat, up to `angle`, folded flat. The folded sheet is the translational surface
+/// P(i, j) = A(i) + B(j) of two zigzags. Zigzag A lies in the xz plane, and B in the xy plane.
+/// Every face is a parallelogram whose angles stay fixed as the zigzags fold, so the faces
+/// turn rigidly.
 fn miura(columns: u32, rows: u32, [side, slant, angle]: [f64; 3], fold: f64) -> Vec<[f64; 3]> {
     let across = slant * angle.cos() / fold.cos();
     let along = (slant * slant - across * across).sqrt();
@@ -153,11 +205,19 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
             column_u == column_v || row_u == row_v
         })
         .collect();
-    let sheet = Sheet::new(mesh, Material::kami()).unwrap();
+    let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
+    for &edge in &creases {
+        sheet
+            .set_crease(edge, Some(Crease { stiffness: 0.1 }))
+            .unwrap();
+    }
     let settings = Settings {
         gravity: [0.0; 3],
         time_step: f64::INFINITY,
-        iteration_limit: 1000,
+        solver: Solver {
+            iteration_limit: 1000,
+            ..Solver::default()
+        },
         ..Settings::default()
     };
     // A second simulation measures the exact folds of the rigidly folded Miura-ori.
@@ -181,13 +241,9 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
             .collect();
         for (edge, target) in dihedrals.iter().zip(&targets) {
             if creases.contains(edge) {
-                let crease = Crease {
-                    stiffness: 0.1,
-                    rest_angle: *target,
-                };
                 simulation
                     .sheet_mut(0)
-                    .set_crease(*edge, Some(crease))
+                    .set_rest_angle(*edge, *target)
                     .unwrap();
             }
         }

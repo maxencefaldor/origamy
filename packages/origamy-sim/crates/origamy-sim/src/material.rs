@@ -2,9 +2,12 @@
 
 use nalgebra::{Matrix2, Matrix3, Vector3};
 
+use crate::parameter::{ParameterError, finite, fraction, positive, require};
+
 /// The material of a sheet.
 ///
-/// Every field is an input. [`Material::kami`] fills them for the thin paper most origami uses.
+/// Every field is an input. [`Material::kami`] fills them for the thin paper most origami uses,
+/// and is the default.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     /// The sheet's thickness, in meters.
@@ -13,12 +16,8 @@ pub struct Material {
     pub mass_per_area: f64,
     /// The stiffness of the sheet in its plane.
     pub stiffness: Stiffness,
-    /// The greatest norm the Green strain of any triangle may reach: 0.005 caps strain at half
-    /// a percent.
-    pub strain_cap: f64,
-    /// The fraction of the strain cap at which the strain barrier starts to push back, between 0
-    /// and 1.
-    pub strain_onset: f64,
+    /// The barrier that caps the sheet's strain.
+    pub strain_limit: StrainLimit,
 }
 
 /// The stiffness of a sheet in its plane, orthotropic about its grain, under plane stress.
@@ -39,29 +38,38 @@ pub struct Stiffness {
     pub grain: f64,
 }
 
-/// A parameter outside the values it may take.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[error("{name} is {value}, but it must be {requirement}")]
-pub struct ParameterError {
-    /// The parameter's name.
-    pub name: &'static str,
-    /// The value it was given.
-    pub value: f64,
-    /// What its value must be.
-    pub requirement: &'static str,
+/// The barrier that caps a sheet's strain.
+///
+/// Paper barely stretches, so the barrier keeps every triangle's Green strain below a cap. The
+/// barrier pushes back harder the closer the strain comes to the cap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrainLimit {
+    /// The greatest norm the Green strain of any triangle may reach: 0.005 caps strain at half
+    /// a percent.
+    pub cap: f64,
+    /// The fraction of the cap at which the barrier starts to push back, between 0 and 1.
+    pub onset: f64,
+    /// The barrier's energy per volume, in pascals: the larger, the harder it pushes back.
+    pub stiffness: f64,
 }
 
 impl Material {
-    /// Kami, the thin paper most origami uses: 70 µm thick, 60 g/m², a Young's modulus of 4
-    /// gigapascals and a Poisson's ratio of 0.3, with strain capped at half a percent.
+    /// Kami, the thin paper most origami uses.
+    ///
+    /// Kami is 70 µm thick and weighs 60 g/m². Its Young's modulus is 4 gigapascals and its
+    /// Poisson's ratio 0.3, with strain capped at half a percent.
     #[must_use]
     pub fn kami() -> Self {
         Self {
             thickness: 70e-6,
             mass_per_area: 0.060,
             stiffness: Stiffness::isotropic(4e9, 0.3),
-            strain_cap: 0.005,
-            strain_onset: 0.8,
+            strain_limit: StrainLimit {
+                cap: 0.005,
+                onset: 0.8,
+                // Young's modulus times the squared cap: the elastic energy density at the cap.
+                stiffness: 1e5,
+            },
         }
     }
 
@@ -81,8 +89,27 @@ impl Material {
         positive("thickness", self.thickness)?;
         positive("mass per area", self.mass_per_area)?;
         self.stiffness.check()?;
-        positive("strain cap", self.strain_cap)?;
-        within("strain onset", self.strain_onset, "between 0 and 1")
+        self.strain_limit.check()
+    }
+}
+
+impl Default for Material {
+    /// Kami.
+    fn default() -> Self {
+        Self::kami()
+    }
+}
+
+impl StrainLimit {
+    /// Checks that every parameter takes a value it may.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first parameter outside its values.
+    pub fn check(&self) -> Result<(), ParameterError> {
+        positive("strain cap", self.cap)?;
+        fraction("strain onset", self.onset)?;
+        positive("strain stiffness", self.stiffness)
     }
 }
 
@@ -143,55 +170,19 @@ impl Stiffness {
         positive("Young's modulus across the grain", self.across)?;
         positive("shear modulus", self.shear)?;
         finite("grain direction", self.grain)?;
-        let limit = (self.along / self.across).sqrt();
-        if self.poisson.abs() < limit {
-            Ok(())
-        } else {
-            Err(ParameterError {
-                name: "Poisson's ratio",
-                value: self.poisson,
-                requirement: "smaller in size than the square root of the ratio of Young's moduli",
-            })
-        }
+        require(
+            "Poisson's ratio",
+            self.poisson,
+            self.poisson.abs() < (self.along / self.across).sqrt(),
+            "smaller in size than the square root of the ratio of Young's moduli",
+        )
     }
 }
 
-/// Checks that a parameter is positive and finite.
-pub(crate) fn positive(name: &'static str, value: f64) -> Result<(), ParameterError> {
-    if value > 0.0 && value.is_finite() {
-        Ok(())
-    } else {
-        Err(ParameterError {
-            name,
-            value,
-            requirement: "positive and finite",
-        })
-    }
-}
-
-/// Checks that a parameter is finite.
-pub(crate) fn finite(name: &'static str, value: f64) -> Result<(), ParameterError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(ParameterError {
-            name,
-            value,
-            requirement: "finite",
-        })
-    }
-}
-
-/// Checks that a parameter lies strictly between 0 and 1.
-fn within(name: &'static str, value: f64, requirement: &'static str) -> Result<(), ParameterError> {
-    if value > 0.0 && value < 1.0 {
-        Ok(())
-    } else {
-        Err(ParameterError {
-            name,
-            value,
-            requirement,
-        })
+impl Default for Stiffness {
+    /// Kami's: isotropic, with a Young's modulus of 4 gigapascals and a Poisson's ratio of 0.3.
+    fn default() -> Self {
+        Material::kami().stiffness
     }
 }
 

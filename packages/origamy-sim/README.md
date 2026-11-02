@@ -42,7 +42,7 @@ uv add git+https://github.com/maxencefaldor/origamy#subdirectory=packages/origam
 
 A `Mesh` gives a sheet its flat shape, in meters, as counterclockwise triangles.
 Its dihedrals are the interior edges with the vertices opposite them, where the sheet bends.
-A `Sheet` adds the paper's material, kami unless given, and its creases.
+A `Sheet` adds the paper's material, kami unless given, its sharp creases, and the angle each dihedral rests at.
 A `Simulation` steps sheets through time; an infinite time step finds the rest the forces lead to.
 
 ```pycon
@@ -52,13 +52,41 @@ A `Simulation` steps sheets through time; an infinite time step finds the rest t
 >>> mesh.dihedrals  # the diagonal, from vertex 0 to 2, with vertex 3 on its left and 1 on its right
 array([[0, 2, 3, 1]])
 >>> sheet = Sheet(mesh)
->>> sheet.set_crease((0, 2), Crease(stiffness=0.01, rest_angle=1.0))
+>>> sheet.set_crease((0, 2), Crease(stiffness=0.01))
+>>> sheet.set_rest_angle((0, 2), 1.0)
 >>> simulation = Simulation([sheet], Settings(gravity=(0, 0, 0), time_step=float("inf")))
->>> for vertex in (0, 1, 2):
-...     simulation.hold(0, vertex)
+>>> simulation.hold(0, [0, 1, 2])
 >>> simulation.step().converged
 True
 >>> print(f"{simulation.fold_angles(0)[0]:.6f} rad")
 1.000000 rad
 
+```
+
+## Parameters
+
+Every parameter is a frozen pydantic model that validates its values: `Material`, `Crease` and `Settings`, with the models they hold.
+Defaults are kami's, or the solver's documented values.
+`Config` reads the settings and the material from a YAML file and the command line, through pydantic-settings:
+
+```yaml
+settings:
+  time_step: .inf
+  table:
+    height: 0.0
+material:
+  thickness: 1.0e-4
+```
+
+```python
+from pydantic_settings import CliApp, SettingsConfigDict
+
+from origamy_sim import Config
+
+
+class Scene(Config):
+    model_config = SettingsConfigDict(yaml_file="scene.yaml")
+
+
+config = CliApp.run(Scene)  # --material.thickness 2e-4 overrides the file
 ```

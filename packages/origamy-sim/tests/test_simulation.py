@@ -5,16 +5,7 @@ import re
 import numpy as np
 import pytest
 
-from origamy_sim import (
-    Crease,
-    Material,
-    Mesh,
-    Settings,
-    Sheet,
-    Simulation,
-    SingularError,
-    Stiffness,
-)
+from origamy_sim import Crease, Mesh, Settings, Sheet, Simulation, SingularError
 
 SIDE = 0.1
 SQUARE = Mesh([[0, 0], [SIDE, 0], [SIDE, SIDE], [0, SIDE]], [[0, 1, 2], [0, 2, 3]])
@@ -40,10 +31,10 @@ def strip(columns: int, rows: int, length: float, width: float) -> Mesh:
 
 def test_a_crease_folds_a_square_to_its_rest_angle() -> None:
     sheet = Sheet(SQUARE)
-    sheet.set_crease((2, 0), Crease(stiffness=0.01, rest_angle=1.0))
+    sheet.set_crease((2, 0), Crease(stiffness=0.01))
+    sheet.set_rest_angle((2, 0), 1.0)
     simulation = Simulation([sheet], STILL)
-    for vertex in (0, 1, 2):
-        simulation.hold(0, vertex)
+    simulation.hold(0, [0, 1, 2])
     report = simulation.step()
     assert report.converged
     # Updates are refitted to their rotations, so a large turn takes few iterations.
@@ -58,8 +49,7 @@ def test_a_crease_folds_a_square_to_its_rest_angle() -> None:
 def test_a_held_strip_sags_under_gravity() -> None:
     mesh = strip(16, 2, 0.06, 0.01)
     simulation = Simulation([Sheet(mesh)], Settings(time_step=math.inf))
-    for vertex in np.flatnonzero(mesh.rest[:, 0] < 0.005):
-        simulation.hold(0, int(vertex))
+    simulation.hold(0, np.flatnonzero(mesh.rest[:, 0] < 0.005))
     report = simulation.step()
     assert report.converged
     assert report.energy.gravity < 0 < report.energy.bending
@@ -70,8 +60,7 @@ def test_a_held_strip_sags_under_gravity() -> None:
 def test_time_steps_converge_as_newton_does() -> None:
     mesh = strip(24, 4, 0.06, 0.01)
     simulation = Simulation([Sheet(mesh)], Settings(time_step=1 / 120))
-    for vertex in np.flatnonzero(mesh.rest[:, 0] < 0.003):
-        simulation.hold(0, int(vertex))
+    simulation.hold(0, np.flatnonzero(mesh.rest[:, 0] < 0.003))
     reports = [simulation.step() for _ in range(30)]
     assert all(report.converged for report in reports)
     assert max(report.iterations for report in reports) <= 10
@@ -98,8 +87,7 @@ def test_the_same_inputs_give_the_same_result_bit_for_bit() -> None:
         simulation = Simulation(
             [Sheet(strip(8, 2, 0.04, 0.01))], Settings(time_step=0.01)
         )
-        simulation.hold(0, 0)
-        simulation.hold(0, 9)
+        simulation.hold(0, [0, 9])
         for _ in range(3):
             simulation.step()
         return simulation.positions(0)
@@ -128,28 +116,51 @@ def test_positions_must_fit_the_sheet() -> None:
         simulation.hold(0, 4)
 
 
-def test_every_parameter_is_an_input_and_checked() -> None:
-    kami = Material.kami()
-    assert Material() == kami
-    thick = kami.replace(thickness=1e-4)
-    assert thick.thickness == 1e-4
-    assert thick.stiffness == kami.stiffness
-    with pytest.raises(ValueError, match="thickness is -1, but it must be positive"):
-        kami.replace(thickness=-1)
-    with pytest.raises(ValueError, match="Poisson's ratio"):
-        Stiffness(along=4e9, across=1e9, poisson=2.5, shear=1e9)
-    with pytest.raises(ValueError, match="rest angle"):
-        Crease(stiffness=0.01, rest_angle=4.0)
-    assert Settings().replace(time_step=0.1).time_step == 0.1
-    with pytest.raises(ValueError, match="time step"):
-        Settings(time_step=0)
+def test_holds_take_one_vertex_or_an_array_of_them() -> None:
+    simulation = Simulation([Sheet(SQUARE)])
+    simulation.hold(0, 3)
+    simulation.hold(0, np.array([0, 1], dtype=np.uint8))
+    assert simulation.held(0).tolist() == [True, True, False, True]
+    simulation.hold(0, [1, 3], held=False)
+    assert simulation.held(0).tolist() == [True, False, False, False]
+    with pytest.raises(
+        TypeError, match="vertices must hold integers, but it holds bool"
+    ):
+        simulation.hold(0, [True, False])
+    with pytest.raises(TypeError, match="vertices must hold integers"):
+        simulation.hold(0, [0.0])
+    with pytest.raises(IndexError, match="no vertex -1"):
+        simulation.hold(0, [0, -1])
+    with pytest.raises(ValueError, match=re.escape("shape (1, 2)")):
+        simulation.hold(0, [[0, 1]])
+    # A refused hold changes nothing.
+    assert simulation.held(0).tolist() == [True, False, False, False]
 
 
-def test_creases_lie_along_interior_edges() -> None:
+def test_creases_and_rest_angles_lie_along_interior_edges() -> None:
     sheet = Sheet(SQUARE)
     with pytest.raises(ValueError, match="no interior edge from vertex 0 to vertex 1"):
-        sheet.set_crease((0, 1), Crease(stiffness=0.01, rest_angle=0.5))
+        sheet.set_crease((0, 1), Crease(stiffness=0.01))
+    with pytest.raises(ValueError, match="no interior edge from vertex 0 to vertex 1"):
+        sheet.set_rest_angle((0, 1), 0.5)
+    with pytest.raises(ValueError, match="rest angle is 4, but it must be smaller"):
+        sheet.set_rest_angle((0, 2), 4.0)
     simulation = Simulation([sheet])
-    simulation.set_crease(0, (0, 2), Crease(stiffness=0.01, rest_angle=0.5))
-    assert simulation.sheet(0).crease((0, 2)) == Crease(stiffness=0.01, rest_angle=0.5)
+    simulation.set_crease(0, (0, 2), Crease(stiffness=0.01))
+    simulation.set_rest_angle(0, (2, 0), 0.5)
+    assert simulation.sheet(0).crease((0, 2)) == Crease(stiffness=0.01)
+    assert simulation.sheet(0).rest_angle((0, 2)) == 0.5
     assert sheet.crease((0, 2)) is None
+    assert sheet.rest_angle((0, 2)) == 0.0
+
+
+def test_a_rest_angle_curves_plain_paper() -> None:
+    # Without a crease, the plate rests curved round the diagonal: the corner lifts.
+    sheet = Sheet(SQUARE)
+    sheet.set_rest_angle((0, 2), 0.3)
+    simulation = Simulation([sheet], STILL)
+    simulation.hold(0, [0, 1, 2])
+    report = simulation.step()
+    assert report.converged
+    assert report.energy.bending == pytest.approx(0, abs=1e-15)
+    assert simulation.fold_angles(0) == pytest.approx([0.3], abs=1e-6)

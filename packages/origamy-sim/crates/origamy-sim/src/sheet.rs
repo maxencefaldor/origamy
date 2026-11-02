@@ -2,18 +2,19 @@
 
 use crate::energy::bending::RestPlate;
 use crate::energy::membrane::RestTriangle;
-use crate::material::{Material, ParameterError, finite, positive};
+use crate::material::Material;
 use crate::mesh::{Mesh, Vertex};
+use crate::parameter::{ParameterError, finite, positive, require};
 
-/// A sharp crease: a dihedral where the paper has yielded, so that it bends there alone, about a
-/// rest angle.
+/// A sharp crease: a dihedral where the paper has yielded.
+///
+/// The paper bends there alone, about the dihedral's rest angle, instead of with the plate
+/// around it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crease {
     /// The moment per length that turns the crease by one radian from rest, in newton meters per
     /// meter per radian.
     pub stiffness: f64,
-    /// The dihedral angle the crease rests at, in radians, positive toward the sheet's front.
-    pub rest_angle: f64,
 }
 
 impl Crease {
@@ -23,18 +24,19 @@ impl Crease {
     ///
     /// Returns the first parameter outside its values.
     pub fn check(&self) -> Result<(), ParameterError> {
-        positive("crease stiffness", self.stiffness)?;
-        finite("rest angle", self.rest_angle)?;
-        if self.rest_angle.abs() < std::f64::consts::PI {
-            Ok(())
-        } else {
-            Err(ParameterError {
-                name: "rest angle",
-                value: self.rest_angle,
-                requirement: "smaller in size than π",
-            })
-        }
+        positive("crease stiffness", self.stiffness)
     }
+}
+
+/// Checks that a rest angle is finite and smaller in size than a half turn.
+fn check_rest_angle(angle: f64) -> Result<(), ParameterError> {
+    finite("rest angle", angle)?;
+    require(
+        "rest angle",
+        angle,
+        angle.abs() < std::f64::consts::PI,
+        "smaller in size than π",
+    )
 }
 
 /// Why a sheet cannot take a change.
@@ -51,8 +53,10 @@ pub enum SheetError {
     Parameter(#[from] ParameterError),
 }
 
-/// Where a triangle's bending reads each of its edges: the dihedral there, and the slots of that
-/// dihedral's stencil in the triangle's stencil of up to six vertices.
+/// Where a triangle's bending reads each of its edges.
+///
+/// Each edge names its dihedral, and the slots of the dihedral's stencil in the triangle's
+/// stencil of up to six vertices.
 pub(crate) type EdgeStencils = [Option<(u32, [usize; 4])>; 3];
 
 /// A sheet of paper: its rest mesh, its material and its creases.
@@ -61,6 +65,7 @@ pub struct Sheet {
     mesh: Mesh,
     material: Material,
     creases: Vec<Option<Crease>>,
+    rest_angles: Vec<f64>,
     triangles: Vec<RestTriangle>,
     plates: Vec<RestPlate>,
     stencils: Vec<EdgeStencils>,
@@ -108,6 +113,7 @@ impl Sheet {
             .collect();
         Ok(Self {
             creases: vec![None; mesh.dihedrals().len()],
+            rest_angles: vec![0.0; mesh.dihedrals().len()],
             mesh,
             material,
             triangles,
@@ -170,6 +176,33 @@ impl Sheet {
         Ok(())
     }
 
+    /// The dihedral angle an interior edge rests at, in radians.
+    ///
+    /// The angle is zero where the paper rests flat, and positive toward the sheet's front.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoDihedral`] when the edge is not an interior edge of the sheet.
+    pub fn rest_angle(&self, edge: [Vertex; 2]) -> Result<f64, SheetError> {
+        Ok(self.rest_angles[self.dihedral(edge)?])
+    }
+
+    /// Sets the dihedral angle an interior edge rests at.
+    ///
+    /// Along a sharp crease, the crease rests there. Elsewhere the plate around the edge takes
+    /// the rest curvature the angle gives, so paper can rest curved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoDihedral`] when the edge is not an interior edge of the sheet.
+    /// Returns [`SheetError::Parameter`] when the angle is not finite or reaches a half turn.
+    pub fn set_rest_angle(&mut self, edge: [Vertex; 2], angle: f64) -> Result<(), SheetError> {
+        let index = self.dihedral(edge)?;
+        check_rest_angle(angle)?;
+        self.rest_angles[index] = angle;
+        Ok(())
+    }
+
     /// The index of the dihedral along an edge, given in either order.
     fn dihedral(&self, [a, b]: [Vertex; 2]) -> Result<usize, SheetError> {
         let edge = [a.min(b), a.max(b)];
@@ -181,6 +214,18 @@ impl Sheet {
 
     pub(crate) fn creases(&self) -> &[Option<Crease>] {
         &self.creases
+    }
+
+    /// Each dihedral's rest angle, in the order of the mesh's dihedrals.
+    pub(crate) fn rest_angles(&self) -> &[f64] {
+        &self.rest_angles
+    }
+
+    /// The rest half-angle sines of a triangle's edges, zero where an edge takes no part in its
+    /// plate energy.
+    pub(crate) fn rest_sines(&self, triangle: usize) -> [f64; 3] {
+        self.stencils[triangle]
+            .map(|edge| edge.map_or(0.0, |(d, _)| (0.5 * self.rest_angles[d as usize]).sin()))
     }
 
     pub(crate) fn rest_triangles(&self) -> &[RestTriangle] {
@@ -275,11 +320,10 @@ mod tests {
     #[test]
     fn a_crease_lies_along_an_interior_edge() {
         let mut sheet = square();
-        let crease = Crease {
-            stiffness: 0.01,
-            rest_angle: 1.0,
-        };
+        let crease = Crease { stiffness: 0.01 };
         sheet.set_crease([2, 0], Some(crease)).unwrap();
+        sheet.set_rest_angle([0, 2], 1.0).unwrap();
+        assert_eq!(sheet.rest_angle([2, 0]), Ok(1.0));
         assert_eq!(sheet.crease([0, 2]), Ok(Some(crease)));
         assert_eq!(
             sheet
@@ -288,12 +332,12 @@ mod tests {
                 .to_string(),
             "the sheet has no interior edge from vertex 0 to vertex 1"
         );
-        let flat = Crease {
-            rest_angle: 4.0,
-            ..crease
-        };
         assert!(matches!(
-            sheet.set_crease([0, 2], Some(flat)),
+            sheet.set_rest_angle([0, 2], 4.0),
+            Err(SheetError::Parameter(_))
+        ));
+        assert!(matches!(
+            sheet.set_crease([0, 2], Some(Crease { stiffness: -1.0 })),
             Err(SheetError::Parameter(_))
         ));
     }

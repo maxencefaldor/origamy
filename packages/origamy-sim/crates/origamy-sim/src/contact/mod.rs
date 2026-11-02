@@ -1,11 +1,11 @@
 //! Contact with thickness: no two pieces of paper come closer than a paper thickness, and no
 //! paper goes through the table.
 //!
-//! Every pair of a point and a triangle, and of two edges, that comes within the activation gap
-//! of its thickness takes a barrier on its distance, as in codimensional incremental potential
-//! contact. Pairs that share a vertex, or that lie that close in the flat sheet, are the sheet
-//! itself rather than contact, and take none. Every Newton update is cut short, by continuous
-//! collision detection, before any pair would reach its thickness.
+//! Pairs of a point and a triangle, and of two edges, take a barrier on their distance, as in
+//! codimensional incremental potential contact. The barrier acts within the activation gap
+//! of the pair's thickness. Pairs that share a vertex, or lie that close in the flat sheet,
+//! are the sheet itself rather than contact, and take none. Continuous collision detection
+//! cuts every Newton update short before any pair would reach its thickness.
 
 pub(crate) mod ccd;
 pub(crate) mod distance;
@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use nalgebra::{SMatrix, Vector3};
 
 use crate::energy::{Barrier, Point};
+use crate::settings::Contact;
 pub(crate) use distance::Kind;
 
 /// Every primitive of a scene's sheets, in the scene's vertex numbering.
@@ -47,23 +48,12 @@ impl Pair {
     }
 }
 
-/// How contact pushes: the parameters of its barrier, alike for every pair.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Contact {
-    /// The gap beyond the thickness at which the barrier starts, in meters.
-    pub gap: f64,
-    /// The barrier's energy scale, in joules.
-    pub stiffness: f64,
-    /// The table's height, in meters; minus infinity where there is no table.
-    pub table: f64,
-}
-
 const SHAPE: Barrier = Barrier { onset: 1.0 };
 
 impl Contact {
     /// The barrier of a pair at squared distance `squared` and thickness `thickness`, with its
     /// derivatives in the squared distance; `None` at or below the thickness.
-    pub fn pair(&self, squared: f64, thickness: f64) -> Option<[f64; 3]> {
+    pub(crate) fn pair(&self, squared: f64, thickness: f64) -> Option<[f64; 3]> {
         let scale = (thickness + self.gap).powi(2) - thickness * thickness;
         let [value, slope, curvature] = SHAPE.at((squared - thickness * thickness) / scale)?;
         Some([
@@ -73,14 +63,12 @@ impl Contact {
         ])
     }
 
-    /// The barrier between a vertex at height `height` and the table, with its derivatives in
-    /// the height; `None` where the vertex's half thickness reaches the table.
-    pub fn table(&self, height: f64, thickness: f64) -> Option<[f64; 3]> {
-        if self.table == f64::NEG_INFINITY {
-            return Some([0.0; 3]);
-        }
-        let [value, slope, curvature] =
-            SHAPE.at((height - self.table - 0.5 * thickness) / self.gap)?;
+    /// The barrier between a vertex and the table, with its derivatives in the vertex's height.
+    ///
+    /// The clearance is the vertex's height over the table less its half thickness. The
+    /// barrier is `None` where the clearance is gone.
+    pub(crate) fn table(&self, clearance: f64) -> Option<[f64; 3]> {
+        let [value, slope, curvature] = SHAPE.at(clearance / self.gap)?;
         Some([
             self.stiffness * value,
             self.stiffness * slope / self.gap,
@@ -90,7 +78,7 @@ impl Contact {
 
     /// The gradient and Hessian of a pair's barrier over its four vertices, or `None` where the
     /// pair lies beyond the barrier's reach.
-    pub fn pair_derivatives(
+    pub(crate) fn pair_derivatives(
         &self,
         pair: &Pair,
         x: &[Point],
@@ -110,8 +98,10 @@ impl Contact {
 }
 
 /// The pairs whose primitives may come within `margin` of each other while the vertices move
-/// from `start` to `end`: their boxes over the motion, grown by `margin`, overlap. Pairs that
-/// share a vertex, or lie within `margin` of each other in one flat sheet, are left out.
+/// from `start` to `end`.
+///
+/// A pair is a candidate where its boxes over the motion, grown by `margin`, overlap. Pairs
+/// that share a vertex, or lie within `margin` of each other in one flat sheet, are left out.
 pub(crate) fn candidates(
     primitives: &Primitives,
     start: &[Point],
@@ -339,13 +329,13 @@ mod tests {
         let contact = Contact {
             gap: 1e-5,
             stiffness: 1e-6,
-            table: 0.0,
         };
         let h = 7e-5;
         assert_eq!(contact.pair((h + 1e-5) * (h + 1e-5), h), Some([0.0; 3]));
         assert!(contact.pair((h + 5e-6) * (h + 5e-6), h).unwrap()[0] > 0.0);
         assert_eq!(contact.pair(h * h, h), None);
-        assert_eq!(contact.table(0.5 * h, h), None);
-        assert!(contact.table(0.5 * h + 1e-6, h).unwrap()[0] > 0.0);
+        assert_eq!(contact.table(1e-5), Some([0.0; 3]));
+        assert!(contact.table(1e-6).unwrap()[0] > 0.0);
+        assert_eq!(contact.table(0.0), None);
     }
 }

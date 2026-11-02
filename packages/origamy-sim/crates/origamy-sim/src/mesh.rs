@@ -2,9 +2,8 @@
 //!
 //! A sheet lies flat at rest, in material coordinates: two numbers per vertex, in meters.
 //! Its triangles run counterclockwise there. Every rest quantity of the sheet, such as a
-//! triangle's area or an edge's length, comes from this geometry, and every derived
-//! table, such as the edges and the dihedrals, comes out in one order, so that a mesh built
-//! twice is the same mesh.
+//! triangle's area or an edge's length, comes from this geometry. Every derived table, such
+//! as the edges and the dihedrals, comes out in one order, so a mesh built twice is the same.
 
 /// The index of a vertex.
 pub type Vertex = u32;
@@ -15,8 +14,9 @@ pub type Vertex = u32;
 pub struct Dihedral {
     /// The edge's two vertices, the lesser first.
     pub edge: [Vertex; 2],
-    /// The vertex opposite the edge in each of its triangles: first the triangle on the
-    /// edge's left, going from its lesser vertex to its greater, then the one on its right.
+    /// The vertex opposite the edge in each of its triangles, left then right.
+    ///
+    /// The left triangle lies on the edge's left, going from its lesser vertex to its greater.
     pub opposite: [Vertex; 2],
     /// The two triangles, in the same order.
     pub triangles: [u32; 2],
@@ -123,9 +123,10 @@ impl Mesh {
     ///
     /// # Errors
     ///
-    /// Returns a [`MeshError`] when the mesh has no triangle, a coordinate is not finite,
-    /// a triangle names a missing or repeated vertex or runs clockwise, an edge borders
-    /// more than two triangles or is run one way by both, or a vertex is unused.
+    /// Returns a [`MeshError`] naming the first fault: a mesh with no triangle, or a
+    /// coordinate that is not finite. A triangle may name a missing or repeated vertex, or run
+    /// clockwise. An edge may border more than two triangles, or be run one way by both. A
+    /// vertex may be unused.
     pub fn new(rest: Vec<[f64; 2]>, triangles: Vec<[Vertex; 3]>) -> Result<Self, MeshError> {
         if triangles.is_empty() {
             return Err(MeshError::Empty);
@@ -202,8 +203,9 @@ impl Mesh {
         &self.dihedrals
     }
 
-    /// Every edge on the sheet's boundary, run as its triangle runs it, so that the
-    /// boundary turns counterclockwise round the sheet and clockwise round its holes.
+    /// Every edge on the sheet's boundary, run as its triangle runs it.
+    ///
+    /// The boundary turns counterclockwise round the sheet and clockwise round its holes.
     #[must_use]
     pub fn boundary(&self) -> &[[Vertex; 2]] {
         &self.boundary

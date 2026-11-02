@@ -7,6 +7,7 @@
 use nalgebra::{Matrix3, SMatrix, Vector2, Vector3};
 
 use super::{Barrier, Local, Point};
+use crate::material::Material;
 
 /// What a triangle keeps of its rest shape.
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +49,21 @@ pub(crate) struct Stretching {
     pub barrier_stiffness: f64,
 }
 
+impl Stretching {
+    /// The parameters of stretching a sheet of this material.
+    pub fn of(material: &Material) -> Self {
+        let limit = material.strain_limit;
+        Self {
+            stiffness: material.stiffness.matrix() * material.thickness,
+            cap: limit.cap,
+            barrier: Barrier {
+                onset: 1.0 - limit.onset * limit.onset,
+            },
+            barrier_stiffness: material.thickness * limit.stiffness,
+        }
+    }
+}
+
 /// The Green strain of a triangle in the voigt form (εxx, εyy, γxy), and its edges' images.
 fn strain(rest: &RestTriangle, x: &[Point; 3]) -> (Vector3<f64>, [Point; 2]) {
     let column =
@@ -61,8 +77,10 @@ fn strain(rest: &RestTriangle, x: &[Point; 3]) -> (Vector3<f64>, [Point; 2]) {
     (strain, f)
 }
 
-/// R − F for a triangle: its deformation gradient F's gap to the nearest rotation R, both 3 by
-/// 2, or `None` for a triangle collapsed to a line.
+/// R − F for a triangle: its deformation gradient F's gap to the nearest rotation R.
+///
+/// Both matrices are 3 by 2. A triangle collapsed to a line has no nearest rotation, so it
+/// gives `None`.
 pub(crate) fn rotation_gap(
     rest: &RestTriangle,
     x: &[Point; 3],
@@ -137,7 +155,7 @@ pub(crate) fn local(
     let pull = -kappa * slope / cap2;
     let gradient = (jacobian.transpose() * stress + s_gradient * pull) * rest.area;
     // Each strain component is quadratic in the positions, with a Hessian of 3 by 3 identity
-    // blocks; `second` weighs them by the stress and the barrier's pull.
+    // blocks. `second` weighs those blocks by the stress and the barrier's pull.
     let second = stress + weights * pull;
     let mut hessian = jacobian.transpose() * stretching.stiffness * jacobian
         + jacobian.transpose()
@@ -165,18 +183,9 @@ pub(crate) fn local(
 mod tests {
     use super::*;
     use crate::energy::testing::check;
-    use crate::material::Material;
 
     fn stretching() -> Stretching {
-        let kami = Material::kami();
-        Stretching {
-            stiffness: kami.stiffness.matrix() * kami.thickness,
-            cap: kami.strain_cap,
-            barrier: Barrier {
-                onset: 1.0 - kami.strain_onset * kami.strain_onset,
-            },
-            barrier_stiffness: kami.thickness * 4e9 * kami.strain_cap * kami.strain_cap,
-        }
+        Stretching::of(&Material::kami())
     }
 
     fn rest() -> RestTriangle {

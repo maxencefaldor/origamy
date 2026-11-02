@@ -72,8 +72,16 @@ def test_vertices_come_in_any_integer_type(dtype: type[np.integer]) -> None:
 
 
 def test_vertices_are_integers() -> None:
-    with pytest.raises(TypeError, match="safe"):
+    with pytest.raises(
+        TypeError, match="triangles must hold integers, but it holds float64"
+    ):
         Mesh(SQUARE, [[0, 1, 2.0], [0, 2, 3]])
+    with pytest.raises(
+        TypeError, match="triangles must hold integers, but it holds bool"
+    ):
+        Mesh(SQUARE, [[False, True, True]])
+    with pytest.raises(TypeError, match="safe"):
+        Mesh(SQUARE, np.array(HALVES, dtype=np.uint64))
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,6 @@
-//! The Newton system: a sparse symmetric matrix in 3 by 3 blocks over pairs of vertices, filled
-//! element by element in a fixed order, and solved by a sparse Cholesky factorization.
+//! The Newton system: a sparse symmetric matrix in 3 by 3 blocks over pairs of vertices.
+//!
+//! Elements fill the matrix in a fixed order, and a sparse Cholesky factorization solves it.
 
 use faer::dyn_stack::{MemBuffer, MemStack};
 use std::sync::Arc;

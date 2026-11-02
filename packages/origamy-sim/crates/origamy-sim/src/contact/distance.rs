@@ -1,10 +1,10 @@
 //! Distances between a point and a triangle, and between two edges, with exact derivatives.
 //!
-//! Each distance first finds which features are closest: two points, a point and a segment's
-//! interior, a point and a triangle's interior, or two segments' interiors. The squared distance
-//! between those features has its own smooth formula, whose derivatives the code generator
-//! writes. The squared distance is the true one everywhere, so it is continuous with continuous
-//! gradients where the closest features change.
+//! Each distance first finds which features are closest. They are two points, a point and a
+//! segment's interior, a point and a triangle's interior, or two segments' interiors. The
+//! squared distance between those features has its own smooth formula, whose derivatives the
+//! code generator writes. The squared distance is the true one everywhere, so its gradient
+//! stays continuous where the closest features change.
 
 #![allow(
     clippy::many_single_char_names,
@@ -18,8 +18,10 @@ use crate::generated::{
     line_line_distance, point_line_distance, point_plane_distance, point_point_distance,
 };
 
-/// A pair of primitives that may touch: the stencil's four vertices are the point then the
-/// triangle's corners, or the first edge's ends then the second edge's.
+/// A pair of primitives that may touch.
+///
+/// A point and a triangle list the point, then the triangle's corners. Two edges list the
+/// first edge's ends, then the second edge's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Kind {
     PointTriangle,
@@ -203,7 +205,9 @@ fn closest_on_triangle(p: &Point, a: &Point, b: &Point, c: &Point) -> Point {
 }
 
 /// The parameters s and t in [0, 1] of the closest points of the segments from `a` to `b` and
-/// from `c` to `d`, after Ericson's Real-Time Collision Detection, 5.1.9. Nearly parallel
+/// from `c` to `d`.
+///
+/// The method follows Ericson's Real-Time Collision Detection, 5.1.9. Nearly parallel
 /// segments take their closest points at ends.
 fn segment_parameters(a: &Point, b: &Point, c: &Point, d: &Point) -> (f64, f64) {
     let (u, v, w) = (b - a, d - c, a - c);

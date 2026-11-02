@@ -121,10 +121,10 @@ def vectors(names: str) -> list[sp.Matrix]:
 def distances() -> dict[str, tuple[str, sp.Basic, list[sp.Symbol]]]:
     """The squared distances between the closest features of two primitives.
 
-    Each holds where its features are closest: the point-to-line distance where the
-    point lies beside the segment, the point-to-plane distance where it lies over the
-    triangle, and the line-to-line distance where both segments' closest points lie
-    inside them.
+    Each formula holds where its features are closest. The point-to-line distance holds
+    where the point lies beside the segment, and the point-to-plane distance where it
+    lies over the triangle. The line-to-line distance holds where both segments' closest
+    points lie inside them.
     """
     p, q = vectors("pq")
     point_point = (p - q).dot(p - q)
@@ -139,7 +139,11 @@ def distances() -> dict[str, tuple[str, sp.Basic, list[sp.Symbol]]]:
     line_line = (c - a).dot(normal) ** 2 / normal.dot(normal)
     flat = lambda *vs: [s for v in vs for s in v]  # noqa: E731
     return {
-        "point_point": ("between the points `p` and `q`", point_point, flat(*vectors("pq"))),
+        "point_point": (
+            "between the points `p` and `q`",
+            point_point,
+            flat(*vectors("pq")),
+        ),
         "point_line": (
             "from the point `p` to the line through `a` and `b`",
             point_line,

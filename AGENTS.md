@@ -51,7 +51,7 @@ The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, desi
 | --- | --- |
 | `crates/origamy-sim` | The core, with no Python: meshes, materials, energies and the Newton solver; contact next |
 | `crates/origamy-sim-py` | The bindings, which make the core the module `origamy_sim._core` |
-| `src/origamy_sim` | The Python package, which re-exports the core, and `_core.pyi`, which types it |
+| `src/origamy_sim` | The Python package: the core's classes, typed by `_core.pyi`, and the pydantic models of every parameter |
 | `codegen` | The SymPy expressions behind the generated derivative code |
 
 The simulator knows nothing of origami: its interface speaks of meshes, materials, bodies and forces.
@@ -88,10 +88,13 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   PyO3 and maturin build the bindings, and proptest tests properties.
 - **Physics:** SI units and 64-bit floats.
   Every physical and numerical quantity is an input with a documented default, and a preset, such as kami, is a named set of values.
+- **Parameters:** in Python, every parameter group is a frozen pydantic model with field constraints and model validators, and the bindings take those models.
+  The core checks every value again, and a property test holds the two checks to one verdict.
+  Configuration reads them through pydantic-settings, from YAML and the command line.
 - **Derivatives:** every energy has an exact gradient and Hessian.
   Hard ones are generated from SymPy expressions by `codegen/generate.py`, and CI checks the generated code is current.
 - **Determinism:** derived tables come out sorted, never in hash order, and parallel work sums in a fixed order.
-- **Bindings stay thin:** they convert arrays, call the core and convert back.
+- **Bindings stay thin:** they convert arrays and parameter models, call the core and convert back.
   Their doc comments are the Python docstrings, in Google style.
   A core error is a typed value naming the element at fault, and Python sees it as a `ValueError` with the same message.
   `_core.pyi` types every class of `_core`, and a test holds the two together.

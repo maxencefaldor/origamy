@@ -131,6 +131,8 @@ The bending energy is the Kirchhoff plate energy, D/2 [(tr K)² − 2(1 − ν) 
 Each triangle's K comes from the normals at the midpoints of its edges, which tilt by half the dihedral angle there.
 The resulting curvature is exact for a grid rolled round a cylinder through its vertices.
 The older energy on each interior edge alone depends on the mesh's directions, by up to a factor of 3 on a regular grid.
+Every dihedral has a rest angle, zero by default, and the plate's rest curvature comes from those angles alike.
+Paper can therefore rest curved, as a sheet taken off a roll does, and a crease rests at its dihedral's angle.
 
 ### 3.3 Motion: forces through an incremental potential
 
@@ -255,14 +257,22 @@ Phase 4 calibrates the crease parameters on published measurements.
 
 | Group | Parameters |
 | --- | --- |
-| Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction, strain cap |
-| Crease | Band width, stiffness relative to the sheet, rest angle, yield moment, hardening, springback, aging rate, softening by a precrease |
-| Contact | Friction coefficients of paper on paper and on each body, the barrier's activation distance, the exclusion radius along the sheet |
+| Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction |
+| Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
+| Dihedral | Rest angle, for every interior edge, crease or not |
+| Crease | Band width, stiffness, yield moment, hardening, springback, aging rate, softening by a precrease |
+| Contact | The barrier's activation gap and energy scale, friction coefficients of paper on paper and on each body, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
-| World | Gravity, the table's height and friction, damping |
-| Solver | Time step, its floor, tolerance in meters, iteration limit, line search constants |
+| World | Gravity, the table and its height and friction, damping |
+| Solver | Time step, its floor, tolerance in meters, iteration limit, sufficient decrease, backtracking factor, shortest update |
 
 Each crease takes its own values, so one model can hold sharp and soft creases, or two papers in one sheet.
+
+In Python, each group is a frozen pydantic model.
+Field constraints check each value, and model validators check the conditions that tie values together, such as a stiffness that stays positive definite.
+The core checks every value again, so Rust callers and unvalidated models meet the same rules.
+A property test holds the two checks to one verdict.
+A pydantic-settings configuration reads the parameters from a YAML file and the command line, which overrides the file.
 
 ### 3.10 Outputs
 
@@ -334,9 +344,9 @@ Cargo.toml                              the Rust workspace, beside pyproject.tom
 packages/origamy-sim/
   crates/origamy-sim/                   the core: geometry, energies, contact, solvers; no Python
   crates/origamy-sim-py/                PyO3 bindings, built into the Python package
-  src/origamy_sim/                      the Python package: typed wrappers, presets, NumPy interop
+  crates/origamy-sim/tests/             physics benchmarks, with references and acceptance thresholds
+  src/origamy_sim/                      the Python package: the core's classes, the parameter models, the configuration
   codegen/                              SymPy sources of every energy and the generator of their derivatives
-  validation/                           physics benchmarks, with references and acceptance thresholds
   tests/                                the Python tests
 docs/simulator.md                       this design
 ```
@@ -346,13 +356,15 @@ docs/simulator.md                       this design
 | Module | Holds |
 | --- | --- |
 | `mesh` | Rest geometry: triangles, edges, dihedrals and the boundary |
-| `material` | Thickness, weight, orthotropic stiffness, the strain cap, and presets |
-| `sheet` | A mesh with its material and creases, and the rest data its energies read |
+| `parameter` | The checks of parameter values, each naming the parameter it refuses |
+| `material` | Thickness, weight, orthotropic stiffness, the strain limit, and presets |
+| `settings` | Gravity, the time step, contact, the table and the solver |
+| `sheet` | A mesh with its material, creases and rest angles, and the rest data its energies read |
 | `energy` | One module per energy term, each with value, gradient and exact Hessian |
 | `generated` | Derivative code generated from symbolic expressions |
 | `system` | The sparse Newton system in 3 by 3 blocks, and its Cholesky factorization |
 | `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
-| `contact` | Bounding volume hierarchy, distances, barrier, exclusions, continuous collision detection |
+| `contact` | Broad phase, distances, barrier, exclusions, continuous collision detection |
 | `body` | Rigid bodies on paths, grips, force fields |
 
 ### 5.5 Engineering standards

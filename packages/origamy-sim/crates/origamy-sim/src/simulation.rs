@@ -1,119 +1,26 @@
 //! A simulation: sheets in space, stepped through time by minimizing the incremental potential.
 //!
-//! Each time step finds the positions x that minimize
+//! Each time step finds the positions x that minimize the incremental potential
 //!
-//! ½ (x − x̂)ᵀ M (x − x̂) / Δt² + E(x),  with x̂ = x₀ + Δt v₀,
+//! ½ (x − x̂)ᵀ M (x − x̂) / Δt² + E(x),  with x̂ = x₀ + Δt v₀.
 //!
-//! which is one step of implicit Euler: inertia, elasticity and gravity balance at the minimum.
-//! An infinite time step drops inertia, so the step finds the rest the forces lead to.
+//! The minimization is one step of implicit Euler: inertia, elasticity and gravity balance at
+//! the minimum. An infinite time step drops inertia, so the step finds the rest the forces
+//! lead to.
 
 use std::cell::OnceCell;
 
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
-use crate::contact::{self, Contact, Kind, Pair, Primitives, ccd, distance};
+use crate::contact::{self, Kind, Pair, Primitives, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::membrane::{self, Stretching};
-use crate::energy::{Barrier, Point, project};
-use crate::material::{ParameterError, finite, positive};
+use crate::energy::{Point, project};
+use crate::parameter::ParameterError;
+use crate::settings::Settings;
 use crate::sheet::Sheet;
 use crate::system::{Assembly, Factor, Pattern, SingularError};
-
-/// The settings of a simulation: the world it runs in and how its solver works.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Settings {
-    /// The acceleration of gravity, in meters per second squared.
-    pub gravity: [f64; 3],
-    /// The length of a time step, in seconds; infinite for quasi-static steps.
-    pub time_step: f64,
-    /// The largest vertex move of a Newton update at which a time step has converged, in meters.
-    pub tolerance: f64,
-    /// The most Newton iterations a time step may take.
-    pub iteration_limit: usize,
-    /// The fraction of the predicted decrease of energy a line search requires, between 0 and 1.
-    pub sufficient_decrease: f64,
-    /// The shortest fraction of a Newton update a line search tries, between 0 and 1.
-    pub shortest_update: f64,
-    /// The gap beyond a paper thickness at which contact starts to push back, in meters.
-    pub contact_gap: f64,
-    /// The energy scale of contact's barrier, in joules: the larger, the less contact yields.
-    pub contact_stiffness: f64,
-    /// The height of the table's top, in meters; minus infinity for no table.
-    pub table: f64,
-}
-
-impl Default for Settings {
-    /// Earth's gravity along −z, time steps of a sixtieth of a second, a tolerance of 10 nm,
-    /// contact that starts 2 µm beyond the thickness, and no table.
-    fn default() -> Self {
-        Self {
-            gravity: [0.0, 0.0, -9.81],
-            time_step: 1.0 / 60.0,
-            tolerance: 1e-8,
-            iteration_limit: 200,
-            sufficient_decrease: 1e-4,
-            shortest_update: 1e-12,
-            contact_gap: 2e-6,
-            contact_stiffness: 1e-8,
-            table: f64::NEG_INFINITY,
-        }
-    }
-}
-
-impl Settings {
-    /// Checks that every setting takes a value it may.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first setting outside its values.
-    pub fn check(&self) -> Result<(), ParameterError> {
-        for g in self.gravity {
-            finite("gravity", g)?;
-        }
-        if self.time_step.is_nan() || self.time_step <= 0.0 {
-            return Err(ParameterError {
-                name: "time step",
-                value: self.time_step,
-                requirement: "positive, or infinite for quasi-static steps",
-            });
-        }
-        positive("tolerance", self.tolerance)?;
-        positive("contact gap", self.contact_gap)?;
-        positive("contact stiffness", self.contact_stiffness)?;
-        if self.table.is_nan() || self.table == f64::INFINITY {
-            return Err(ParameterError {
-                name: "table",
-                value: self.table,
-                requirement: "finite, or minus infinity for no table",
-            });
-        }
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "the count only appears in a message"
-        )]
-        if self.iteration_limit == 0 {
-            return Err(ParameterError {
-                name: "iteration limit",
-                value: self.iteration_limit as f64,
-                requirement: "at least 1",
-            });
-        }
-        for (name, value) in [
-            ("sufficient decrease", self.sufficient_decrease),
-            ("shortest update", self.shortest_update),
-        ] {
-            if !(value > 0.0 && value < 1.0) {
-                return Err(ParameterError {
-                    name,
-                    value,
-                    requirement: "between 0 and 1",
-                });
-            }
-        }
-        Ok(())
-    }
-}
 
 /// The energy of a simulation, term by term, in joules.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -149,8 +56,10 @@ pub struct Report {
     pub greatest_strain: f64,
     /// The pairs of primitives, and the vertices on the table, that contact pushes apart.
     pub contacts: usize,
-    /// The least gap beyond the thickness between two pieces of paper, or between paper and the
-    /// table, within the reach of contact, in meters; infinite where nothing is that close.
+    /// The least gap beyond the thickness within the reach of contact, in meters.
+    ///
+    /// The gap lies between two pieces of paper, or between paper and the table. The gap is
+    /// infinite where nothing is that close.
     pub least_gap: f64,
     /// The simulated time after the step, in seconds.
     pub time: f64,
@@ -220,20 +129,8 @@ struct Constants {
 impl Constants {
     fn of(sheet: &Sheet) -> Self {
         let material = sheet.material();
-        let stiffness = material.stiffness.matrix();
-        let young = material.stiffness.along.max(material.stiffness.across);
         Self {
-            stretching: Stretching {
-                stiffness: stiffness * material.thickness,
-                cap: material.strain_cap,
-                barrier: Barrier {
-                    onset: 1.0 - material.strain_onset * material.strain_onset,
-                },
-                barrier_stiffness: material.thickness
-                    * young
-                    * material.strain_cap
-                    * material.strain_cap,
-            },
+            stretching: Stretching::of(material),
             bending: material.bending(),
             mass_per_area: material.mass_per_area,
         }
@@ -343,8 +240,9 @@ impl Simulation {
     ///
     /// # Errors
     ///
-    /// Returns a [`StateError`] when the positions do not match the sheet's vertices, a
-    /// coordinate is not finite, or a triangle would stretch past the strain cap.
+    /// Returns a [`StateError`] when the positions do not match the sheet's vertices. The error
+    /// also names a coordinate that is not finite, a triangle stretched past the strain cap,
+    /// and paper brought closer than its thickness.
     ///
     /// # Panics
     ///
@@ -387,14 +285,13 @@ impl Simulation {
             .into_iter()
             .filter(|pair| pair.vertices.iter().any(|&v| moved(v)))
             .collect();
-        let contact = self.contact();
+        let contact = self.settings.contact;
         let overlapping = pairs.iter().any(|pair| {
             let squared = distance::squared(pair.kind, &pair.at(&x));
             contact.pair(squared, self.pair_thickness(pair)).is_none()
-        }) || range.clone().any(|v| {
-            let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-            contact.table(x[v][2], self.thickness(vertex)).is_none()
-        });
+        }) || range
+            .clone()
+            .any(|v| self.clearance(v, &x[v]).is_some_and(|c| c <= 0.0));
         if overlapping {
             return Err(StateError::Overlapping);
         }
@@ -429,9 +326,10 @@ impl Simulation {
         Ok(())
     }
 
-    /// The dihedral angle along each interior edge of a sheet, in the order of its mesh's
-    /// dihedrals, in radians: zero where the sheet lies flat, and positive where it folds toward
-    /// its front.
+    /// The dihedral angle along each interior edge of a sheet, in radians.
+    ///
+    /// The angles follow the order of the mesh's dihedrals. An angle is zero where the sheet
+    /// lies flat, and positive where it folds toward its front.
     ///
     /// # Panics
     ///
@@ -475,8 +373,8 @@ impl Simulation {
     /// # Errors
     ///
     /// Returns a [`StepError`] when some motion costs no energy, so the step has no unique
-    /// result, or when paper starts closer than its thickness to itself or to the table; the
-    /// state stays as it was.
+    /// result. The step also refuses paper that starts closer than its thickness to itself or
+    /// to the table. A refused step leaves the state as it was.
     pub fn step(&mut self) -> Result<Report, StepError> {
         let dt = self.settings.time_step;
         let start: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
@@ -501,7 +399,7 @@ impl Simulation {
         // Contact joins vertices no element joins, so the system's pattern grows to hold them.
         let mut grown: Option<Pattern> = None;
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
-        while iterations < self.settings.iteration_limit {
+        while iterations < self.settings.solver.iteration_limit {
             iterations += 1;
             let near = self.candidates(&x, &x);
             self.grow(&mut grown, &near);
@@ -523,7 +421,7 @@ impl Simulation {
                 .chunks_exact(3)
                 .map(|d| d[0].hypot(d[1]).hypot(d[2]))
                 .fold(0.0, f64::max);
-            if update <= self.settings.tolerance {
+            if update <= self.settings.solver.tolerance {
                 converged = true;
                 break;
             }
@@ -604,14 +502,14 @@ impl Simulation {
         }
     }
 
-    /// The first point along a Newton update that keeps every pair its thickness apart, stays
-    /// below the strain cap and lowers the energy enough, with its energy, or `None` when no
-    /// fraction of the update does.
+    /// The first point along a Newton update that the line search accepts, with its energy.
     ///
+    /// An accepted point keeps every pair its thickness apart, stays below the strain cap and
+    /// lowers the energy enough. The search gives `None` when no fraction of the update does.
     /// The search starts from the longest fraction that collision detection allows. A Newton
     /// update moves vertices along straight lines, so turning paper stretches it. Where a
-    /// fraction of the update fails, its retraction, refitted to the update's rotations without
-    /// stretch, is tried before a shorter fraction, if no pair meets on the way there.
+    /// fraction fails, its retraction refits it to the update's rotations without stretch. The
+    /// search tries the retraction before a shorter fraction, if no pair meets on the way.
     fn line_search<'a>(
         &'a self,
         x: &[Point],
@@ -622,11 +520,11 @@ impl Simulation {
             1e-12 * size(&self.energy_at(x, search.predicted, search.inertia, search.pairs));
         let accepts = |energy: &Energy, fraction: f64| {
             let change = total(energy) - search.energy;
-            change <= self.settings.sufficient_decrease * fraction * search.slope
+            change <= self.settings.solver.sufficient_decrease * fraction * search.slope
                 || change.abs() <= scale
         };
         let mut fraction = search.safe;
-        while fraction >= self.settings.shortest_update {
+        while fraction >= self.settings.solver.shortest_update {
             let trial = moved(x, direction, fraction);
             let trial_energy =
                 self.energy_at(&trial, search.predicted, search.inertia, search.pairs);
@@ -645,13 +543,15 @@ impl Simulation {
                     }
                 }
             }
-            fraction *= 0.5;
+            fraction *= self.settings.solver.backtracking;
         }
         None
     }
 
-    /// The factorized system of the as-rigid-as-possible fit: Σ Ā |F − R|² over triangles,
-    /// with F a triangle's deformation gradient and R its nearest rotation; held vertices stay.
+    /// The factorized system of the as-rigid-as-possible fit, which minimizes Σ Ā |F − R|².
+    ///
+    /// The sum runs over triangles, with F a triangle's deformation gradient and R its nearest
+    /// rotation. Held vertices stay where they are.
     fn rigidity(&self) -> Result<Factor<'_>, SingularError> {
         let mut assembly = Assembly::new(&self.pattern, &self.held);
         for (s, sheet) in self.sheets.iter().enumerate() {
@@ -679,8 +579,9 @@ impl Simulation {
         assembly.factor()
     }
 
-    /// Positions refitted, as rigid as possible, to the rotations of their triangles: the
-    /// positions nearest to turning each triangle as it turns in `x`, without stretch.
+    /// Positions refitted, as rigid as possible, to the rotations of their triangles.
+    ///
+    /// The refitted positions turn each triangle as it turns in `x`, without stretch.
     fn retract(&self, x: &[Point], rigidity: &Factor) -> Vec<Point> {
         let mut pull = vec![0.0; 3 * x.len()];
         for (s, sheet) in self.sheets.iter().enumerate() {
@@ -712,7 +613,7 @@ impl Simulation {
     fn energy_at(&self, x: &[Point], predicted: &[Point], inertia: f64, pairs: &[Pair]) -> Energy {
         let gravity = Point::from(self.settings.gravity);
         let mut energy = Energy::default();
-        let contact = self.contact();
+        let contact = self.settings.contact;
         let barriers: Vec<f64> = pairs
             .par_iter()
             .map(|pair| {
@@ -724,10 +625,11 @@ impl Simulation {
             .collect();
         energy.contact = barriers.iter().sum();
         for (v, p) in x.iter().enumerate() {
-            let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-            energy.contact += contact
-                .table(p[2], self.thickness(vertex))
-                .map_or(f64::INFINITY, |[value, _, _]| value);
+            if let Some(clearance) = self.clearance(v, p) {
+                energy.contact += contact
+                    .table(clearance)
+                    .map_or(f64::INFINITY, |[value, _, _]| value);
+            }
         }
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset = self.offsets[s];
@@ -774,7 +676,7 @@ impl Simulation {
                         .then(|| (0.5 * angles[d]).sin())
                 });
                 let matrix = plate.energy_matrix(&constants.bending);
-                energy.bending += bending::plate(&matrix, sines, [0.0; 3]).0;
+                energy.bending += bending::plate(&matrix, sines, sheet.rest_sines(t)).0;
             }
             for (d, crease) in sheet.creases().iter().enumerate() {
                 if let Some(crease) = crease {
@@ -782,7 +684,7 @@ impl Simulation {
                         angles[d],
                         sheet.lengths()[d],
                         crease.stiffness,
-                        crease.rest_angle,
+                        sheet.rest_angles()[d],
                     );
                     energy.creases += value;
                 }
@@ -799,7 +701,7 @@ impl Simulation {
         projected: bool,
         pairs: &[Pair],
     ) {
-        let contact = self.contact();
+        let contact = self.settings.contact;
         let barriers: Vec<_> = pairs
             .par_iter()
             .filter_map(|pair| {
@@ -813,7 +715,8 @@ impl Simulation {
         }
         for (v, p) in x.iter().enumerate() {
             let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-            if let Some([_, slope, curvature]) = contact.table(p[2], self.thickness(vertex)) {
+            let barrier = self.clearance(v, p).and_then(|c| contact.table(c));
+            if let Some([_, slope, curvature]) = barrier {
                 if slope != 0.0 || curvature != 0.0 {
                     assembly.add_vertex_z(vertex, slope, curvature);
                 }
@@ -885,7 +788,7 @@ impl Simulation {
                         })
                     });
                     let matrix = sheet.plates()[t].energy_matrix(&constants.bending);
-                    bending::triangle(&matrix, edges, [0.0; 3])
+                    bending::triangle(&matrix, edges, sheet.rest_sines(t))
                 })
                 .collect();
             let mut moments = vec![0.0; mesh.dihedrals().len()];
@@ -911,7 +814,7 @@ impl Simulation {
                             angle.value,
                             sheet.lengths()[d],
                             crease.stiffness,
-                            crease.rest_angle,
+                            sheet.rest_angles()[d],
                         );
                         gradient += angle.gradient * slope;
                         matrix += angle.gradient * angle.gradient.transpose() * curvature
@@ -926,13 +829,12 @@ impl Simulation {
         }
     }
 
-    /// The contact barrier's parameters.
-    fn contact(&self) -> Contact {
-        Contact {
-            gap: self.settings.contact_gap,
-            stiffness: self.settings.contact_stiffness,
-            table: self.settings.table,
-        }
+    /// A vertex's clearance at position `p`: its height over the table less its half
+    /// thickness, or `None` without a table.
+    fn clearance(&self, vertex: usize, p: &Point) -> Option<f64> {
+        let vertex = u32::try_from(vertex).expect("a scene counts its vertices in 32 bits");
+        let table = self.settings.table?;
+        Some(p[2] - table.height - 0.5 * self.thickness(vertex))
     }
 
     /// The thickness of a vertex's sheet, in meters.
@@ -958,7 +860,7 @@ impl Simulation {
             .iter()
             .map(|s| s.material().thickness)
             .fold(0.0, f64::max);
-        thickest + self.settings.contact_gap
+        thickest + self.settings.contact.gap
     }
 
     /// The pairs that may touch while the vertices move from `start` to `end`.
@@ -966,9 +868,10 @@ impl Simulation {
         contact::candidates(&self.primitives, start, end, self.reach())
     }
 
-    /// The largest fraction, at most 1, of a motion from `x` that keeps every pair its
-    /// thickness apart and every vertex its half thickness above the table, and the pairs that
-    /// may touch along the motion.
+    /// The largest safe fraction of a motion from `x`, at most 1, and the pairs that may touch.
+    ///
+    /// A safe fraction keeps every pair its thickness apart, and every vertex its half
+    /// thickness above the table.
     fn safe_fraction(&self, x: &[Point], displacement: &[Point]) -> (f64, Vec<Pair>) {
         let end: Vec<Point> = x.iter().zip(displacement).map(|(p, d)| p + d).collect();
         let pairs = self.candidates(x, &end);
@@ -978,11 +881,9 @@ impl Simulation {
             .collect::<Vec<f64>>()
             .into_iter()
             .fold(1.0, f64::min);
-        if self.settings.table > f64::NEG_INFINITY {
-            for (v, (p, d)) in x.iter().zip(displacement).enumerate() {
-                let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-                let half = 0.5 * self.thickness(vertex);
-                fraction = fraction.min(ccd::table(p[2] - self.settings.table, -d[2], half));
+        for (v, (p, d)) in x.iter().zip(displacement).enumerate() {
+            if let Some(clearance) = self.clearance(v, p) {
+                fraction = fraction.min(ccd::table(clearance, -d[2]));
             }
         }
         (fraction, pairs)
@@ -991,7 +892,7 @@ impl Simulation {
     /// The pairs and table contacts that contact pushes apart at positions `x`, and the least
     /// gap within contact's reach.
     fn contacts(&self, x: &[Point]) -> (usize, f64) {
-        let contact = self.contact();
+        let contact = self.settings.contact;
         let mut count = 0;
         let mut least = f64::INFINITY;
         for pair in self.candidates(x, x) {
@@ -1002,10 +903,8 @@ impl Simulation {
                 least = least.min(gap);
             }
         }
-        if contact.table > f64::NEG_INFINITY {
-            for (v, p) in x.iter().enumerate() {
-                let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-                let gap = p[2] - contact.table - 0.5 * self.thickness(vertex);
+        for (v, p) in x.iter().enumerate() {
+            if let Some(gap) = self.clearance(v, p) {
                 if gap < contact.gap {
                     count += 1;
                     least = least.min(gap);
