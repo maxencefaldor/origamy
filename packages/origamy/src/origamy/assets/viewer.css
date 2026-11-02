@@ -224,3 +224,19 @@ footer {
     height: auto;
   }
 }
+
+/* One step alone, filling the page, as the view command draws it. */
+#origamy.bare {
+  display: block;
+}
+
+#origamy.bare > header,
+#origamy.bare > aside,
+#origamy.bare > footer,
+#origamy.bare .views {
+  display: none;
+}
+
+#origamy.bare main {
+  height: 100vh;
+}

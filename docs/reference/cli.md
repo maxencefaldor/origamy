@@ -13,17 +13,18 @@ The sections below hold each command's help text, as `--help` prints it.
 The command names its two subcommands.
 
 ```text
-usage: origamy [-h] {build,explain} ...
+usage: origamy [-h] {build,view,explain} ...
 
 Fold origami models written as Python fold scripts.
 
 options:
-  -h, --help       show this help message and exit
+  -h, --help            show this help message and exit
 
 subcommands:
-  {build,explain}
-    build          Run a fold script, then report, draw and export the paper.
-    explain        Explain rules and their levels.
+  {build,view,explain}
+    build               Run a fold script, then report, draw and export the paper.
+    view                Draw one step of a fold in 3D, from any direction.
+    explain             Explain rules and their levels.
 ```
 
 ## `origamy build`

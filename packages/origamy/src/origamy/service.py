@@ -22,7 +22,7 @@ from origamy.provenance import Source
 from origamy.render import render
 from origamy.result import BuildResult, DiagnosticData, Failure, StepData
 from origamy.rules import RULES, Level, rule
-from origamy.viewer import write_viewer
+from origamy.viewer import draw_view, write_viewer
 
 _RUN = TypeAdapter[BuildResult | Failure](BuildResult | Failure)
 """What the runner writes: a build's result, or why its script failed."""
@@ -193,6 +193,93 @@ async def build(request: BuildRequest) -> BuildReport:
         refused=refused,
         facts=facts,
         files=tuple(str(path) for path in files),
+    )
+
+
+class ViewRequest(_Model):
+    """Run a fold script, then draw one step in 3D, seen from any direction."""
+
+    script: CliPositionalArg[Path] = Field(
+        description="The fold script: a Python file that defines fold(), "
+        "returning a Paper."
+    )
+    step: int | None = Field(
+        default=None,
+        ge=0,
+        description="The step to see, 0 being the unfolded paper; when omitted, the "
+        "last step, or the paper just before a refused action.",
+    )
+    azimuth: float | None = Field(
+        default=None,
+        description="Degrees round the paper to look from, on the table: 0 in front "
+        "of its bottom edge, 90 at its right, 180 behind it, 270 at its left. When "
+        "omitted, as the viewer opens.",
+    )
+    elevation: float | None = Field(
+        default=None,
+        ge=-90,
+        le=90,
+        description="Degrees above the table to look from: 90 straight above, 0 level "
+        "with the table, negative below it. When omitted, as the viewer opens.",
+    )
+    xray: bool = Field(default=False, description="See through every layer.")
+    timeout: float = Field(
+        default=300, gt=0, description="Seconds the script may run before it stops."
+    )
+
+
+class ViewReport(_Model):
+    """One step of a build, drawn in 3D from one direction."""
+
+    script: str
+    step: int = Field(default=0, description="The step drawn.")
+    description: str = Field(default="", description="What that step did.")
+    azimuth: float = Field(default=0, description="Degrees round the paper.")
+    elevation: float = Field(default=0, description="Degrees above the table.")
+    failure: Failure | None = None
+    files: tuple[str, ...] = ()
+
+    @property
+    def text(self) -> str:
+        """The view as lines of text."""
+        if self.failure:
+            where = f"{self.failure.frames[0]}: " if self.failure.frames else ""
+            return (
+                f"{self.script}: the script failed: {where}"
+                f"{self.failure.error}: {self.failure.message}"
+            )
+        return (
+            f"{self.script}: step {self.step}, {self.description}, seen from azimuth "
+            f"{self.azimuth:.0f}° and elevation {self.elevation:.0f}°\n"
+            f"wrote {', '.join(self.files)}"
+        )
+
+
+async def view(request: ViewRequest) -> ViewReport:
+    """Run a fold script, then draw one of its steps in 3D, from a direction."""
+    script = request.script
+    result = await run_script(script, request.timeout)
+    if isinstance(result, Failure):
+        return ViewReport(script=script.name, failure=result)
+    path = script.with_suffix("").with_suffix(".view.png")
+    with tower(Number.from_data(radicand) for radicand in result.tower):
+        step, direction = await draw_view(
+            result,
+            script.stem,
+            path,
+            step=request.step,
+            azimuth=request.azimuth,
+            elevation=request.elevation,
+            xray=request.xray,
+        )
+    shown = (*result.steps, *([result.refused] if result.refused else []))[step]
+    return ViewReport(
+        script=script.name,
+        step=step,
+        description=shown.description,
+        azimuth=direction.azimuth,
+        elevation=direction.elevation,
+        files=(str(path),),
     )
 
 

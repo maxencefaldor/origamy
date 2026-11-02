@@ -15,7 +15,7 @@ from math import atan2, ceil, cos, floor, hypot, sin, sqrt
 from typing import Final
 
 from origamy.field import Number
-from origamy.geometry import Line, Point, bounds
+from origamy.geometry import Line, Point
 from origamy.space import Form, Motion, Shaped, Turn, Vector, apply, rotate, same
 from origamy.state import State
 
@@ -550,11 +550,10 @@ def _area(polygon: Sequence[Flat]) -> float:
 
 
 def folded_box(*states: State) -> tuple[float, float, float, float]:
-    """A box around the folded paper of every state given."""
-    x0, y0, x1, y1 = bounds(
-        p for state in states for poly in state.folded for p in poly
-    )
-    return float(x0), float(y0), float(x1), float(y1)
+    """A box around the folded paper of every state given, as floats for drawing."""
+    points = [p.floats() for state in states for poly in state.folded for p in poly]
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def _mark_faces(

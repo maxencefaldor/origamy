@@ -90,10 +90,20 @@ export function start(root, build) {
     }
   });
 
+  /** Show one step alone, filling the page, from a direction toward the eye. */
+  function view(target, toward = null, seeThrough = false) {
+    root.classList.add("bare");
+    stage.resize();
+    go(target, false);
+    stage.xray(seeThrough);
+    if (stage.line) stage.line.visible = false;
+    stage.look("tilt", true, toward);
+  }
+
   pattern.onHover = (face) => stage.highlight(face);
   stage.onHover = (face) => pattern.highlight(face);
   go(steps.length - 1, false);
-  return { go, stage, pattern, get index() { return index; } };
+  return { go, view, stage, pattern, get index() { return index; } };
 }
 
 function page(build) {
@@ -459,7 +469,7 @@ class Stage {
     if (t >= 1) this.started = null;
   }
 
-  look(view, instant = false) {
+  look(view, instant = false, toward = null) {
     const box = new THREE.Box3().setFromObject(this.paper);
     const center = box.isEmpty() ? new THREE.Vector3(this.size / 2, this.size / 2, 0) : box.getCenter(new THREE.Vector3());
     // Shaped paper comes with an eye that faces it; flat paper is seen from in front.
@@ -468,12 +478,12 @@ class Stage {
       bottom: [0, -0.0001, -1],
       tilt: this.build.eye ?? [0.35, -0.75, 0.75],
     };
-    const toward = new THREE.Vector3(...offsets[view]).normalize();
+    const eye = new THREE.Vector3(...(toward ?? offsets[view])).normalize();
     // Back away until every corner of the paper, seen from there, fits the view both ways.
-    const right = new THREE.Vector3(-toward.y, toward.x, 0);
+    const right = new THREE.Vector3(-eye.y, eye.x, 0);
     if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
     right.normalize();
-    const up = new THREE.Vector3().crossVectors(toward, right);
+    const up = new THREE.Vector3().crossVectors(eye, right);
     const half = Math.tan((this.camera.fov * Math.PI) / 360);
     const corners = (this.faces ?? []).flatMap((face) => {
       const positions = face.geometry.attributes.position;
@@ -489,10 +499,10 @@ class Stage {
     for (const corner of corners) {
       const offset = corner.clone().sub(center);
       const fit = Math.max(Math.abs(offset.dot(right)) / (half * this.camera.aspect), Math.abs(offset.dot(up)) / half);
-      distance = Math.max(distance, fit * 1.1 + offset.dot(toward));
+      distance = Math.max(distance, fit * 1.1 + offset.dot(eye));
     }
     this.controls.target.copy(center);
-    this.camera.position.copy(center).addScaledVector(toward, distance);
+    this.camera.position.copy(center).addScaledVector(eye, distance);
     this.controls.update();
     if (instant) this.renderer.render(this.scene, this.camera);
   }

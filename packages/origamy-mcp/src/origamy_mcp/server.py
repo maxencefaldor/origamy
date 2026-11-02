@@ -54,10 +54,16 @@ Actions: valley and mountain fold the paper at a flap point over a line, with th
 unfold reverses a fold, precrease folds and unfolds, turn_over flips the paper. collapse
 sets creases already in the paper to valley, mountain or flat at once, named as lines
 or segments of the crease pattern, with valley and mountain seen from the front.
-reverse and petal fold compute their creases and collapse. Queries: where maps a point
-of the unfolded paper to where it lies now, origin maps back, creases lists the crease
-pattern segments along a line, and layers counts the layers at a point. explain_rule
-gives each rule's exact condition.
+reverse and petal fold compute their creases and collapse. shape, flex and tilt turn
+folded paper out of the plane: shape opens a fold about its hinge by an angle, flex
+folds creases that meet at a vertex together, and tilt holds the whole model up.
+Queries: where maps a point of the unfolded paper to where it lies now, origin maps
+back, creases lists the crease pattern segments along a line, and layers counts the
+layers at a point.
+
+view_model draws one step in 3D from any direction, given as an azimuth round the
+paper and an elevation above the table; call it once per direction to see a model from
+all sides. explain_rule gives each rule's exact condition.
 """
 
 READ_ONLY: Final = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -157,6 +163,11 @@ def create_server() -> MCPServer:
         tool_from(
             "fold_model", service.BuildRequest, service.build, service.BuildReport
         ),
+        annotations=RUNS_CODE,
+        structured_output=True,
+    )
+    server.add_tool(
+        tool_from("view_model", service.ViewRequest, service.view, service.ViewReport),
         annotations=RUNS_CODE,
         structured_output=True,
     )

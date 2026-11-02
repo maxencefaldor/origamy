@@ -108,7 +108,7 @@ From a clone of this repository, Claude Code adds it with one command:
 claude mcp add origamy -- uv run --directory /path/to/origamy origamy-mcp
 ```
 
-The tool `fold_model` runs a fold script and answers with the report and both pictures, and `explain_rule` gives a rule's exact condition.
+The tool `fold_model` runs a fold script and answers with the report and both pictures, `view_model` draws any step in 3D from any direction, and `explain_rule` gives a rule's exact condition.
 The skill in [.claude/skills/fold-model](.claude/skills/fold-model/SKILL.md) teaches the loop, the coordinates and the actions, and no designs.
 
 ## Feedback is facts

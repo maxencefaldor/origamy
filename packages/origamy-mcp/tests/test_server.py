@@ -46,7 +46,7 @@ def text_of(result: CallToolResult) -> str:
 
 def test_tools_mirror_the_service_requests() -> None:
     found = tools()
-    assert set(found) == {"fold_model", "explain_rule"}
+    assert set(found) == {"fold_model", "view_model", "explain_rule"}
     schema = found["fold_model"].input_schema
     assert schema["required"] == ["script"]
     assert "fold()" in schema["properties"]["script"]["description"]
@@ -60,6 +60,14 @@ def test_fold_model_reports_the_refusal_and_shows_the_paper(tmp_path: Path) -> N
     assert sum(isinstance(c, ImageContent) for c in result.content) == 2
     assert result.structured_content is not None
     assert result.structured_content["refused"]["step"] == 2
+
+
+def test_view_model_shows_one_step_from_a_direction(tmp_path: Path) -> None:
+    script = tmp_path / "broken.py"
+    script.write_text(SCRIPT, encoding="utf-8")
+    result = call("view_model", {"script": str(script), "azimuth": 90, "elevation": 20})
+    assert "seen from azimuth 90° and elevation 20°" in text_of(result)
+    assert sum(isinstance(c, ImageContent) for c in result.content) == 1
 
 
 def test_explain_rule_gives_the_condition() -> None:

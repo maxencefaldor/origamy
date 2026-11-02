@@ -121,12 +121,18 @@ class State:
         """The face of this state that holds each face of a later state.
 
         Actions only ever cut faces, so each face of a later crease pattern lies inside
-        exactly one face of an earlier one.
+        exactly one face of an earlier one; a face no action cut is that face itself.
         """
-        inners = [center(polygon) for polygon in later.patterns]
+        same = {pattern: f for f, pattern in enumerate(self.patterns)}
         return [
-            next(f for f, pattern in enumerate(self.patterns) if covers(pattern, inner))
-            for inner in inners
+            same[pattern]
+            if pattern in same
+            else next(
+                f
+                for f, outline in enumerate(self.patterns)
+                if covers(outline, center(pattern))
+            )
+            for pattern in later.patterns
         ]
 
     def flips(self, face: int) -> bool:

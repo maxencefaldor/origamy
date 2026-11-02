@@ -50,24 +50,26 @@ Each tool matches one command and takes the same arguments:
 | Tool | Command | Does |
 | --- | --- | --- |
 | `fold_model` | `origamy build` | Runs a fold script in its own process, reports its steps, and returns its pictures |
+| `view_model` | `origamy view` | Runs a fold script and returns one step drawn in 3D, from any direction |
 | `explain_rule` | `origamy explain` | Gives a rule's level and exact condition, or every rule's |
 
 Each tool answers twice: with the text the command line prints, for the agent, and with the result as structured content, for programs.
 The tool `fold_model` also returns both pictures, so the agent sees the paper without another call.
+The tool `view_model` returns its picture too: one call per direction the agent wants to see.
 
 Two behaviors of the server matter to an agent:
 
 - **Scripts run apart.**
   Each fold script runs in a child process with a time limit, and nothing it prints reaches the protocol stream.
   A fold script still runs as ordinary Python with your permissions, so run only scripts you trust.
-  The tool `fold_model` declares that it runs code, so a harness can ask before each call.
+  The tools `fold_model` and `view_model` declare that they run code, so a harness can ask before each call.
 - **Self-contained instructions.**
   The server's instructions teach the workflow, the coordinates, the actions and the queries, so an agent can start without the skill.
 
 ## Skill
 
-The skill `.claude/skills/fold-model/SKILL.md` teaches an agent the loop: write a fold script, build it, read the report and the pictures, and change the script.
-The skill also teaches the coordinates and the actions, and holds no designs.
+The skill `.claude/skills/fold-model/SKILL.md` gives an agent the goal, a model that looks like its subject, and the tools to reach it: building, views from any direction, the coordinates and the actions.
+The skill sets no order of work, and holds no designs.
 Claude Code loads the skill on its own inside the origamy repository.
 Another project uses the skill once a copy sits in its own `.claude/skills/fold-model/`:
 

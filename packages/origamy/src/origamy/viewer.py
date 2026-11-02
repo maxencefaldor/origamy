@@ -4,24 +4,34 @@
 The page holds the build as data, the viewer's module and its styles, and loads
 three.js from jsDelivr, so it stays small and needs a network connection when opened.
 Each step carries every face's place before and after it, so the viewer animates the
-move: a face that turns over makes a half turn about its axis, and the rest glide.
-Once shaping turns the paper out of the plane, each step also carries every face's
-motion in space, and the turn its moving faces make.
+move: a fold turns its paper about its line, and a collapse follows its creases as
+rigid origami. Once shaping turns the paper out of the plane, each step also carries
+every face's motion in space, and the turn its moving faces make. The same page, in
+headless Chromium, draws any step from any direction.
 """
 
 import base64
 import json
+import os
+import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import cache
 from html import escape
 from importlib.resources import files
+from math import atan2, cos, degrees, hypot, radians, sin
 from pathlib import Path
 from string import Template
 from typing import Any, Final
 
+from playwright.async_api import Route, async_playwright
+
 from origamy import flex
 from origamy.draw import GAP, Eye, across, folded_box, layers
+from origamy.errors import OrigamyError
 from origamy.geometry import Isometry, Line
 from origamy.paper import Step
+from origamy.render import BROWSER
 from origamy.result import BuildResult
 from origamy.space import Shaped
 from origamy.state import State
@@ -39,6 +49,15 @@ _COLLAPSES: Final = frozenset({"collapse", "reverse", "petal"})
 
 _FRAMES: Final = 12
 """How many parts the viewer divides a collapse's path into."""
+
+_TILT: Final = (0.35, -0.75, 0.75)
+"""Toward the eye the viewer opens flat paper with: in front of it, and above."""
+
+_STEEPEST: Final = 89.99
+"""The steepest elevation an eye takes, so that it still knows which way is up."""
+
+_THREE: Final = Path(str(files("origamy").joinpath("assets", "three")))
+"""The copy of three.js that origamy vendors."""
 
 _PAGE: Final = Template("""<!doctype html>
 <html lang="en">
@@ -73,32 +92,118 @@ try {
 
 def write_viewer(result: BuildResult, name: str, path: Path) -> Path:
     """Write the viewer of a build to ``path`` and return the path."""
+    path.write_text(_page(build_data(result, name), name), encoding="utf-8")
+    return path
+
+
+@dataclass(frozen=True, slots=True)
+class Direction:
+    """Where an eye looks at the paper from, far away, in degrees.
+
+    The azimuth runs round the paper on the table: 0 in front of its bottom edge, 90 at
+    its right, 180 behind it and 270 at its left. The elevation rises from 0, level
+    with the table, to 90, straight above; below the table it is negative.
+    """
+
+    azimuth: float
+    elevation: float
+
+    @classmethod
+    def of(cls, toward: Sequence[float]) -> Direction:
+        """The direction of a vector toward the eye."""
+        x, y, z = toward
+        level = hypot(x, y)
+        return cls(degrees(atan2(x, -y)) % 360, degrees(atan2(z, level)))
+
+    @property
+    def toward(self) -> tuple[float, float, float]:
+        """A unit vector toward the eye; straight above or below tilts a hair."""
+        a = radians(self.azimuth)
+        e = radians(max(-_STEEPEST, min(_STEEPEST, self.elevation)))
+        return sin(a) * cos(e), -cos(a) * cos(e), sin(e)
+
+
+async def draw_view(  # noqa: PLR0913 - a picture of one step, from one direction
+    result: BuildResult,
+    name: str,
+    path: Path,
+    *,
+    step: int | None,
+    azimuth: float | None,
+    elevation: float | None,
+    xray: bool,
+) -> tuple[int, Direction]:
+    """Draw one step of a build in 3D into a PNG, as the viewer shows it.
+
+    The step defaults to the last; the direction, to the one the viewer opens with,
+    which an azimuth or an elevation given replaces. Returns the step and direction.
+    """
+    data = build_data(result, name, motion=False)
+    count = len(data["steps"])
+    index = count - 1 if step is None else step
+    if not 0 <= index < count:
+        msg = f"the build has steps 0 to {count - 1}, not {index}"
+        raise OrigamyError(msg)
+    opening = Direction.of(data["eye"] or _TILT)
+    direction = Direction(
+        opening.azimuth if azimuth is None else azimuth % 360,
+        opening.elevation if elevation is None else elevation,
+    )
+    with tempfile.TemporaryDirectory() as folder:
+        page = Path(folder) / "view.html"
+        page.write_text(_page(data, name), encoding="utf-8")
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                executable_path=os.environ.get(BROWSER) or None
+            )
+            try:
+                tab = await browser.new_page(viewport={"width": 960, "height": 760})
+                await tab.route(f"{THREE_PACKAGE}**", _vendored)
+                await tab.goto(page.as_uri())
+                await tab.wait_for_selector('#origamy[data-state="ready"]')
+                toward = list(direction.toward)
+                await tab.evaluate(
+                    "([i, t, x]) => window.origamy.view(i, t, x)", [index, toward, xray]
+                )
+                await tab.wait_for_timeout(300)
+                await tab.locator(".stage").screenshot(path=path)
+            finally:
+                await browser.close()
+    return index, direction
+
+
+async def _vendored(route: Route) -> None:
+    """Answer a request for three.js with the copy origamy vendors."""
+    name = route.request.url.removeprefix(THREE_PACKAGE).replace("build/", "")
+    await route.fulfill(path=_THREE / name, content_type="text/javascript")
+
+
+def _page(data: Data, name: str) -> str:
+    """The viewer's page, holding a build's data."""
     imports = {
         "three": THREE_PACKAGE + "build/three.module.js",
         "three/addons/": THREE_PACKAGE + "examples/jsm/",
         "origamy/viewer.js": "data:text/javascript;base64,"
         + base64.b64encode(_asset("viewer.js").encode()).decode("ascii"),
     }
-    page = _PAGE.substitute(
+    return _PAGE.substitute(
         title=escape(f"{name} · origamy"),
         style=_asset("viewer.css"),
         imports=json.dumps({"imports": imports}),
-        build=json.dumps(build_data(result, name)).replace("</", "<\\/"),
+        build=json.dumps(data).replace("</", "<\\/"),
     )
-    path.write_text(page, encoding="utf-8")
-    return path
 
 
-def build_data(result: BuildResult, name: str) -> Data:
+def build_data(result: BuildResult, name: str, *, motion: bool = True) -> Data:
     """The build as the viewer reads it: floats, with each step's places before it."""
     steps = [data.step() for data in result.steps]
     refused = result.refused.step() if result.refused else None
     views = [
-        _step(step, steps[index - 1] if index else None)
+        _step(step, steps[index - 1] if index else None, motion=motion)
         for index, step in enumerate(steps)
     ]
     if refused is not None:
-        views.append({**_step(refused, None), "refused": True})
+        views.append({**_step(refused, None, motion=motion), "refused": True})
     shaped = [Shaped(s.state, s.form) for s in (*steps, refused) if s and s.form]
     return {
         "name": name,
@@ -110,7 +215,7 @@ def build_data(result: BuildResult, name: str) -> Data:
     }
 
 
-def _step(step: Step, previous: Step | None) -> Data:
+def _step(step: Step, previous: Step | None, *, motion: bool) -> Data:
     state = step.state
     parted = layers(Shaped(state, step.form))
     before = [_floats(f.place) for f in state.faces]
@@ -124,7 +229,7 @@ def _step(step: Step, previous: Step | None) -> Data:
         shifts = tuple(old.shifts[p] for p in parents)
         form_before = previous.form and previous.form.carried(previous.state, state)
     path = [form.motions for form in step.path]
-    if previous is not None and step.action in _COLLAPSES and not form_before:
+    if motion and previous and step.action in _COLLAPSES and not form_before:
         # A collapse turns many creases at once: follow them as rigid origami, so the
         # paper stays whole on its way, where a rigid motion takes it there. A face
         # that turns over on the way starts its layer gap on its other side.

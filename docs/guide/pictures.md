@@ -46,6 +46,25 @@ Marks show on the pictures what the report states in text:
 | Blue dashed line | The next fold, in the picture of every step |
 | Red note under the title | The refused step and its fact |
 
+## Views from any direction
+
+The command `origamy view` folds a script, then draws one step in 3D, as the viewer shows it, from a direction the agent names.
+It writes `name.view.png` beside the script, and the MCP tool `view_model` returns the picture.
+Each call draws one direction, so an agent sees a model from all sides by asking several times.
+
+| Option | Means |
+| --- | --- |
+| `--step` | The step to see, 0 being the unfolded paper; the last step by default |
+| `--azimuth` | Degrees round the paper on the table: 0 in front of its bottom edge, 90 at its right, 180 behind it, 270 at its left |
+| `--elevation` | Degrees above the table: 90 straight above, 0 level with it, negative below it |
+| `--xray` | See through every layer |
+
+Without an azimuth or an elevation, the view takes the direction the viewer opens with.
+
+```sh
+uv run origamy view models/crane.py --azimuth 90 --elevation 10
+```
+
 ## The 3D viewer
 
 A build writes `name.html`, a standalone page that replays the fold step by step in 3D.

@@ -132,3 +132,36 @@ async def replay(page: Path, shot: Path) -> tuple[list[str], tuple[float, float]
         heights = await tab.evaluate(HEIGHTS)
         await browser.close()
     return errors, (float(heights[0]), float(heights[1]))
+
+
+BOOK = """from origamy import Line, Paper
+
+
+def fold() -> Paper:
+    paper = Paper.square()
+    paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    return paper
+"""
+
+
+def test_a_view_draws_a_step_from_the_direction_asked(
+    tmp_path: Path, colors: Colors
+) -> None:
+    script = tmp_path / "book.py"
+    script.write_text(BOOK, encoding="utf-8")
+    seen = {}
+    for name, elevation in (("above", 90), ("below", -90)):
+        request = service.ViewRequest(script=script, elevation=elevation)
+        report = asyncio.run(service.view(request))
+        assert report.step == 1
+        assert report.elevation == elevation
+        assert "seen from azimuth" in report.text
+        seen[name] = colors(Path(report.files[0]))
+    # Folded in half, the book shows the back of its top layer above and the back of
+    # its bottom layer below: cream both ways, and no vermilion front at all.
+    for found in seen.values():
+        assert any(r > 200 and g > 190 and b > 170 and r - b < 45 for r, g, b in found)
+        assert not any(r > 150 and r > g + 60 for r, g, b in found)
+    unfolded = asyncio.run(service.view(service.ViewRequest(script=script, step=0)))
+    front = colors(Path(unfolded.files[0]))
+    assert any(r > 150 and r > g + 60 for r, g, b in front)

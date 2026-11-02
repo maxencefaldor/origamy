@@ -44,6 +44,21 @@ class BuildCommand(service.BuildRequest, _Output):
             raise SystemExit(1)
 
 
+class ViewCommand(service.ViewRequest, _Output):
+    """Run a fold script, then draw one step in 3D, seen from any direction."""
+
+    def cli_cmd(self) -> None:
+        """Run the command."""
+        report = asyncio.run(service.view(self))
+        print(
+            report.model_dump_json(indent=2)
+            if self.output_format == "json"
+            else report.text
+        )
+        if report.failure:
+            raise SystemExit(1)
+
+
 class ExplainCommand(service.ExplainRequest):
     """Explain the rules: each one's level and exact condition."""
 
@@ -66,6 +81,9 @@ class Origamy(BaseSettings):
 
     build: CliSubCommand[BuildCommand] = Field(
         description="Run a fold script, then report, draw and export the paper."
+    )
+    view: CliSubCommand[ViewCommand] = Field(
+        description="Draw one step of a fold in 3D, from any direction."
     )
     explain: CliSubCommand[ExplainCommand] = Field(
         description="Explain rules and their levels."
