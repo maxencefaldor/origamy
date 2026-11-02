@@ -4,7 +4,7 @@
 pub(crate) mod bending;
 pub(crate) mod membrane;
 
-use nalgebra::{DMatrix, SMatrix, SymmetricEigen, Vector3};
+use nalgebra::{SMatrix, Vector3};
 
 /// A position in space, in meters.
 pub(crate) type Point = Vector3<f64>;
@@ -17,19 +17,43 @@ pub(crate) struct Local<const D: usize> {
     pub hessian: SMatrix<f64, D, D>,
 }
 
-/// The nearest positive semi-definite matrix to a symmetric one: its negative eigenvalues set to
-/// zero.
-pub(crate) fn project<const D: usize>(matrix: &SMatrix<f64, D, D>) -> SMatrix<f64, D, D> {
-    // A matrix with a Cholesky factor is already positive definite.
-    if matrix.cholesky().is_some() {
-        return *matrix;
-    }
-    let mut eigen = SymmetricEigen::new(DMatrix::from_column_slice(D, D, matrix.as_slice()));
-    for value in eigen.eigenvalues.iter_mut() {
-        *value = value.max(0.0);
-    }
-    SMatrix::from_column_slice(eigen.recompose().as_slice())
+/// A symmetric matrix made positive semi-definite by taking the absolute value of each
+/// eigenvalue.
+///
+/// Flipping negative curvature, rather than clearing it, keeps its size in the Newton step,
+/// which then converges faster. The filter follows Chen et al., Stabler Neo-Hookean
+/// Simulation: Absolute Eigenvalue Filtering for Projected Newton, 2024.
+pub(crate) trait Project {
+    /// The projected matrix.
+    fn project(&self) -> Self;
 }
+
+/// Implements [`Project`] for the sizes of the elements' Hessians, where nalgebra's eigen
+/// solver works on the stack.
+macro_rules! project {
+    ($($size:literal),*) => {$(
+        impl Project for SMatrix<f64, $size, $size> {
+            fn project(&self) -> Self {
+                // A matrix with a Cholesky factor is already positive definite. A matrix that
+                // gains one from a shift at the scale of rounding is semi-definite already.
+                if self.cholesky().is_some() || self.amax() == 0.0 {
+                    return *self;
+                }
+                let shifted = self + Self::identity() * (1e-12 * self.diagonal().amax());
+                if shifted.cholesky().is_some() {
+                    return *self;
+                }
+                let eigen = self.symmetric_eigen();
+                let flipped = eigen.eigenvectors
+                    * SMatrix::from_diagonal(&eigen.eigenvalues.abs())
+                    * eigen.eigenvectors.transpose();
+                (flipped + flipped.transpose()) * 0.5
+            }
+        }
+    )*};
+}
+
+project!(2, 9, 12, 18);
 
 /// The barrier that keeps a quantity `d` above zero: zero from `onset` up, smooth, and growing
 /// without bound as `d` falls to zero.
@@ -131,17 +155,33 @@ mod tests {
         }
     }
 
+    proptest::proptest! {
+        #[test]
+        fn projection_takes_each_eigenvalue_in_size(
+            entries in proptest::collection::vec(-1e3..1e3f64, 144),
+        ) {
+            let raw = SMatrix::<f64, 12, 12>::from_column_slice(&entries);
+            let matrix = raw + raw.transpose();
+            let size = matrix.norm();
+            let mut expected: Vec<f64> =
+                matrix.symmetric_eigenvalues().iter().map(|v| v.abs()).collect();
+            let mut found: Vec<f64> = matrix.project().symmetric_eigenvalues().iter().copied().collect();
+            expected.sort_by(f64::total_cmp);
+            found.sort_by(f64::total_cmp);
+            for (e, f) in expected.iter().zip(&found) {
+                proptest::prop_assert!((e - f).abs() <= 1e-12 * size);
+            }
+        }
+    }
+
     #[test]
-    fn projection_clears_negative_eigenvalues() {
+    fn projection_flips_negative_eigenvalues() {
+        // The eigenvalues are 3 and −1, along (1, 1) and (1, −1).
         let matrix = SMatrix::<f64, 2, 2>::new(1.0, 2.0, 2.0, 1.0);
-        let projected = project(&matrix);
-        let eigen = SymmetricEigen::new(projected);
-        assert!(eigen.eigenvalues.min() > -1e-12);
-        assert!(
-            (projected - SMatrix::<f64, 2, 2>::new(1.5, 1.5, 1.5, 1.5))
-                .abs()
-                .max()
-                < 1e-12
-        );
+        let projected = matrix.project();
+        let expected = SMatrix::<f64, 2, 2>::new(2.0, 1.0, 1.0, 2.0);
+        assert!((projected - expected).abs().max() < 1e-12);
+        let definite = SMatrix::<f64, 2, 2>::new(2.0, 1.0, 1.0, 2.0);
+        assert_eq!(definite.project(), definite);
     }
 }

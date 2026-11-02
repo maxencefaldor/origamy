@@ -2,24 +2,15 @@
 
 use origamy_sim::{Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness};
 
-/// A rectangle of `columns` by `rows` cells of `width` by `height` meters, each split along its
-/// rising diagonal.
+/// A rectangle of `columns` by `rows` cells of `width` by `height` meters.
 fn grid(columns: u32, rows: u32, width: f64, height: f64) -> Mesh {
-    let at = |i: u32, j: u32| j * (columns + 1) + i;
-    let rest = (0..=rows)
-        .flat_map(|j| (0..=columns).map(move |i| [f64::from(i) * width, f64::from(j) * height]))
-        .collect();
-    let triangles = (0..rows)
-        .flat_map(|j| {
-            (0..columns).flat_map(move |i| {
-                [
-                    [at(i, j), at(i + 1, j), at(i + 1, j + 1)],
-                    [at(i, j), at(i + 1, j + 1), at(i, j + 1)],
-                ]
-            })
-        })
-        .collect();
-    Mesh::new(rest, triangles).unwrap()
+    Mesh::grid(
+        columns,
+        rows,
+        width * f64::from(columns),
+        height * f64::from(rows),
+    )
+    .unwrap()
 }
 
 /// The tip deflection of a cantilever bent by its own weight, from the elastica.
@@ -109,6 +100,40 @@ fn a_cantilever_sags_under_its_own_weight_as_the_elastica_says() {
         (tip / expected - 1.0).abs() < 1e-3,
         "the tip drops {tip} m, the elastica {expected} m"
     );
+}
+
+#[test]
+fn a_square_hung_on_a_hinge_swings_down_to_hang_straight() {
+    // Held along one line of vertices, the flat square has a motion that costs no energy, so
+    // the first Newton update runs out of bounds. The trust radius keeps the step in reach.
+    let (cells, side) = (8, 0.2);
+    let sheet = Sheet::new(
+        Mesh::grid(cells, cells, side, side).unwrap(),
+        Material::kami(),
+    )
+    .unwrap();
+    let settings = Settings {
+        time_step: f64::INFINITY,
+        solver: Solver {
+            iteration_limit: 1000,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    for j in 0..=cells {
+        simulation.hold(0, (j * (cells + 1)) as usize, true);
+    }
+    let report = simulation.step().unwrap();
+    assert!(report.converged, "{report:?}");
+    for (v, [x, _, z]) in simulation.positions(0).iter().enumerate() {
+        let column = f64::from(u32::try_from(v).unwrap() % (cells + 1));
+        let depth = side * column / f64::from(cells);
+        assert!(
+            x.abs() < 1e-6 && (z + depth).abs() < 1e-6,
+            "vertex {v} hangs at {x}, {z}"
+        );
+    }
 }
 
 #[test]
@@ -216,6 +241,8 @@ fn a_miura_ori_folds_rigidly_when_its_creases_are_actuated() {
         time_step: f64::INFINITY,
         solver: Solver {
             iteration_limit: 1000,
+            // The rigid folding has no strain, so the solver runs well past the strain bound.
+            tolerance: 1e-11,
             ..Solver::default()
         },
         ..Settings::default()

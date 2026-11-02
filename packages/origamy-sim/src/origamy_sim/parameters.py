@@ -155,6 +155,13 @@ class Solver(_Parameters):
     iteration_limit: Annotated[int, Field(gt=0)] = 200
     """The most Newton iterations a time step may take."""
 
+    trust_radius: Positive = 0.25
+    """The longest vertex move of a time step's first Newton update, in meters.
+
+    A longer update shrinks to this trust radius. An update shrunk and then taken whole
+    doubles the radius for the next update of the time step.
+    """
+
     sufficient_decrease: Fraction = 1e-4
     """The fraction of the predicted decrease of energy a line search requires."""
 

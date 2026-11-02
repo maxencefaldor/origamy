@@ -73,6 +73,21 @@ impl PyMesh {
         Ok(Self(mesh))
     }
 
+    /// A `width` by `height` rectangle of `columns` by `rows` cells, each split along its
+    /// rising diagonal, with its lower left corner at the origin.
+    ///
+    /// Vertex `j * (columns + 1) + i` lies at column `i` and row `j`.
+    ///
+    /// Raises:
+    ///     ValueError: When the grid has no cell, too many vertices, or a size that is not
+    ///         positive and finite.
+    #[staticmethod]
+    fn grid(columns: u32, rows: u32, width: f64, height: f64) -> PyResult<Self> {
+        Ok(Self(
+            Mesh::grid(columns, rows, width, height).map_err(value_error)?,
+        ))
+    }
+
     /// Each vertex's place in the flat sheet, in meters, of shape (n, 2).
     #[getter]
     fn rest<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
@@ -327,6 +342,21 @@ impl From<Energy> for PyEnergy {
 
 #[pymethods]
 impl PyEnergy {
+    /// The sum of every term, in joules.
+    #[getter]
+    fn total(&self) -> f64 {
+        Energy {
+            stretching: self.stretching,
+            strain_barrier: self.strain_barrier,
+            bending: self.bending,
+            creases: self.creases,
+            contact: self.contact,
+            gravity: self.gravity,
+            kinetic: self.kinetic,
+        }
+        .total()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, contact={:?}, gravity={:?}, kinetic={:?})",

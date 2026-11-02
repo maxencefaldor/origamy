@@ -179,6 +179,51 @@ impl Mesh {
         })
     }
 
+    /// A `width` by `height` rectangle of `columns` by `rows` cells, each split along its
+    /// rising diagonal, with its lower left corner at the origin.
+    ///
+    /// Vertex `j * (columns + 1) + i` lies at column `i` and row `j`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MeshError::Empty`] without columns or rows, and
+    /// [`MeshError::TooManyVertices`] when a vertex index cannot name every vertex. A size that
+    /// is not finite or not positive gives the error [`Mesh::new`] gives for it.
+    pub fn grid(columns: u32, rows: u32, width: f64, height: f64) -> Result<Self, MeshError> {
+        if columns == 0 || rows == 0 {
+            return Err(MeshError::Empty);
+        }
+        let count = (u64::from(columns) + 1) * (u64::from(rows) + 1);
+        if Vertex::try_from(count).is_err() {
+            return Err(MeshError::TooManyVertices {
+                count: usize::try_from(count).unwrap_or(usize::MAX),
+            });
+        }
+        let at = |i: u32, j: u32| j * (columns + 1) + i;
+        let rest = (0..=rows)
+            .flat_map(|j| {
+                (0..=columns).map(move |i| {
+                    // The fractions reach exactly 1, so the far sides lie exactly at the size.
+                    [
+                        width * (f64::from(i) / f64::from(columns)),
+                        height * (f64::from(j) / f64::from(rows)),
+                    ]
+                })
+            })
+            .collect();
+        let triangles = (0..rows)
+            .flat_map(|j| {
+                (0..columns).flat_map(move |i| {
+                    [
+                        [at(i, j), at(i + 1, j), at(i + 1, j + 1)],
+                        [at(i, j), at(i + 1, j + 1), at(i, j + 1)],
+                    ]
+                })
+            })
+            .collect();
+        Self::new(rest, triangles)
+    }
+
     /// Each vertex's place in the flat sheet, in meters.
     #[must_use]
     pub fn rest(&self) -> &[[f64; 2]] {
@@ -307,23 +352,37 @@ mod tests {
         .unwrap()
     }
 
-    /// A rectangle of `columns` by `rows` unit squares, each split along its rising diagonal.
+    /// A rectangle of `columns` by `rows` unit squares.
     fn grid(columns: u32, rows: u32) -> Mesh {
-        let at = |i: u32, j: u32| j * (columns + 1) + i;
-        let rest = (0..=rows)
-            .flat_map(|j| (0..=columns).map(move |i| [f64::from(i), f64::from(j)]))
-            .collect();
-        let triangles = (0..rows)
-            .flat_map(|j| {
-                (0..columns).flat_map(move |i| {
-                    [
-                        [at(i, j), at(i + 1, j), at(i + 1, j + 1)],
-                        [at(i, j), at(i + 1, j + 1), at(i, j + 1)],
-                    ]
-                })
-            })
-            .collect();
-        Mesh::new(rest, triangles).unwrap()
+        Mesh::grid(columns, rows, f64::from(columns), f64::from(rows)).unwrap()
+    }
+
+    #[test]
+    #[expect(clippy::float_cmp, reason = "the far corner lies exactly at the size")]
+    fn a_grid_reaches_exactly_its_size() {
+        let mesh = Mesh::grid(7, 3, 0.3, 0.1).unwrap();
+        assert_eq!(mesh.rest()[31], [0.3, 0.1]);
+    }
+
+    #[test]
+    fn a_grid_is_a_rectangle_of_cells() {
+        let mesh = Mesh::grid(3, 2, 0.3, 0.1).unwrap();
+        assert_eq!(mesh.vertex_count(), 12);
+        assert_eq!(mesh.triangles().len(), 12);
+        assert!((mesh.area() - 0.03).abs() < 1e-15);
+        assert_eq!(Mesh::grid(0, 2, 1.0, 1.0), Err(MeshError::Empty));
+        assert!(matches!(
+            Mesh::grid(u32::MAX, 2, 1.0, 1.0),
+            Err(MeshError::TooManyVertices { .. })
+        ));
+        assert!(matches!(
+            Mesh::grid(1, 1, -1.0, 1.0),
+            Err(MeshError::NotCounterclockwise { .. })
+        ));
+        assert!(matches!(
+            Mesh::grid(1, 1, f64::NAN, 1.0),
+            Err(MeshError::NotFinite { .. })
+        ));
     }
 
     #[test]

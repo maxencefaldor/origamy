@@ -71,6 +71,18 @@ def test_vertices_come_in_any_integer_type(dtype: type[np.integer]) -> None:
     assert Mesh(rest, np.array(HALVES, dtype=dtype)) == Mesh(SQUARE, HALVES)
 
 
+def test_a_grid_is_a_rectangle_of_cells() -> None:
+    grid = Mesh.grid(3, 2, 0.3, 0.1)
+    assert grid.rest.shape == (12, 2)
+    assert grid.triangles.shape == (12, 3)
+    assert grid.rest[11].tolist() == [0.3, 0.1]
+    assert grid.area == pytest.approx(0.03)
+    with pytest.raises(ValueError, match="no triangles"):
+        Mesh.grid(0, 2, 1.0, 1.0)
+    with pytest.raises(ValueError, match="counterclockwise"):
+        Mesh.grid(1, 1, -1.0, 1.0)
+
+
 def test_vertices_are_integers() -> None:
     with pytest.raises(
         TypeError, match="triangles must hold integers, but it holds float64"

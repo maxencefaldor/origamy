@@ -19,6 +19,7 @@ uv run --group docs zensical serve  # the docs site, at http://localhost:8000
 uv run python packages/origamy-sim/codegen/generate.py  # the simulator's generated derivatives
 cargo fmt --all                     # format Rust
 cargo test                          # Rust tests of the simulator's core
+cargo bench                         # time steps of the simulator's benchmark scenes
 PYO3_PYTHON=$PWD/.venv/bin/python cargo clippy --workspace --all-targets -- -D warnings  # lint Rust
 ```
 

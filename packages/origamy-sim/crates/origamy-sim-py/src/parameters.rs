@@ -142,6 +142,7 @@ impl Parameters for Solver {
         Ok(Self {
             tolerance: field(model, "tolerance")?,
             iteration_limit: field(model, "iteration_limit")?,
+            trust_radius: field(model, "trust_radius")?,
             sufficient_decrease: field(model, "sufficient_decrease")?,
             backtracking: field(model, "backtracking")?,
             shortest_update: field(model, "shortest_update")?,
@@ -151,6 +152,7 @@ impl Parameters for Solver {
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("tolerance", self.tolerance)?;
         fields.set_item("iteration_limit", self.iteration_limit)?;
+        fields.set_item("trust_radius", self.trust_radius)?;
         fields.set_item("sufficient_decrease", self.sufficient_decrease)?;
         fields.set_item("backtracking", self.backtracking)?;
         fields.set_item("shortest_update", self.shortest_update)

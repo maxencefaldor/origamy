@@ -13,10 +13,10 @@ use std::cell::OnceCell;
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
-use crate::contact::{self, Kind, Pair, Primitives, ccd, distance};
+use crate::contact::{self, Kind, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::membrane::{self, Stretching};
-use crate::energy::{Point, project};
+use crate::energy::{Point, Project};
 use crate::parameter::ParameterError;
 use crate::settings::Settings;
 use crate::sheet::Sheet;
@@ -39,6 +39,58 @@ pub struct Energy {
     pub gravity: f64,
     /// The kinetic energy.
     pub kinetic: f64,
+}
+
+impl Energy {
+    /// The sum of every term, in joules.
+    #[must_use]
+    pub fn total(&self) -> f64 {
+        self.terms().into_iter().sum()
+    }
+
+    /// Every term, in a fixed order.
+    fn terms(&self) -> [f64; 7] {
+        // The destructuring names every field, so a new term cannot be left out of the total.
+        let Self {
+            stretching,
+            strain_barrier,
+            bending,
+            creases,
+            contact,
+            gravity,
+            kinetic,
+        } = *self;
+        [
+            stretching,
+            strain_barrier,
+            bending,
+            creases,
+            contact,
+            gravity,
+            kinetic,
+        ]
+    }
+}
+
+/// The incremental potential of a time step at some positions, term by term, in joules.
+#[derive(Clone, Copy, Debug, Default)]
+struct Potential {
+    /// The terms of the potential energy; the kinetic term stays zero.
+    energy: Energy,
+    /// The inertia term ½ (x − x̂)ᵀ M (x − x̂) / Δt².
+    inertia: f64,
+}
+
+impl Potential {
+    /// The incremental potential.
+    fn total(&self) -> f64 {
+        self.energy.total() + self.inertia
+    }
+
+    /// The size of the terms, for telling a change from rounding.
+    fn size(&self) -> f64 {
+        self.energy.terms().iter().map(|t| t.abs()).sum::<f64>() + self.inertia.abs()
+    }
 }
 
 /// What a time step did.
@@ -117,6 +169,8 @@ pub struct Simulation {
     pattern: Pattern,
     pairs: Vec<(u32, u32)>,
     primitives: Primitives,
+    /// Hierarchies over the primitives, built at the start of each time step.
+    trees: Trees,
 }
 
 /// The constants of one sheet's energies, from its material.
@@ -154,6 +208,8 @@ impl Simulation {
         let pairs = pairs(&sheets, &offsets);
         let pattern = Pattern::new(positions.len(), pairs.iter().copied());
         let primitives = primitives(&sheets, &offsets);
+        let rest: Vec<Point> = positions.iter().map(|&p| Point::from(p)).collect();
+        let trees = Trees::new(&primitives, &rest);
         Ok(Self {
             velocities: vec![[0.0; 3]; positions.len()],
             held: vec![false; positions.len()],
@@ -165,6 +221,7 @@ impl Simulation {
             pattern,
             pairs,
             primitives,
+            trees,
         })
     }
 
@@ -363,7 +420,7 @@ impl Simulation {
     #[must_use]
     pub fn energy(&self) -> Energy {
         let x: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
-        let mut energy = self.energy_at(&x, &x, 0.0, &self.candidates(&x, &x));
+        let mut energy = self.potential(&x, &x, 0.0, &self.candidates(&x, &x)).energy;
         energy.kinetic = self.kinetic();
         energy
     }
@@ -378,6 +435,7 @@ impl Simulation {
     pub fn step(&mut self) -> Result<Report, StepError> {
         let dt = self.settings.time_step;
         let start: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
+        self.trees = Trees::new(&self.primitives, &start);
         let predicted: Vec<Point> = if dt.is_finite() {
             start
                 .iter()
@@ -390,33 +448,36 @@ impl Simulation {
         };
         let inertia = if dt.is_finite() { 1.0 / (dt * dt) } else { 0.0 };
         let mut x = start.clone();
-        let mut energy = self.energy_at(&x, &predicted, inertia, &self.candidates(&x, &x));
-        if !total(&energy).is_finite() {
+        let mut potential = self.potential(&x, &predicted, inertia, &self.candidates(&x, &x));
+        if !potential.total().is_finite() {
             return Err(StepError::Overlapping);
         }
         // The retraction's system is factorized once a time step needs it.
         let rigidity = OnceCell::new();
-        // Contact joins vertices no element joins, so the system's pattern grows to hold them.
-        let mut grown: Option<Pattern> = None;
+        // Contact joins vertices no element joins, so the system's pattern grows to hold them,
+        // with the vertex pairs it grew by.
+        let mut grown: Option<(Pattern, Vec<(u32, u32)>)> = None;
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
+        let mut radius = self.settings.solver.trust_radius;
         while iterations < self.settings.solver.iteration_limit {
             iterations += 1;
             let near = self.candidates(&x, &x);
-            self.grow(&mut grown, &near);
-            let pattern = grown.as_ref().unwrap_or(&self.pattern);
+            let derivatives = self.derivatives(&x, &predicted, inertia, &near);
+            self.grow(&mut grown, &derivatives.pairs);
+            let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
             // definite; elsewhere each element's Hessian is projected to be.
             let mut assembly = Assembly::new(pattern, &self.held);
-            self.assemble(&x, &predicted, inertia, &mut assembly, false, &near);
+            derivatives.scatter(&mut assembly, false);
             let factor = if let Ok(factor) = assembly.factor() {
                 factor
             } else {
                 assembly = Assembly::new(pattern, &self.held);
-                self.assemble(&x, &predicted, inertia, &mut assembly, true, &near);
+                derivatives.scatter(&mut assembly, true);
                 assembly.factor().map_err(StepError::Singular)?
             };
             let negative: Vec<f64> = assembly.gradient.iter().map(|g| -g).collect();
-            let direction = factor.solve(&negative);
+            let mut direction = factor.solve(&negative);
             update = direction
                 .chunks_exact(3)
                 .map(|d| d[0].hypot(d[1]).hypot(d[2]))
@@ -424,6 +485,15 @@ impl Simulation {
             if update <= self.settings.solver.tolerance {
                 converged = true;
                 break;
+            }
+            // Where some motion costs nearly no energy, the update runs far past where its
+            // quadratic model holds, so it shrinks to the trust radius.
+            let clamped = update > radius;
+            if clamped {
+                let scale = radius / update;
+                for d in &mut direction {
+                    *d *= scale;
+                }
             }
             let slope: f64 = assembly
                 .gradient
@@ -437,31 +507,49 @@ impl Simulation {
                 predicted: &predicted,
                 inertia,
                 rigidity: &rigidity,
-                energy: total(&energy),
+                potential,
                 slope,
                 safe,
                 pairs: &swept,
             };
             match self.line_search(&x, &direction, &search) {
-                Some((next, next_energy)) => {
+                Some((next, next_potential, fraction)) => {
                     x = next;
-                    energy = next_energy;
+                    potential = next_potential;
+                    // An update the radius shrank, taken whole, says the model holds farther.
+                    if clamped && fraction >= 1.0 {
+                        radius *= 2.0;
+                    }
                 }
                 None => break,
             }
         }
-        Ok(self.finish(&start, &x, energy, converged, iterations, update))
+        Ok(self.finish(&start, &x, potential, converged, iterations, update))
     }
 
-    /// Grows the system's pattern, where contacts `near` join vertices it does not hold.
-    fn grow(&self, grown: &mut Option<Pattern>, near: &[Pair]) {
-        let pattern = grown.as_ref().unwrap_or(&self.pattern);
-        if !near.iter().all(|pair| joined(pattern, pair)) {
-            let contacts = near.iter().flat_map(vertex_pairs);
-            *grown = Some(Pattern::new(
+    /// Grows the system's pattern where active contacts join vertices it does not hold.
+    ///
+    /// The pattern only grows within a time step, so contacts that come and go do not rebuild
+    /// it again and again.
+    fn grow(&self, grown: &mut Option<(Pattern, Vec<(u32, u32)>)>, contacts: &[Element<4, 12>]) {
+        let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
+        let missing: Vec<(u32, u32)> = contacts
+            .iter()
+            .flat_map(|(stencil, _, _)| {
+                vertex_pairs(stencil.map(|v| v.expect("a pair names four vertices")))
+            })
+            .filter(|&(a, b)| !pattern.contains(a, b))
+            .collect();
+        if !missing.is_empty() {
+            let mut joined = grown.take().map_or_else(Vec::new, |(_, joined)| joined);
+            joined.extend(missing);
+            joined.sort_unstable();
+            joined.dedup();
+            let pattern = Pattern::new(
                 self.positions.len(),
-                self.pairs.iter().copied().chain(contacts),
-            ));
+                self.pairs.iter().chain(&joined).copied(),
+            );
+            *grown = Some((pattern, joined));
         }
     }
 
@@ -470,7 +558,7 @@ impl Simulation {
         &mut self,
         start: &[Point],
         x: &[Point],
-        mut energy: Energy,
+        potential: Potential,
         converged: bool,
         iterations: usize,
         update: f64,
@@ -488,7 +576,10 @@ impl Simulation {
         if dt.is_finite() {
             self.time += dt;
         }
-        energy.kinetic = self.kinetic();
+        let energy = Energy {
+            kinetic: self.kinetic(),
+            ..potential.energy
+        };
         let (contacts, least_gap) = self.contacts(x);
         Report {
             converged,
@@ -502,7 +593,8 @@ impl Simulation {
         }
     }
 
-    /// The first point along a Newton update that the line search accepts, with its energy.
+    /// The first point along a Newton update that the line search accepts, with its potential
+    /// and the fraction of the update it took.
     ///
     /// An accepted point keeps every pair its thickness apart, stays below the strain cap and
     /// lowers the energy enough. The search gives `None` when no fraction of the update does.
@@ -515,31 +607,30 @@ impl Simulation {
         x: &[Point],
         direction: &[f64],
         search: &Search<'a, '_>,
-    ) -> Option<(Vec<Point>, Energy)> {
-        let scale =
-            1e-12 * size(&self.energy_at(x, search.predicted, search.inertia, search.pairs));
-        let accepts = |energy: &Energy, fraction: f64| {
-            let change = total(energy) - search.energy;
+    ) -> Option<(Vec<Point>, Potential, f64)> {
+        let scale = 1e-12 * search.potential.size();
+        let accepts = |potential: &Potential, fraction: f64| {
+            let change = potential.total() - search.potential.total();
             change <= self.settings.solver.sufficient_decrease * fraction * search.slope
                 || change.abs() <= scale
         };
         let mut fraction = search.safe;
         while fraction >= self.settings.solver.shortest_update {
             let trial = moved(x, direction, fraction);
-            let trial_energy =
-                self.energy_at(&trial, search.predicted, search.inertia, search.pairs);
-            if accepts(&trial_energy, fraction) {
-                return Some((trial, trial_energy));
+            let trial_potential =
+                self.potential(&trial, search.predicted, search.inertia, search.pairs);
+            if accepts(&trial_potential, fraction) {
+                return Some((trial, trial_potential, fraction));
             }
             if let Ok(rigidity) = search.rigidity.get_or_init(|| self.rigidity()) {
                 let retracted = self.retract(&trial, rigidity);
                 let way: Vec<Point> = retracted.iter().zip(x).map(|(r, p)| r - p).collect();
                 let (safe, pairs) = self.safe_fraction(x, &way);
                 if safe >= 1.0 {
-                    let retracted_energy =
-                        self.energy_at(&retracted, search.predicted, search.inertia, &pairs);
-                    if accepts(&retracted_energy, fraction) {
-                        return Some((retracted, retracted_energy));
+                    let retracted_potential =
+                        self.potential(&retracted, search.predicted, search.inertia, &pairs);
+                    if accepts(&retracted_potential, fraction) {
+                        return Some((retracted, retracted_potential, fraction));
                     }
                 }
             }
@@ -608,11 +699,20 @@ impl Simulation {
         moved(x, &rigidity.solve(&pull), 1.0)
     }
 
-    /// The energy's terms at positions `x`, with the inertia term in `kinetic`; the strain
-    /// barrier is infinite past the strain cap.
-    fn energy_at(&self, x: &[Point], predicted: &[Point], inertia: f64, pairs: &[Pair]) -> Energy {
+    /// The incremental potential at positions `x`, term by term, with contact between `pairs`.
+    ///
+    /// The strain barrier is infinite past the strain cap, and contact is infinite where paper
+    /// reaches its thickness.
+    fn potential(
+        &self,
+        x: &[Point],
+        predicted: &[Point],
+        inertia: f64,
+        pairs: &[Pair],
+    ) -> Potential {
         let gravity = Point::from(self.settings.gravity);
         let mut energy = Energy::default();
+        let mut inertia_term = 0.0;
         let contact = self.settings.contact;
         let barriers: Vec<f64> = pairs
             .par_iter()
@@ -640,7 +740,7 @@ impl Simulation {
                 let mass = constants.mass_per_area * area;
                 energy.gravity -= mass * gravity.dot(&x[v]);
                 if !self.held[offset + v] {
-                    energy.kinetic += 0.5 * mass * inertia * (x[v] - predicted[v]).norm_squared();
+                    inertia_term += 0.5 * mass * inertia * (x[v] - predicted[v]).norm_squared();
                 }
             }
             let mesh = sheet.mesh();
@@ -690,52 +790,41 @@ impl Simulation {
                 }
             }
         }
-        energy
+        Potential {
+            energy,
+            inertia: inertia_term,
+        }
     }
 
-    /// Fills the gradient and Hessian of contact's barriers at positions `x`.
-    fn assemble_contact(
+    /// Every element's gradient and Hessian at positions `x`, with contact between `pairs`.
+    fn derivatives(
         &self,
         x: &[Point],
-        assembly: &mut Assembly,
-        projected: bool,
+        predicted: &[Point],
+        inertia: f64,
         pairs: &[Pair],
-    ) {
+    ) -> Derivatives {
         let contact = self.settings.contact;
-        let barriers: Vec<_> = pairs
-            .par_iter()
-            .filter_map(|pair| {
-                let (gradient, hessian) =
-                    contact.pair_derivatives(pair, x, self.pair_thickness(pair))?;
-                Some((pair.stencil(), gradient, projected_if(&hessian, projected)))
-            })
-            .collect();
-        for (stencil, gradient, hessian) in &barriers {
-            assembly.add(stencil, gradient, hessian);
-        }
+        let mut derivatives = Derivatives {
+            pairs: pairs
+                .par_iter()
+                .filter_map(|pair| {
+                    let (gradient, hessian) =
+                        contact.pair_derivatives(pair, x, self.pair_thickness(pair))?;
+                    Some((pair.stencil(), gradient, hessian))
+                })
+                .collect(),
+            ..Derivatives::default()
+        };
         for (v, p) in x.iter().enumerate() {
             let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
             let barrier = self.clearance(v, p).and_then(|c| contact.table(c));
             if let Some([_, slope, curvature]) = barrier {
                 if slope != 0.0 || curvature != 0.0 {
-                    assembly.add_vertex_z(vertex, slope, curvature);
+                    derivatives.table.push((vertex, slope, curvature));
                 }
             }
         }
-    }
-
-    /// Fills the gradient and Hessian of the incremental potential at positions `x`.
-    /// With `projected`, each element's Hessian is projected to be positive semi-definite.
-    fn assemble(
-        &self,
-        x: &[Point],
-        predicted: &[Point],
-        inertia: f64,
-        assembly: &mut Assembly,
-        projected: bool,
-        pairs: &[Pair],
-    ) {
-        self.assemble_contact(x, assembly, projected, pairs);
         let gravity = Point::from(self.settings.gravity);
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset = self.offsets[s];
@@ -749,65 +838,84 @@ impl Simulation {
                 let mass = constants.mass_per_area * area;
                 let force = (x[v] - predicted[v]) * (mass * inertia) - gravity * mass;
                 let vertex = u32::try_from(v).expect("a mesh counts its vertices in 32 bits");
-                assembly.add_vertex(global(vertex), force.into(), mass * inertia);
+                derivatives
+                    .vertices
+                    .push((global(vertex), force.into(), mass * inertia));
             }
-            let stretching: Vec<_> = mesh
-                .triangles()
-                .par_iter()
-                .zip(sheet.rest_triangles())
-                .map(|(t, rest)| {
-                    let points = t.map(|v| x[v as usize]);
-                    let local = membrane::local(rest, &points, &constants.stretching)
-                        .expect("the simulation keeps every state below the strain cap");
-                    (local.gradient, projected_if(&local.hessian, projected))
+            derivatives.triangles.par_extend(
+                mesh.triangles()
+                    .par_iter()
+                    .zip(sheet.rest_triangles())
+                    .map(|(t, rest)| {
+                        let points = t.map(|v| x[v as usize]);
+                        let local = membrane::local(rest, &points, &constants.stretching)
+                            .expect("the simulation keeps every state below the strain cap");
+                        (t.map(|v| Some(global(v))), local.gradient, local.hessian)
+                    }),
+            );
+            bend(sheet, x, &constants.bending, &global, &mut derivatives);
+        }
+        derivatives
+    }
+}
+
+/// Adds a sheet's bending derivatives at its positions `x`, its vertices numbered by `global`.
+fn bend(
+    sheet: &Sheet,
+    x: &[Point],
+    stiffness: &nalgebra::Matrix3<f64>,
+    global: &(impl Fn(u32) -> u32 + Sync),
+    derivatives: &mut Derivatives,
+) {
+    let mesh = sheet.mesh();
+    let angles: Vec<(Angle, Angle)> = mesh
+        .dihedrals()
+        .par_iter()
+        .map(|d| {
+            let angle = bending::angle(&stencil(d).map(|v| x[v as usize]));
+            let sine = bending::half_sine(&angle);
+            (angle, sine)
+        })
+        .collect();
+    let plates: Vec<_> = (0..mesh.triangles().len())
+        .into_par_iter()
+        .map(|t| {
+            let edges = sheet.stencils()[t].map(|edge| {
+                let (d, slots) = edge?;
+                let d = d as usize;
+                let (_, sine) = &angles[d];
+                sheet.creases()[d].is_none().then_some(BendingEdge {
+                    sine: sine.value,
+                    gradient: &sine.gradient,
+                    slots,
                 })
-                .collect();
-            for (t, (gradient, hessian)) in mesh.triangles().iter().zip(&stretching) {
-                assembly.add(&t.map(|v| Some(global(v))), gradient, hessian);
+            });
+            let matrix = sheet.plates()[t].energy_matrix(stiffness);
+            bending::triangle(&matrix, edges, sheet.rest_sines(t))
+        })
+        .collect();
+    // Each plate's moments on its edges' sines act through the curvature of those sines.
+    let mut moments = vec![0.0; mesh.dihedrals().len()];
+    for (t, (local, moment)) in plates.into_iter().enumerate() {
+        for (i, edge) in sheet.stencils()[t].iter().enumerate() {
+            if let Some((d, _)) = edge {
+                moments[*d as usize] += moment[i];
             }
-            let angles: Vec<(Angle, Angle)> = mesh
-                .dihedrals()
-                .par_iter()
-                .map(|d| {
-                    let angle = bending::angle(&stencil(d).map(|v| x[v as usize]));
-                    let sine = bending::half_sine(&angle);
-                    (angle, sine)
-                })
-                .collect();
-            let plates: Vec<_> = (0..mesh.triangles().len())
-                .into_par_iter()
-                .map(|t| {
-                    let edges = sheet.stencils()[t].map(|edge| {
-                        let (d, slots) = edge?;
-                        let d = d as usize;
-                        let (_, sine) = &angles[d];
-                        sheet.creases()[d].is_none().then_some(BendingEdge {
-                            sine: sine.value,
-                            gradient: &sine.gradient,
-                            slots,
-                        })
-                    });
-                    let matrix = sheet.plates()[t].energy_matrix(&constants.bending);
-                    bending::triangle(&matrix, edges, sheet.rest_sines(t))
-                })
-                .collect();
-            let mut moments = vec![0.0; mesh.dihedrals().len()];
-            for (t, (local, moment)) in plates.iter().enumerate() {
-                let stencil = sheet.bending_stencil(t).map(|v| v.map(&global));
-                assembly.add(&stencil, &local.gradient, &local.hessian);
-                for (i, edge) in sheet.stencils()[t].iter().enumerate() {
-                    if let Some((d, _)) = edge {
-                        moments[*d as usize] += moment[i];
-                    }
-                }
-            }
-            let dihedrals: Vec<_> = mesh
-                .dihedrals()
+        }
+        let stencil = sheet.bending_stencil(t).map(|v| v.map(global));
+        derivatives
+            .plates
+            .push((stencil, local.gradient, local.hessian));
+    }
+    derivatives
+        .dihedrals
+        .par_extend(
+            mesh.dihedrals()
                 .par_iter()
                 .enumerate()
-                .map(|(d, _)| {
+                .map(|(d, dihedral)| {
                     let (angle, sine) = &angles[d];
-                    let mut matrix = sine.hessian * moments[d];
+                    let mut hessian = sine.hessian * moments[d];
                     let mut gradient = SMatrix::<f64, 12, 1>::zeros();
                     if let Some(crease) = &sheet.creases()[d] {
                         let [_, slope, curvature] = bending::crease(
@@ -817,18 +925,16 @@ impl Simulation {
                             sheet.rest_angles()[d],
                         );
                         gradient += angle.gradient * slope;
-                        matrix += angle.gradient * angle.gradient.transpose() * curvature
+                        hessian += angle.gradient * angle.gradient.transpose() * curvature
                             + angle.hessian * slope;
                     }
-                    (gradient, projected_if(&matrix, projected))
-                })
-                .collect();
-            for (d, (gradient, hessian)) in mesh.dihedrals().iter().zip(&dihedrals) {
-                assembly.add(&stencil(d).map(|v| Some(global(v))), gradient, hessian);
-            }
-        }
-    }
+                    let stencil = stencil(dihedral).map(|v| Some(global(v)));
+                    (stencil, gradient, hessian)
+                }),
+        );
+}
 
+impl Simulation {
     /// A vertex's clearance at position `p`: its height over the table less its half
     /// thickness, or `None` without a table.
     fn clearance(&self, vertex: usize, p: &Point) -> Option<f64> {
@@ -865,7 +971,7 @@ impl Simulation {
 
     /// The pairs that may touch while the vertices move from `start` to `end`.
     fn candidates(&self, start: &[Point], end: &[Point]) -> Vec<Pair> {
-        contact::candidates(&self.primitives, start, end, self.reach())
+        contact::candidates(&self.primitives, &self.trees, start, end, self.reach())
     }
 
     /// The largest safe fraction of a motion from `x`, at most 1, and the pairs that may touch.
@@ -946,12 +1052,73 @@ impl Simulation {
     }
 }
 
+/// One element's stencil of vertices, its gradient and its Hessian.
+type Element<const N: usize, const D: usize> =
+    ([Option<u32>; N], SMatrix<f64, D, 1>, SMatrix<f64, D, D>);
+
+/// Every element's gradient and Hessian at some positions, evaluated once and scattered into
+/// a system as many times as it takes.
+#[derive(Default)]
+struct Derivatives {
+    /// Each vertex's force from inertia and gravity, and the diagonal of its mass term.
+    vertices: Vec<(u32, [f64; 3], f64)>,
+    /// Each vertex the table pushes: its barrier's slope and curvature along z.
+    table: Vec<(u32, f64, f64)>,
+    /// The contact barrier of each pair within reach.
+    pairs: Vec<Element<4, 12>>,
+    /// Each triangle's stretching.
+    triangles: Vec<Element<3, 9>>,
+    /// Each triangle's plate bending in the half-angle sines, positive semi-definite already.
+    plates: Vec<Element<6, 18>>,
+    /// Each dihedral's bending moment on its angle's curvature, and its sharp crease.
+    dihedrals: Vec<Element<4, 12>>,
+}
+
+impl Derivatives {
+    /// Fills an assembly. With `projected`, each element's Hessian is projected to be positive
+    /// semi-definite first.
+    fn scatter(&self, assembly: &mut Assembly, projected: bool) {
+        for &(vertex, force, diagonal) in &self.vertices {
+            assembly.add_vertex(vertex, force, diagonal);
+        }
+        for &(vertex, slope, curvature) in &self.table {
+            assembly.add_vertex_z(vertex, slope, curvature);
+        }
+        scatter_elements(&self.pairs, assembly, projected);
+        scatter_elements(&self.triangles, assembly, projected);
+        scatter_elements(&self.plates, assembly, false);
+        scatter_elements(&self.dihedrals, assembly, projected);
+    }
+}
+
+/// Fills an assembly with elements, their Hessians projected in parallel when `projected`.
+fn scatter_elements<const N: usize, const D: usize>(
+    elements: &[Element<N, D>],
+    assembly: &mut Assembly,
+    projected: bool,
+) where
+    SMatrix<f64, D, D>: Project,
+{
+    if projected {
+        let hessians: Vec<SMatrix<f64, D, D>> =
+            elements.par_iter().map(|(_, _, h)| h.project()).collect();
+        for ((stencil, gradient, _), hessian) in elements.iter().zip(&hessians) {
+            assembly.add(stencil, gradient, hessian);
+        }
+    } else {
+        for (stencil, gradient, hessian) in elements {
+            assembly.add(stencil, gradient, hessian);
+        }
+    }
+}
+
 /// What a line search needs from its Newton iteration.
 struct Search<'a, 'b> {
     predicted: &'b [Point],
     inertia: f64,
     rigidity: &'a OnceCell<Result<Factor<'a>, SingularError>>,
-    energy: f64,
+    /// The incremental potential where the update starts.
+    potential: Potential,
     slope: f64,
     /// The longest fraction of the update that collision detection allows.
     safe: f64,
@@ -959,23 +1126,9 @@ struct Search<'a, 'b> {
     pairs: &'b [Pair],
 }
 
-/// Whether a pattern holds every pair of a contact's vertices.
-fn joined(pattern: &Pattern, pair: &Pair) -> bool {
-    vertex_pairs(pair).all(|(a, b)| pattern.contains(a, b))
-}
-
-/// Every pair of a contact's vertices.
-fn vertex_pairs(pair: &Pair) -> impl Iterator<Item = (u32, u32)> + '_ {
-    let v = pair.vertices;
-    (0..4).flat_map(move |i| (0..i).map(move |j| (v[i], v[j])))
-}
-
-/// A Hessian projected to be positive semi-definite when `projected` holds.
-fn projected_if<const D: usize>(
-    matrix: &SMatrix<f64, D, D>,
-    projected: bool,
-) -> SMatrix<f64, D, D> {
-    if projected { project(matrix) } else { *matrix }
+/// Every pair of a contact's four vertices, the greater first.
+fn vertex_pairs(v: [u32; 4]) -> impl Iterator<Item = (u32, u32)> {
+    (0..4).flat_map(move |i| (0..i).map(move |j| (v[i].max(v[j]), v[i].min(v[j]))))
 }
 
 /// Points moved by a fraction of a displacement given in flat coordinates.
@@ -984,26 +1137,6 @@ fn moved(x: &[Point], displacement: &[f64], fraction: f64) -> Vec<Point> {
         .enumerate()
         .map(|(i, p)| p + Vector3::from_column_slice(&displacement[3 * i..3 * i + 3]) * fraction)
         .collect()
-}
-
-/// The size of the energy's terms, for telling a change from rounding.
-fn size(energy: &Energy) -> f64 {
-    energy.stretching.abs()
-        + energy.strain_barrier.abs()
-        + energy.bending.abs()
-        + energy.creases.abs()
-        + energy.gravity.abs()
-        + energy.kinetic.abs()
-}
-
-/// The sum of the energy's terms.
-fn total(energy: &Energy) -> f64 {
-    energy.stretching
-        + energy.strain_barrier
-        + energy.bending
-        + energy.creases
-        + energy.gravity
-        + energy.kinetic
 }
 
 /// The stencil `[u, v, a, b]` of a dihedral.
@@ -1069,4 +1202,149 @@ fn pairs(sheets: &[Sheet], offsets: &[usize]) -> Vec<(u32, u32)> {
         }
     }
     pairs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::material::Material;
+    use crate::mesh::Mesh;
+    use crate::settings::Table;
+    use crate::sheet::Crease;
+
+    /// A small deterministic wobble, to keep every quantity away from symmetric values.
+    fn wobble(v: usize, amplitude: f64) -> Point {
+        #[expect(clippy::cast_precision_loss, reason = "the index only seeds a wobble")]
+        let k = v as f64;
+        Point::new((1.3 * k).sin(), (2.1 * k).cos(), (0.7 * k + 0.4).sin()) * amplitude
+    }
+
+    /// Checks the assembled gradient and Hessian at `x` against central differences of the
+    /// incremental potential and of the gradient, to a relative tolerance.
+    fn check(simulation: &Simulation, x: &[Point], predicted: &[Point], step: f64) {
+        let inertia = 3600.0;
+        let pairs = simulation.candidates(x, x);
+        let pattern = Pattern::new(
+            x.len(),
+            simulation
+                .pairs
+                .iter()
+                .copied()
+                .chain(pairs.iter().flat_map(|p| vertex_pairs(p.vertices))),
+        );
+        let assemble = |y: &[Point]| {
+            let mut assembly = Assembly::new(&pattern, &simulation.held);
+            simulation
+                .derivatives(y, predicted, inertia, &pairs)
+                .scatter(&mut assembly, false);
+            assembly
+        };
+        let gradient = |y: &[Point]| assemble(y).gradient;
+        let at_x = assemble(x);
+        let hessian = at_x.dense();
+        let potential = |y: &[Point]| simulation.potential(y, predicted, inertia, &pairs).total();
+        // Rounding limits the differences to about the scale of a column. Each entry is held to
+        // a tolerance relative to itself and to its column.
+        let gradient_scale = at_x.gradient.iter().fold(0.0, |m: f64, g| m.max(g.abs()));
+        for i in 0..3 * x.len() {
+            let mut ahead = x.to_vec();
+            ahead[i / 3][i % 3] += step;
+            let mut behind = x.to_vec();
+            behind[i / 3][i % 3] -= step;
+            let numeric = (potential(&ahead) - potential(&behind)) / (2.0 * step);
+            let exact = at_x.gradient[i];
+            assert!(
+                (numeric - exact).abs() <= 1e-6 * (exact.abs() + gradient_scale),
+                "coordinate {i}: the gradient is {exact}, its differences {numeric}"
+            );
+            let (g_ahead, g_behind) = (gradient(&ahead), gradient(&behind));
+            let column = hessian.column(i).amax();
+            for j in 0..3 * x.len() {
+                let numeric = (g_ahead[j] - g_behind[j]) / (2.0 * step);
+                let exact = hessian[(j, i)];
+                assert!(
+                    (numeric - exact).abs() <= 1e-5 * exact.abs() + 1e-6 * column,
+                    "entry ({j}, {i}): the Hessian is {exact}, its differences {numeric}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_assembly_differentiates_the_elastic_potential() {
+        // A creased sheet folded off its rest angle, curved off its rest curvature, and
+        // stretched along x into its strain barrier.
+        let mut sheet =
+            Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+        let at = |i: u32, j: u32| j * 4 + i;
+        for j in 0..3 {
+            let edge = [at(1, j), at(1, j + 1)];
+            sheet
+                .set_crease(edge, Some(Crease { stiffness: 0.01 }))
+                .unwrap();
+            sheet.set_rest_angle(edge, 0.9).unwrap();
+            sheet
+                .set_rest_angle([at(2, j), at(2, j + 1)], -0.2)
+                .unwrap();
+        }
+        let simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        let fold = nalgebra::Rotation3::from_axis_angle(&Vector3::y_axis(), -0.5);
+        let x: Vec<Point> = simulation
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(v, p)| {
+                let flat = Point::new(p[0] * 1.0042, p[1], 0.0);
+                let creased = Point::new(0.01 / 3.0 * 1.0042, 0.0, 0.0);
+                let turned = if p[0] > 0.004 {
+                    creased + fold * (flat - creased)
+                } else {
+                    flat
+                };
+                turned + wobble(v, 2e-7)
+            })
+            .collect();
+        let energy = simulation.potential(&x, &x, 0.0, &[]).energy;
+        assert!(energy.strain_barrier > 0.0 && energy.creases > 0.0 && energy.bending > 0.0);
+        let predicted: Vec<Point> = x.iter().map(|p| p + Point::new(0.0, 0.0, 1e-3)).collect();
+        check(&simulation, &x, &predicted, 1e-9);
+    }
+
+    #[test]
+    fn the_assembly_differentiates_contact() {
+        // A small sheet lies turned over a larger one, which lies on the table, each within
+        // the reach of contact.
+        let (h, gap) = (70e-6, 2e-6);
+        let lower = Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+        let upper = Sheet::new(Mesh::grid(2, 2, 0.006, 0.006).unwrap(), Material::kami()).unwrap();
+        let settings = Settings {
+            table: Some(Table { height: 0.0 }),
+            ..Settings::default()
+        };
+        let simulation = Simulation::new(vec![lower, upper], settings).unwrap();
+        let turn = nalgebra::Rotation3::from_axis_angle(&Vector3::z_axis(), 0.3);
+        let x: Vec<Point> = simulation
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(v, p)| {
+                let flat = Point::new(p[0], p[1], 0.0);
+                let placed = if v < 16 {
+                    flat + Point::new(0.0, 0.0, 0.5 * h + 0.6 * gap)
+                } else {
+                    turn * flat + Point::new(0.003, 0.001, 1.5 * h + 1.2 * gap)
+                };
+                placed + wobble(v, 0.1 * gap)
+            })
+            .collect();
+        let pairs = simulation.candidates(&x, &x);
+        let energy = simulation.potential(&x, &x, 0.0, &pairs).energy;
+        assert!(
+            energy.contact > 0.0 && pairs.len() > 10,
+            "{} pairs",
+            pairs.len()
+        );
+        let predicted: Vec<Point> = x.iter().map(|p| p - Point::new(0.0, 0.0, 1e-3)).collect();
+        check(&simulation, &x, &predicted, 1e-9);
+    }
 }

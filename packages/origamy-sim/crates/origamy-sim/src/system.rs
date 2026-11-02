@@ -26,6 +26,8 @@ pub struct SingularError;
 pub(crate) struct Pattern {
     /// Every block's vertex pair, the greater vertex first, in increasing order.
     blocks: Vec<(u32, u32)>,
+    /// Where each vertex's row of blocks starts in `blocks`, with the end last.
+    rows: Vec<usize>,
     symbolic: SymbolicSparseColMat<usize>,
     argsort: Argsort<usize>,
     cholesky: Arc<SymbolicCholesky<usize>>,
@@ -43,6 +45,13 @@ impl Pattern {
         blocks.extend((0..count).map(|v| (v, v)));
         blocks.sort_unstable();
         blocks.dedup();
+        let mut rows = vec![0; vertices + 1];
+        for &(a, _) in &blocks {
+            rows[a as usize + 1] += 1;
+        }
+        for v in 0..vertices {
+            rows[v + 1] += rows[v];
+        }
         let indices: Vec<_> = blocks
             .iter()
             .flat_map(|&(a, b)| {
@@ -67,6 +76,7 @@ impl Pattern {
         );
         Self {
             blocks,
+            rows,
             symbolic,
             argsort,
             cholesky,
@@ -74,18 +84,27 @@ impl Pattern {
         }
     }
 
+    /// The index of the block of a pair of vertices, if the pattern holds it.
+    fn find(&self, a: u32, b: u32) -> Option<usize> {
+        let (row, column) = (a.max(b), a.min(b));
+        let start = self.rows[row as usize];
+        let end = self.rows[row as usize + 1];
+        self.blocks[start..end]
+            .binary_search(&(row, column))
+            .ok()
+            .map(|i| start + i)
+    }
+
     /// Whether the pattern holds the block of a pair of vertices.
     pub fn contains(&self, a: u32, b: u32) -> bool {
-        self.blocks.binary_search(&(a.max(b), a.min(b))).is_ok()
+        self.find(a, b).is_some()
     }
 
     /// Where the block of rows `a` and columns `b` lies in the values, and whether it lies
     /// transposed there.
     fn block(&self, a: u32, b: u32) -> (usize, bool) {
-        let key = (a.max(b), a.min(b));
         let index = self
-            .blocks
-            .binary_search(&key)
+            .find(a, b)
             .expect("every element's pairs belong to the pattern");
         (9 * index, a < b)
     }
@@ -210,6 +229,26 @@ impl<'a> Assembly<'a> {
             pattern,
             values: factor,
         })
+    }
+}
+
+#[cfg(test)]
+impl Assembly<'_> {
+    /// The Hessian as a dense matrix.
+    pub fn dense(&self) -> nalgebra::DMatrix<f64> {
+        let size = self.pattern.dimension;
+        let mut dense = nalgebra::DMatrix::zeros(size, size);
+        for (index, &(a, b)) in self.pattern.blocks.iter().enumerate() {
+            let (a, b) = (3 * a as usize, 3 * b as usize);
+            for r in 0..3 {
+                for c in 0..3 {
+                    let value = self.values[9 * index + 3 * r + c];
+                    dense[(a + r, b + c)] = value;
+                    dense[(b + c, a + r)] = value;
+                }
+            }
+        }
+        dense
     }
 }
 

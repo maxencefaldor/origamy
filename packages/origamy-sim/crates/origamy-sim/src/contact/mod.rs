@@ -7,12 +7,14 @@
 //! are the sheet itself rather than contact, and take none. Continuous collision detection
 //! cuts every Newton update short before any pair would reach its thickness.
 
+mod bvh;
 pub(crate) mod ccd;
 pub(crate) mod distance;
 
-use std::collections::HashMap;
-
 use nalgebra::{SMatrix, Vector3};
+
+use bvh::{Bounds, Bvh};
+use rayon::prelude::*;
 
 use crate::energy::{Barrier, Point};
 use crate::settings::Contact;
@@ -27,6 +29,33 @@ pub(crate) struct Primitives {
     pub sheet: Vec<u32>,
     /// Each vertex's place in its flat sheet, at height zero.
     pub rest: Vec<Point>,
+}
+
+/// Hierarchies over a scene's triangles and edges, built for one arrangement of the vertices
+/// and fitted to others.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Trees {
+    triangles: Bvh,
+    edges: Bvh,
+}
+
+impl Trees {
+    /// The hierarchies for the primitives with vertices at positions `x`.
+    pub fn new(primitives: &Primitives, x: &[Point]) -> Self {
+        let bound = |vertices: &[u32]| {
+            vertices
+                .iter()
+                .map(|&v| (x[v as usize], x[v as usize]))
+                .reduce(|(low, high), (l, h)| (low.inf(&l), high.sup(&h)))
+                .expect("a primitive has vertices")
+        };
+        let triangles: Vec<Bounds> = primitives.triangles.iter().map(|t| bound(t)).collect();
+        let edges: Vec<Bounds> = primitives.edges.iter().map(|e| bound(e)).collect();
+        Self {
+            triangles: Bvh::new(&triangles),
+            edges: Bvh::new(&edges),
+        }
+    }
 }
 
 /// A pair of primitives that may touch: a point and a triangle's corners, or two edges' ends.
@@ -104,60 +133,76 @@ impl Contact {
 /// that share a vertex, or lie within `margin` of each other in one flat sheet, are left out.
 pub(crate) fn candidates(
     primitives: &Primitives,
+    trees: &Trees,
     start: &[Point],
     end: &[Point],
     margin: f64,
 ) -> Vec<Pair> {
-    let boxes: Vec<(Point, Point)> = start
+    let boxes: Vec<Bounds> = start
         .iter()
         .zip(end)
         .map(|(a, b)| (a.inf(b), a.sup(b)))
         .collect();
     let bound = |vertices: &[u32]| {
-        let mut low = boxes[vertices[0] as usize].0;
-        let mut high = boxes[vertices[0] as usize].1;
-        for &v in &vertices[1..] {
-            low = low.inf(&boxes[v as usize].0);
-            high = high.sup(&boxes[v as usize].1);
-        }
+        let (low, high) = vertices
+            .iter()
+            .map(|&v| boxes[v as usize])
+            .reduce(|(low, high), (l, h)| (low.inf(&l), high.sup(&h)))
+            .expect("a primitive has vertices");
         let grow = Vector3::repeat(margin);
         (low - grow, high + grow)
     };
-    let cell = cell_size(primitives, margin);
-    let mut pairs = Vec::new();
     // Points against triangles.
-    let triangle_boxes: Vec<_> = primitives.triangles.iter().map(|t| bound(t)).collect();
-    let grid = Grid::new(cell, &triangle_boxes);
-    for (v, point) in boxes.iter().enumerate() {
-        let v = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-        for t in grid.near(point) {
-            let triangle = primitives.triangles[t];
-            if !triangle.contains(&v) && overlap(point, &triangle_boxes[t]) {
-                pairs.push(Pair {
+    let triangle_boxes: Vec<Bounds> = primitives.triangles.iter().map(|t| bound(t)).collect();
+    let triangles = trees.triangles.fit(&triangle_boxes);
+    let point_pairs: Vec<Vec<Pair>> = boxes
+        .par_iter()
+        .enumerate()
+        .map(|(v, point)| {
+            let v = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
+            triangles
+                .overlapping(point)
+                .into_iter()
+                .map(|t| primitives.triangles[t])
+                .filter(|triangle| !triangle.contains(&v))
+                .map(|[a, b, c]| Pair {
                     kind: Kind::PointTriangle,
-                    vertices: [v, triangle[0], triangle[1], triangle[2]],
-                });
-            }
-        }
-    }
-    // Edges against edges, each pair once.
-    let edge_boxes: Vec<_> = primitives.edges.iter().map(|e| bound(e)).collect();
-    let grid = Grid::new(cell, &edge_boxes);
-    for (e, (low, high)) in edge_boxes.iter().enumerate() {
-        let shrunk = (
-            low + Vector3::repeat(margin),
-            high - Vector3::repeat(margin),
-        );
-        for f in grid.near(&shrunk) {
-            let (a, b) = (primitives.edges[e], primitives.edges[f]);
-            if f > e && !a.iter().any(|v| b.contains(v)) && overlap(&shrunk, &edge_boxes[f]) {
-                pairs.push(Pair {
+                    vertices: [v, a, b, c],
+                })
+                .collect()
+        })
+        .collect();
+    // Edges against edges, each pair once: an edge's own box meets the others' grown boxes.
+    let edge_boxes: Vec<Bounds> = primitives.edges.iter().map(|e| bound(e)).collect();
+    let edges = trees.edges.fit(&edge_boxes);
+    let edge_pairs: Vec<Vec<Pair>> = primitives
+        .edges
+        .par_iter()
+        .enumerate()
+        .map(|(e, a)| {
+            let own = bound(a);
+            let own = (
+                own.0 + Vector3::repeat(margin),
+                own.1 - Vector3::repeat(margin),
+            );
+            edges
+                .overlapping(&own)
+                .into_iter()
+                .filter(|&f| f > e)
+                .map(|f| primitives.edges[f])
+                .filter(|b| !a.iter().any(|v| b.contains(v)))
+                .map(|b| Pair {
                     kind: Kind::EdgeEdge,
                     vertices: [a[0], a[1], b[0], b[1]],
-                });
-            }
-        }
-    }
+                })
+                .collect()
+        })
+        .collect();
+    let mut pairs: Vec<Pair> = point_pairs
+        .into_iter()
+        .chain(edge_pairs)
+        .flatten()
+        .collect();
     pairs.sort_unstable();
     pairs.dedup();
     pairs.retain(|pair| !resting(primitives, pair, margin));
@@ -172,80 +217,6 @@ fn resting(primitives: &Primitives, pair: &Pair, margin: f64) -> bool {
         .iter()
         .all(|&v| primitives.sheet[v as usize] == sheet)
         && distance::squared(pair.kind, &pair.at(&primitives.rest)) < margin * margin
-}
-
-/// Whether two boxes overlap.
-fn overlap((low, high): &(Point, Point), (other_low, other_high): &(Point, Point)) -> bool {
-    (0..3).all(|i| low[i] <= other_high[i] && other_low[i] <= high[i])
-}
-
-/// A cell size for the broad phase: the mean rest edge length, and no less than twice the margin.
-fn cell_size(primitives: &Primitives, margin: f64) -> f64 {
-    let total: f64 = primitives
-        .edges
-        .iter()
-        .map(|[a, b]| (primitives.rest[*a as usize] - primitives.rest[*b as usize]).norm())
-        .sum();
-    #[expect(clippy::cast_precision_loss, reason = "a mean needs no exact count")]
-    let mean = total / primitives.edges.len().max(1) as f64;
-    mean.max(2.0 * margin).max(f64::MIN_POSITIVE)
-}
-
-/// A uniform grid of boxes, for finding the boxes near another.
-struct Grid {
-    cell: f64,
-    cells: HashMap<[i64; 3], Vec<usize>>,
-}
-
-impl Grid {
-    fn new(cell: f64, boxes: &[(Point, Point)]) -> Self {
-        let mut grid = Self {
-            cell,
-            cells: HashMap::new(),
-        };
-        for (i, (low, high)) in boxes.iter().enumerate() {
-            for key in grid.keys(low, high) {
-                grid.cells.entry(key).or_default().push(i);
-            }
-        }
-        grid
-    }
-
-    /// The cells a box covers.
-    fn keys(&self, low: &Point, high: &Point) -> Vec<[i64; 3]> {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "cells index a bounded scene"
-        )]
-        let index = |value: f64| (value / self.cell).floor() as i64;
-        let (a, b) = (
-            [0, 1, 2].map(|i| index(low[i])),
-            [0, 1, 2].map(|i| index(high[i])),
-        );
-        let mut keys = Vec::new();
-        for i in a[0]..=b[0] {
-            for j in a[1]..=b[1] {
-                for k in a[2]..=b[2] {
-                    keys.push([i, j, k]);
-                }
-            }
-        }
-        keys
-    }
-
-    /// The boxes sharing a cell with a box, each once, in increasing order.
-    fn near(&self, (low, high): &(Point, Point)) -> Vec<usize> {
-        let mut found: Vec<usize> = self
-            .keys(low, high)
-            .iter()
-            .filter_map(|key| self.cells.get(key))
-            .flatten()
-            .copied()
-            .collect();
-        found.sort_unstable();
-        found.dedup();
-        found
-    }
 }
 
 #[cfg(test)]
@@ -292,7 +263,8 @@ mod tests {
     #[test]
     fn stacked_sheets_are_candidates_and_a_sheet_is_not_its_own() {
         let (primitives, x) = stack(0.05);
-        let pairs = candidates(&primitives, &x, &x, 0.1);
+        let trees = Trees::new(&primitives, &x);
+        let pairs = candidates(&primitives, &trees, &x, &x, 0.1);
         // No pair of one sheet lies within the margin in the flat sheet.
         assert!(pairs.iter().all(|p| !resting(&primitives, p, 0.1)));
         // Each corner over each triangle below, and the reverse, is a candidate.
@@ -318,7 +290,7 @@ mod tests {
                 && across(p)
         };
         assert!(
-            !candidates(&primitives, &apart, &apart, 0.1)
+            !candidates(&primitives, &trees, &apart, &apart, 0.1)
                 .iter()
                 .any(both)
         );

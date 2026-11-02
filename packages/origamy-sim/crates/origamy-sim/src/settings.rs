@@ -25,6 +25,11 @@ pub struct Solver {
     pub tolerance: f64,
     /// The most Newton iterations a time step may take.
     pub iteration_limit: usize,
+    /// The longest move of any vertex a time step's first Newton update may take, in meters.
+    ///
+    /// A longer update shrinks to this trust radius. An update shrunk and then taken whole
+    /// doubles the radius for the next update of the time step.
+    pub trust_radius: f64,
     /// The fraction of the predicted decrease of energy a line search requires, between 0 and 1.
     pub sufficient_decrease: f64,
     /// The factor by which a line search shortens an update it refuses, between 0 and 1.
@@ -66,11 +71,13 @@ impl Default for Settings {
 }
 
 impl Default for Solver {
-    /// A tolerance of 10 nm within 200 iterations, and a line search that halves updates.
+    /// A tolerance of 10 nm within 200 iterations, and a line search that halves updates. The
+    /// trust radius is a quarter meter, about the size of a sheet of origami paper.
     fn default() -> Self {
         Self {
             tolerance: 1e-8,
             iteration_limit: 200,
+            trust_radius: 0.25,
             sufficient_decrease: 1e-4,
             backtracking: 0.5,
             shortest_update: 1e-12,
@@ -128,6 +135,7 @@ impl Solver {
             self.iteration_limit > 0,
             "at least 1",
         )?;
+        positive("trust radius", self.trust_radius)?;
         fraction("sufficient decrease", self.sufficient_decrease)?;
         fraction("backtracking", self.backtracking)?;
         fraction("shortest update", self.shortest_update)

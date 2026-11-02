@@ -12,23 +12,6 @@ SQUARE = Mesh([[0, 0], [SIDE, 0], [SIDE, SIDE], [0, SIDE]], [[0, 1, 2], [0, 2, 3
 STILL = Settings(gravity=(0, 0, 0), time_step=math.inf)
 
 
-def strip(columns: int, rows: int, length: float, width: float) -> Mesh:
-    """A rectangle of cells, each split along its rising diagonal."""
-    x, y = np.meshgrid(
-        np.linspace(0, length, columns + 1), np.linspace(0, width, rows + 1)
-    )
-    corner = np.arange(x.size).reshape(x.shape)
-    low_left, low_right = corner[:-1, :-1].ravel(), corner[:-1, 1:].ravel()
-    up_left, up_right = corner[1:, :-1].ravel(), corner[1:, 1:].ravel()
-    triangles = np.concatenate(
-        [
-            np.column_stack([low_left, low_right, up_right]),
-            np.column_stack([low_left, up_right, up_left]),
-        ]
-    )
-    return Mesh(np.column_stack([x.ravel(), y.ravel()]), triangles)
-
-
 def test_a_crease_folds_a_square_to_its_rest_angle() -> None:
     sheet = Sheet(SQUARE)
     sheet.set_crease((2, 0), Crease(stiffness=0.01))
@@ -47,7 +30,7 @@ def test_a_crease_folds_a_square_to_its_rest_angle() -> None:
 
 
 def test_a_held_strip_sags_under_gravity() -> None:
-    mesh = strip(16, 2, 0.06, 0.01)
+    mesh = Mesh.grid(16, 2, 0.06, 0.01)
     simulation = Simulation([Sheet(mesh)], Settings(time_step=math.inf))
     simulation.hold(0, np.flatnonzero(mesh.rest[:, 0] < 0.005))
     report = simulation.step()
@@ -58,7 +41,7 @@ def test_a_held_strip_sags_under_gravity() -> None:
 
 
 def test_time_steps_converge_as_newton_does() -> None:
-    mesh = strip(24, 4, 0.06, 0.01)
+    mesh = Mesh.grid(24, 4, 0.06, 0.01)
     simulation = Simulation([Sheet(mesh)], Settings(time_step=1 / 120))
     simulation.hold(0, np.flatnonzero(mesh.rest[:, 0] < 0.003))
     reports = [simulation.step() for _ in range(30)]
@@ -80,12 +63,14 @@ def test_a_free_sheet_falls_as_implicit_euler_says() -> None:
     assert report.energy.kinetic == pytest.approx(
         0.5 * 0.06 * SIDE * SIDE * (9.81 * dt * steps) ** 2
     )
+    energy = report.energy
+    assert energy.total == pytest.approx(energy.gravity + energy.kinetic)
 
 
 def test_the_same_inputs_give_the_same_result_bit_for_bit() -> None:
     def run() -> np.ndarray:
         simulation = Simulation(
-            [Sheet(strip(8, 2, 0.04, 0.01))], Settings(time_step=0.01)
+            [Sheet(Mesh.grid(8, 2, 0.04, 0.01))], Settings(time_step=0.01)
         )
         simulation.hold(0, [0, 9])
         for _ in range(3):

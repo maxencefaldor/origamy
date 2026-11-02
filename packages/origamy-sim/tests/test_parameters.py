@@ -99,6 +99,7 @@ def test_pydantic_accepts_a_crease_exactly_when_the_core_does(stiffness: float) 
         {
             "tolerance": NUMBERS,
             "iteration_limit": st.integers(-2, 2),
+            "trust_radius": NUMBERS,
             "sufficient_decrease": NUMBERS,
             "backtracking": NUMBERS,
             "shortest_update": NUMBERS,

@@ -180,6 +180,11 @@ Each pair of nearby mid-surface primitives, a point and a triangle or two edges,
 The barrier is zero beyond an activation distance, smooth, and grows without bound as d nears the thickness h.
 Mid-surfaces therefore never come closer than h, as in codimensional incremental potential contact.
 
+**Finding pairs.**
+A bounding volume hierarchy over the triangles, and another over the edges, find the pairs whose boxes overlap.
+Each is built at the start of a time step and refit to every later arrangement, since paper keeps its neighbors as it moves.
+A query costs about the logarithm of the count plus what it finds, however far the primitives sweep.
+
 **Collision-checked updates.**
 Each Newton update is cut short before any primitive would cross the offset surface of another, by continuous collision detection over the whole update.
 The detection is conservative: it may stop an update early, but it never misses a crossing.
@@ -223,7 +228,12 @@ Each time step minimizes the incremental potential with a projected Newton metho
 
 - **Hessian.**
   Each energy term contributes its exact Hessian.
-  Where their sum is not positive definite, each element's Hessian is projected to be, so every Newton direction descends.
+  Where their sum is not positive definite, each element's Hessian takes the absolute value of its eigenvalues, so every Newton direction descends.
+  Flipping negative curvature, rather than clearing it, keeps its size in the step and converges faster.
+- **Trust radius.**
+  No Newton update moves a vertex farther than a trust radius in meters.
+  The radius doubles each time an update it shortened is taken whole.
+  Where some motion costs nearly no energy, as for a sheet held along one line, the update would otherwise run off by millions of meters.
 - **Linear solve.**
   A sparse Cholesky factorization solves each Newton system, with its symbolic analysis reused while the contact set keeps its pattern.
 - **Line search.**
@@ -439,6 +449,22 @@ Two findings from phase 1 shape the next phases:
   Projecting every element's Hessian made Newton converge only linearly, as the projections drop curvature the sheet has.
   The solver now projects only when the exact Hessian is not positive definite.
   A time step of a falling strip takes 4 iterations instead of 22, and a quasi-static fold increment 7 instead of 128.
+
+Phase 2 so far adds these findings:
+
+- **Every term in the total.**
+  The line search once summed every energy term but contact, so a sheet landing on the table stalled a micrometer above it.
+  The total now names every term, so the compiler refuses a total that leaves one out.
+  Two tests check the assembled gradient and Hessian against finite differences of the whole potential, with and without contact.
+- **Updates out of reach.**
+  A flat square held along one line of vertices swings at no cost, so its first quasi-static update ran 5 × 10⁸ m.
+  The uniform grid that found contact pairs then ran out of memory.
+  The trust radius now bounds every update, and bounding volume hierarchies replace the grid.
+- **Absolute eigenvalues.**
+  Flipping each element's negative eigenvalues instead of clearing them cut quasi-static iterations by 13% to 24% across the benchmark scenes.
+- **Far from rest.**
+  Quasi-static steps far from rest still converge linearly while the Hessian stays indefinite.
+  A square of 24 by 24 cells, clamped along one side, sags from flat to rest in about 130 iterations.
 
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
