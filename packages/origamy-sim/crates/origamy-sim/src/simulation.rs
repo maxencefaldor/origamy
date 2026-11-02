@@ -429,10 +429,19 @@ impl Simulation {
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
         while iterations < self.settings.iteration_limit {
             iterations += 1;
+            // The exact Hessian gives Newton's quadratic convergence wherever it is positive
+            // definite; elsewhere each element's Hessian is projected to be.
             let mut assembly = Assembly::new(&self.pattern, &self.held);
-            self.assemble(&x, &predicted, inertia, &mut assembly);
+            self.assemble(&x, &predicted, inertia, &mut assembly, false);
+            let factor = if let Ok(factor) = assembly.factor() {
+                factor
+            } else {
+                assembly = Assembly::new(&self.pattern, &self.held);
+                self.assemble(&x, &predicted, inertia, &mut assembly, true);
+                assembly.factor()?
+            };
             let negative: Vec<f64> = assembly.gradient.iter().map(|g| -g).collect();
-            let direction = assembly.factor()?.solve(&negative);
+            let direction = factor.solve(&negative);
             update = direction
                 .chunks_exact(3)
                 .map(|d| d[0].hypot(d[1]).hypot(d[2]))
@@ -646,8 +655,16 @@ impl Simulation {
         energy
     }
 
-    /// Fills the gradient and projected Hessian of the incremental potential at positions `x`.
-    fn assemble(&self, x: &[Point], predicted: &[Point], inertia: f64, assembly: &mut Assembly) {
+    /// Fills the gradient and Hessian of the incremental potential at positions `x`.
+    /// With `projected`, each element's Hessian is projected to be positive semi-definite.
+    fn assemble(
+        &self,
+        x: &[Point],
+        predicted: &[Point],
+        inertia: f64,
+        assembly: &mut Assembly,
+        projected: bool,
+    ) {
         let gravity = Point::from(self.settings.gravity);
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset = self.offsets[s];
@@ -671,7 +688,7 @@ impl Simulation {
                     let points = t.map(|v| x[v as usize]);
                     let local = membrane::local(rest, &points, &constants.stretching)
                         .expect("the simulation keeps every state below the strain cap");
-                    (local.gradient, project(&local.hessian))
+                    (local.gradient, projected_if(&local.hessian, projected))
                 })
                 .collect();
             for (t, (gradient, hessian)) in mesh.triangles().iter().zip(&stretching) {
@@ -732,7 +749,7 @@ impl Simulation {
                         matrix += angle.gradient * angle.gradient.transpose() * curvature
                             + angle.hessian * slope;
                     }
-                    (gradient, project(&matrix))
+                    (gradient, projected_if(&matrix, projected))
                 })
                 .collect();
             for (d, (gradient, hessian)) in mesh.dihedrals().iter().zip(&dihedrals) {
@@ -780,6 +797,14 @@ struct Search<'a> {
     rigidity: &'a OnceCell<Result<Factor<'a>, SingularError>>,
     energy: f64,
     slope: f64,
+}
+
+/// A Hessian projected to be positive semi-definite when `projected` holds.
+fn projected_if<const D: usize>(
+    matrix: &SMatrix<f64, D, D>,
+    projected: bool,
+) -> SMatrix<f64, D, D> {
+    if projected { project(matrix) } else { *matrix }
 }
 
 /// Points moved by a fraction of a displacement given in flat coordinates.

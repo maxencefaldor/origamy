@@ -67,6 +67,16 @@ def test_a_held_strip_sags_under_gravity() -> None:
     assert (tip[:, 2] < -0.001).all()
 
 
+def test_time_steps_converge_as_newton_does() -> None:
+    mesh = strip(24, 4, 0.06, 0.01)
+    simulation = Simulation([Sheet(mesh)], Settings(time_step=1 / 120))
+    for vertex in np.flatnonzero(mesh.rest[:, 0] < 0.003):
+        simulation.hold(0, int(vertex))
+    reports = [simulation.step() for _ in range(30)]
+    assert all(report.converged for report in reports)
+    assert max(report.iterations for report in reports) <= 10
+
+
 def test_a_free_sheet_falls_as_implicit_euler_says() -> None:
     dt, steps = 0.01, 5
     simulation = Simulation([Sheet(SQUARE)], Settings(time_step=dt))

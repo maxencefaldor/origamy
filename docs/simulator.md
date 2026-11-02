@@ -220,7 +220,8 @@ Hands appear in the animations, so a person sees exactly how to fold.
 Each time step minimizes the incremental potential with a projected Newton method:
 
 - **Hessian.**
-  Each energy term contributes its exact Hessian, projected to be positive semi-definite element by element, so every Newton direction descends.
+  Each energy term contributes its exact Hessian.
+  Where their sum is not positive definite, each element's Hessian is projected to be, so every Newton direction descends.
 - **Linear solve.**
   A sparse Cholesky factorization solves each Newton system, with its symbolic analysis reused while the contact set keeps its pattern.
 - **Line search.**
@@ -422,6 +423,10 @@ Two findings from phase 1 shape the next phases:
   The line search alone then shortens the update to keep the paper's length, and a turn of a radian took 136 Newton iterations.
   The line search now also tries the update's retraction: its positions refitted, as rigid as possible, to its triangles' rotations.
   The same turn takes 6 iterations, and a turn of 172° takes 9.
+- **Exact Hessians.**
+  Projecting every element's Hessian made Newton converge only linearly, as the projections drop curvature the sheet has.
+  The solver now projects only when the exact Hessian is not positive definite.
+  A time step of a falling strip takes 4 iterations instead of 22, and a quasi-static fold increment 7 instead of 128.
 
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
