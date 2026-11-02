@@ -134,11 +134,32 @@ fn end(parameter: f64, start: usize, finish: usize) -> usize {
 
 /// The closest points of the stencil's two primitives.
 fn closest_points(kind: Kind, x: &[Point; 4]) -> (Point, Point) {
+    let weights = closest_weights(kind, x);
+    let split = match kind {
+        Kind::PointTriangle => 1,
+        Kind::EdgeEdge => 2,
+    };
+    let first = (0..split).map(|i| x[i] * weights[i]).sum();
+    let second = (split..4).map(|i| x[i] * -weights[i]).sum();
+    (first, second)
+}
+
+/// The weights of the stencil's vertices in the vector between the primitives' closest points.
+///
+/// The vector runs from the second primitive to the first. The vector is the sum of each
+/// vertex times its weight.
+///
+/// The first primitive's weights are positive and sum to 1, and the second's are negative and
+/// sum to −1.
+pub(crate) fn closest_weights(kind: Kind, x: &[Point; 4]) -> [f64; 4] {
     match kind {
-        Kind::PointTriangle => (x[0], closest_on_triangle(&x[0], &x[1], &x[2], &x[3])),
+        Kind::PointTriangle => {
+            let [a, b, c] = triangle_weights(&x[0], &x[1], &x[2], &x[3]);
+            [1.0, -a, -b, -c]
+        }
         Kind::EdgeEdge => {
             let (s, t) = segment_parameters(&x[0], &x[1], &x[2], &x[3]);
-            (x[0] + (x[1] - x[0]) * s, x[2] + (x[3] - x[2]) * t)
+            [1.0 - s, s, t - 1.0, -t]
         }
     }
 }
@@ -183,23 +204,36 @@ fn triangle_region(p: &Point, a: &Point, b: &Point, c: &Point) -> Region {
     Region::Face
 }
 
-/// The point of the triangle `a`, `b`, `c` closest to `p`.
-fn closest_on_triangle(p: &Point, a: &Point, b: &Point, c: &Point) -> Point {
-    let on_segment = |from: &Point, to: &Point| {
+/// The barycentric weights of the point of the triangle `a`, `b`, `c` closest to `p`.
+fn triangle_weights(p: &Point, a: &Point, b: &Point, c: &Point) -> [f64; 3] {
+    let along = |from: &Point, to: &Point| {
         let direction = to - from;
-        let t = ((p - from).dot(&direction) / direction.norm_squared()).clamp(0.0, 1.0);
-        from + direction * t
+        ((p - from).dot(&direction) / direction.norm_squared()).clamp(0.0, 1.0)
     };
     match triangle_region(p, a, b, c) {
-        Region::Corner(0) => *a,
-        Region::Corner(1) => *b,
-        Region::Corner(_) => *c,
-        Region::Side(0, 1) => on_segment(a, b),
-        Region::Side(0, _) => on_segment(a, c),
-        Region::Side(..) => on_segment(b, c),
+        Region::Corner(0) => [1.0, 0.0, 0.0],
+        Region::Corner(1) => [0.0, 1.0, 0.0],
+        Region::Corner(_) => [0.0, 0.0, 1.0],
+        Region::Side(0, 1) => {
+            let t = along(a, b);
+            [1.0 - t, t, 0.0]
+        }
+        Region::Side(0, _) => {
+            let t = along(a, c);
+            [1.0 - t, 0.0, t]
+        }
+        Region::Side(..) => {
+            let t = along(b, c);
+            [0.0, 1.0 - t, t]
+        }
         Region::Face => {
-            let normal = (b - a).cross(&(c - a));
-            p - normal * ((p - a).dot(&normal) / normal.norm_squared())
+            // The weights of the point's projection, from the areas it makes with the sides.
+            let (ab, ac, ap) = (b - a, c - a, p - a);
+            let normal = ab.cross(&ac);
+            let area = normal.norm_squared();
+            let v = ap.cross(&ac).dot(&normal) / area;
+            let w = ab.cross(&ap).dot(&normal) / area;
+            [1.0 - v - w, v, w]
         }
     }
 }

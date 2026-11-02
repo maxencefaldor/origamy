@@ -25,9 +25,20 @@ They settle into a stack, each layer a paper thickness above the one below, with
 ## A strip swinging onto the table
 
 A strip of 12 by 2 cm is clamped 6 cm over the table, along its first two columns, and let go at rest.
-The strip swings down under its weight, overshoots and comes to rest with its end on the table.
+The strip swings down under its weight, and its end strikes the table, lifts once and comes to rest there.
 
 <iframe class="origamy-run" src="viewer.html?run=strip" title="A strip swinging onto the table" loading="lazy"></iframe>
+
+## Squares on two ramps
+
+Two ramps of kami, 16 by 5 cm, are held white side up on the table at 15° and 30°.
+A 3 cm square of kami lies at rest near the top of each, and the time steps last 1/240 s.
+Friction between two sheets of kami, of coefficient 0.4, holds paper on slopes up to 21.8°.
+The square on the gentler ramp stays, creeping by less than the 0.1 µm stick distance a step.
+The square on the steeper ramp slides at the speed Coulomb's law gives, within 0.3%.
+The square runs off the ramp onto the table, where friction stops it.
+
+<iframe class="origamy-run" src="viewer.html?run=ramps" title="Squares on two ramps" loading="lazy"></iframe>
 
 ## Accordion pleats
 

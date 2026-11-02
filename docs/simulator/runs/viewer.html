@@ -245,6 +245,7 @@ const format = (value, unit) => {
   if (unit === "m") return length(value);
   if (unit === "°") return `${value.toFixed(1)}°`;
   if (unit === "s") return `${value.toFixed(3)} s`;
+  if (unit === "m/s") return `${value.toFixed(3)} m/s`;
   if (unit === "rad") return `${scientific(value)} rad`;
   return Number.isInteger(value) ? String(value) : scientific(value);
 };

@@ -56,9 +56,10 @@ A sheet of kami, the thin paper most origami uses, sets the scales below.
 | Length where stretching and bending balance | √(D / Eh) | 21 µm |
 | Length that gravity bends | (D / ρgh)^(1/3) | 6 cm |
 | Width of a crease | S₀ | about 0.5 mm |
-| Friction of paper on paper | μ | 0.3 to 0.6 |
+| Friction of paper on paper | μ | 0.17 to 0.44 sliding, 0.33 to 0.61 at rest |
+| Terminal velocity of a sheet falling flat | √(2ρhg / ρₐC) | 0.91 m/s |
 
-Six facts follow from these numbers, and each one shapes the model.
+Seven facts follow from these numbers, and each one shapes the model.
 
 1. **Paper bends and does not stretch.**
    Stretching a 15 cm sheet by 1% costs about 560 times the energy of rolling it round a 5 cm cylinder.
@@ -77,6 +78,9 @@ Six facts follow from these numbers, and each one shapes the model.
    Within it, the paper rests curved, so the fold rests at an angle, and it springs open a little when released.
 1. **Friction holds models together.**
    Locks, pockets and tucked flaps stay in place by friction.
+1. **Air slows paper.**
+   A sheet falling flat nears its terminal velocity of 0.91 m/s within a quarter of a second.
+   The air's density ρₐ is 1.204 kg/m³, and a square plate's drag coefficient C is 1.17.
 
 ### 2.2 What the simulator reproduces
 
@@ -90,6 +94,7 @@ Six facts follow from these numbers, and each one shapes the model.
 | No crossing | Barrier contact and collision-checked Newton updates |
 | Locks, pockets, tucks | Friction between sheets, and between sheets and fingers |
 | Sag of large flaps | Gravity |
+| Paper floating down | Air drag on each patch of paper, across its surface |
 | Hands, tools, the table | Moving rigid bodies that touch the paper, and grips that hold it |
 | Paper grain | Orthotropic stiffness, by fiber direction |
 
@@ -109,7 +114,7 @@ Each vertex also keeps its place in the flat sheet, the material coordinates, wh
 Every behavior of the paper enters as one term of a total energy:
 
 ```text
-E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction + E_hands + E_gravity
+E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction + E_drag + E_hands + E_gravity
 ```
 
 | Term | Meaning |
@@ -119,7 +124,8 @@ E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_contact + E_friction +
 | E_bend | Plate bending energy of each triangle, from a discrete curvature built from its edges' dihedral angles |
 | E_crease | Bending energy of crease bands, softer than the paper around them, about a rest curvature |
 | E_contact | A barrier on the distance between mid-surface primitives, offset by the thickness |
-| E_friction | Smoothed Coulomb friction between surfaces in contact, lagged per time step |
+| E_friction | Smoothed Coulomb friction between paper and paper, and between paper and the table, lagged per time step |
+| E_drag | Quadratic air drag on each vertex's patch of paper, across the sheet, lagged per time step |
 | E_hands | Contact with moving bodies, and stiff springs from held vertices to the bodies that hold them |
 | E_gravity | The weight of each vertex's share of the sheet |
 
@@ -146,7 +152,7 @@ x(n+1) = argmin over x of  ½ (x − x̂)ᵀ M (x − x̂) / Δt²  +  E(x),   w
 ```
 
 Minimizing this potential solves one time step of implicit Euler.
-Inertia, elastic forces, contact, friction, gravity and the hands' forces all balance at its minimum.
+Inertia, elastic forces, contact, friction, drag, gravity and the hands' forces all balance at its minimum.
 Large time steps stay stable, and every force term keeps its physical meaning.
 Dropping the inertia term gives quasi-static motion, for folds slow enough that inertia does not matter.
 
@@ -213,7 +219,31 @@ The result is a physical stack, exactly consistent with the kernel's layer order
 Offset geometric contact bounds how far each vertex may move without any crossing, with no collision detection over the update.
 The simulator evaluates it as a faster filter in phase 8, and keeps the guarantee whichever filter it uses.
 
-### 3.6 Hands, tools and forces
+### 3.6 Friction and air
+
+**Friction.**
+Friction follows incremental potential contact, lagged per time step.
+At the start of a time step, each contact fixes its normal force λ, its tangent plane and its closest points.
+Over the step, friction resists the slip u of those points in that plane with the potential μλ f₀(|u|).
+Past a stick distance ε, f₀ is the slip itself, so a sliding contact feels the force μλ against its slip.
+Below ε, f₀ turns smoothly, so a contact that friction holds creeps by less than ε a step.
+The table holds each vertex the same way, with a friction coefficient of its own.
+The friction's Hessian is exact and positive semi-definite.
+
+**Lags.**
+A normal force fixed at the start of a step lags its load by a step.
+A sheet tilted on the table thus keeps its old weight for that step.
+Each time step therefore lags friction again from the solution it reached, and solves once more.
+The lags end once a solve converges where it starts, or after a set count, three by default.
+
+**Air.**
+Air drags each vertex's patch of paper against its velocity v across the sheet, with the force ½ ρₐ C A v².
+The potential k |w·n|³ / 3 of the vertex's move w over the step gives that force, with k = ρₐ C A / 2Δt².
+The normal n is the patch's normal at the start of the step, so the potential is convex and its Hessian exact.
+Drag along the sheet, from skin friction, is a few percent as strong at the same speed, and left out.
+Quasi-static steps have no velocity, and so no drag.
+
+### 3.7 Hands, tools and forces
 
 Folding by hand is a choreography of a few physical actions.
 The simulator provides each as an input to the same model:
@@ -229,7 +259,7 @@ The simulator provides each as an input to the same model:
 A finger pressing along a fold line yields the crease band there, so creasing comes from pressure, as it does by hand.
 Hands appear in the animations, so a person sees exactly how to fold.
 
-### 3.7 Solver
+### 3.8 Solver
 
 Each time step minimizes the incremental potential with a projected Newton method:
 
@@ -250,13 +280,14 @@ Each time step minimizes the incremental potential with a projected Newton metho
 - **Convergence.**
   The largest vertex move of the Newton update falls below a tolerance in meters.
 - **Recovery.**
-  From phase 3, a time step that does not converge halves and tries again, and reports the failure if it falls below a floor.
-  Until then, the step reports that it did not converge.
+  A time step whose solve does not converge retries as two time steps of half its length.
+  A time step that would halve below the shortest time step reports that it did not converge.
+  The report counts the time steps taken.
 
 The solver is the reference: accurate, robust and the one every guarantee is proved for.
 A second solver, vertex block descent with offset contact, joins in phase 8 for interactive speed on GPUs, minimizing the same energy.
 
-### 3.8 Discretization
+### 3.9 Discretization
 
 - **Meshes that follow creases.**
   A constrained Delaunay triangulation of the crease pattern makes every crease line a chain of mesh edges, with no angle under 20°.
@@ -267,7 +298,7 @@ A second solver, vertex block descent with offset contact, joins in phase 8 for 
 - **Precision.**
   Every quantity is a 64-bit float, and collision detection bounds its own rounding errors.
 
-### 3.9 Parameters
+### 3.10 Parameters
 
 Every quantity below is an input, in SI units, with a documented default.
 A preset fills them all for one paper: the kami preset takes the values of section 2.1.
@@ -279,10 +310,10 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Band width, stiffness, yield moment, hardening, springback, aging rate, softening by a precrease |
-| Contact | The barrier's activation gap and energy scale, friction coefficients of paper on paper and on each body, the exclusion radius along the sheet |
+| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
 | Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
-| World | Gravity, the table and its height and friction, damping |
-| Solver | Time step, its floor, tolerance in meters, iteration limit, sufficient decrease, backtracking factor, shortest update |
+| World | Gravity, the table and its height and friction, the air's density and drag coefficient |
+| Solver | Time step, the shortest time step, the lags of friction, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
 
 Each crease takes its own values, so one model can hold sharp and soft creases, or two papers in one sheet.
 
@@ -292,12 +323,12 @@ The core checks every value again, so Rust callers and unvalidated models meet t
 A property test holds the two checks to one verdict.
 A pydantic-settings configuration reads the parameters from a YAML file and the command line, which overrides the file.
 
-### 3.10 Outputs
+### 3.11 Outputs
 
 | Output | Content |
 | --- | --- |
 | States | Vertex positions and velocities, crease rest curvatures, as NumPy arrays |
-| Time step reports | Newton iterations, residual, every energy term, greatest strain, least distance between sheets, contacts, and whether the time step converged |
+| Time step reports | Newton iterations, time steps taken, residual, every energy term, greatest strain, least distance between sheets, contacts, and whether the time step converged |
 | Surfaces with thickness | Both faces of the sheet, offset by half the thickness, and its rims, for rendering |
 | glTF 2.0 | Meshes and animations, the standard format for 3D |
 | FOLD 1.2 | Frames with 3D vertex coordinates and fold angles, for origami tools |
@@ -378,13 +409,13 @@ docs/simulator.py                       the recorder of the runs the docs show
 | `mesh` | Rest geometry: triangles, edges, dihedrals and the boundary |
 | `parameter` | The checks of parameter values, each naming the parameter it refuses |
 | `material` | Thickness, weight, orthotropic stiffness, the strain limit, and presets |
-| `settings` | Gravity, the time step, contact, the table and the solver |
+| `settings` | Gravity, the time step, contact and friction, the table, the air and the solver |
 | `sheet` | A mesh with its material, creases and rest angles, and the rest data its energies read |
 | `energy` | One module per energy term, each with value, gradient and exact Hessian |
 | `generated` | Derivative code generated from symbolic expressions |
 | `system` | The sparse Newton system in 3 by 3 blocks, and its Cholesky factorization |
 | `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
-| `contact` | Bounding volume hierarchies, distances, the barrier and its fade for parallel edges, exclusions, continuous collision detection |
+| `contact` | Bounding volume hierarchies, distances, the barrier and its fade for parallel edges, friction, exclusions, continuous collision detection |
 | `body` | Rigid bodies on paths, grips, force fields |
 
 ### 5.5 Engineering standards
@@ -419,6 +450,9 @@ The simulator is excellent when it passes all of these, in CI:
 | The assembled system | Finite differences of the whole potential | Gradient within 10⁻⁶ and Hessian within 10⁻⁵, with and without contact |
 | Sheets dropped on the table | k thicknesses for layer k | Each layer within the barrier's gap of its place; distances never under h |
 | A strip folded over itself onto the table | No crossing | Distances never under h at any step |
+| A square sliding down an incline, on the table and on paper | Coulomb's law: acceleration g (sin θ − μ cos θ) | Velocity within 1% |
+| A square on an incline gentler than its friction angle | Coulomb's law: no slip | Slip under the stick distance a step |
+| A sheet falling flat through air | Implicit Euler of v′ = −g + kv², and the terminal velocity | Velocity within 10 nm/s of implicit Euler, and within 0.1% of the terminal velocity |
 | A fold pressed flat, then released | Measured springback | Rest angle within measured scatter |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -441,14 +475,14 @@ Each phase ends when its exit tests pass in CI.
 | 0. Foundations | Package, Rust workspace, Python package, bindings, CI, the rest mesh and its topology | A mesh built from Python reports its edges, dihedrals and boundary, and every check passes in CI |
 | 1. The elastic sheet | Membrane, strain barrier, bending, sharp creases, gravity, held vertices, projected Newton, sparse Cholesky, derivative generation, the validation harness | Derivative, bending, cantilever and Miura benchmarks pass |
 | 2. Contact | Bounding volumes, distances, thickness barrier, exclusions, continuous collision detection, the table | A sheet folds over itself under gravity onto the table with no crossing, and the stack benchmark passes |
-| 3. Friction and dynamics | Lagged friction, damping, adaptive time steps | Sliding, sticking and settling tests match theory |
+| 3. Friction and dynamics | Lagged friction, air drag, adaptive time steps | Sliding, sticking and falling tests match theory |
 | 4. Paper | Crease bands, plasticity, aging, orthotropy, presets calibrated on published measurements | The springback benchmark passes |
 | 5. Hands | Rigid bodies on paths, grips, forces, pressure | A fingertip folds a sheet in half and creases it, repeatably |
 | 6. Thickening | Physical stacks from exact layer orders | The flat crane thickens with its exact layer order, no crossing, within target time |
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0, 1 and 2 are done.
+Phases 0 to 3 are done.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -481,6 +515,17 @@ Phase 2 adds these findings:
   Quasi-static steps far from rest still converge linearly while the Hessian stays indefinite.
   A square of 24 by 24 cells, clamped along one side, sags from flat to rest in about 130 iterations.
 
+Phase 3 adds these findings:
+
+- **Lagged normal forces.**
+  A square tilted on the table first slid 1.2% to 2.5% slower than Coulomb's law says.
+  Its friction kept the normal force of each step's start, from before the load changed.
+  Lagging friction again from each step's solution brings the square within 1%.
+- **Drag on stacks.**
+  Air drags every layer of a stack as if it were alone, so a stack falls as fast as one sheet.
+  Real air reaches only the outer layers, so a stack of n layers falls √n times faster.
+  Shielding the layers that contact covers is left for later.
+
 Phase 7 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
 Shaping becomes crease actuation and hands; animation becomes simulated motion.
@@ -504,6 +549,8 @@ A research track runs alongside, with ambitious targets:
 | Core language | Rust | C++, NumPy, JAX |
 | Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |
 | Derivatives | Generated from symbolic energies | Hand derivation, error prone; runtime autodiff, slow in the hot loop |
+| Friction | Lagged, smoothed Coulomb friction in the incremental potential | Friction forces applied after each step, which stick and slip at large time steps; exact Coulomb constraints, which are not smooth |
+| Air | Quadratic drag across the sheet, as a potential | Damping proportional to mass, which slows paper alike in every direction, even in a vacuum |
 
 ## 9. References
 
@@ -515,5 +562,8 @@ A research track runs alongside, with ambitious targets:
 - [Incremental Potential Contact](https://research.adobe.com/publication/incremental-potential-contact-intersection-and-inversion-free-large-deformation-dynamics), by Minchen Li, Zachary Ferguson, Teseo Schneider, Timothy Langlois, Denis Zorin, Daniele Panozzo, Chenfanfu Jiang and Danny Kaufman, ACM Transactions on Graphics, 2020.
 - [Codimensional Incremental Potential Contact](https://research.adobe.com/publication/codimensional-incremental-potential-contact), by Minchen Li, Danny Kaufman and Chenfanfu Jiang, ACM Transactions on Graphics, 2021.
 - [Offset Geometric Contact](https://graphics.cs.utah.edu/research/projects/ogc/), by Anka He Chen, Jerry Hsu, Ziheng Liu, Miles Macklin, Yin Yang and Cem Yuksel, ACM Transactions on Graphics, 2025.
+- [Coefficient of friction of paper used in a copy machine](https://instron.jp/ja-jp/-/media/literature-library/applications/2006/03/coefficient-of-friction-of-paper-used-in-a-copy-machine.pdf), Instron application note, 2006.
+- [Stick-slip dynamics in an interleaved system with self-amplified friction](https://arxiv.org/abs/2602.14935), by Plati, Restagno and Poulard, arXiv, 2026.
+- Fluid-Dynamic Drag, by Sighard Hoerner, 1965.
 - [Local Mechanical Description of an Elastic Fold](https://arxiv.org/pdf/1808.04892), by Théo Jules, Frédéric Lechenault and Mokhtar Adda-Bedia, Soft Matter, 2019.
 - [Relaxation Mechanisms in the Unfolding of Thin Sheets](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.107.025506), by Benjamin Thiria and Mokhtar Adda-Bedia, Physical Review Letters, 2011.

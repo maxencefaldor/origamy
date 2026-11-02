@@ -1,7 +1,7 @@
 //! Physics benchmarks: the simulator against known solutions, each with its acceptance threshold.
 
 use origamy_sim::{
-    Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness, Table,
+    Air, Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness, Table,
 };
 
 /// A rectangle of `columns` by `rows` cells of `width` by `height` meters.
@@ -304,7 +304,7 @@ fn sheets_dropped_on_the_table_stack_a_thickness_apart() {
         .collect();
     let settings = Settings {
         time_step: 1.0 / 120.0,
-        table: Some(Table { height: 0.0 }),
+        table: Some(Table::default()),
         ..Settings::default()
     };
     let mut simulation = Simulation::new(sheets, settings).unwrap();
@@ -356,7 +356,7 @@ fn a_strip_folded_over_itself_never_crosses_and_rests_above_itself() {
     }
     let settings = Settings {
         time_step: 1.0 / 120.0,
-        table: Some(Table { height: 0.0 }),
+        table: Some(Table::default()),
         ..Settings::default()
     };
     let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
@@ -398,4 +398,144 @@ fn a_strip_folded_over_itself_never_crosses_and_rests_above_itself() {
             z - rest
         );
     }
+}
+
+/// A 4 cm square of kami on an incline, on the table or on a 10 cm square held on the table.
+///
+/// Gravity tilts by `tilt` from the table's normal, which makes the table an incline. The
+/// function returns the square's mean velocity along the incline after `steps` time steps of
+/// 1/240 s, and its mean slip.
+///
+/// The square first settles for a quarter second under upright gravity. Friction thus lags
+/// the square's weight as its normal force from the first tilted step.
+fn incline(tilt: f64, on_paper: bool, steps: u32) -> (f64, f64) {
+    let kami = Material::kami();
+    let contact = Contact::default();
+    let (h, gap) = (kami.thickness, contact.gap);
+    let square = |cells: u32, side: f64| {
+        Sheet::new(Mesh::grid(cells, cells, side, side).unwrap(), kami).unwrap()
+    };
+    let mut sheets = vec![square(8, 0.04)];
+    if on_paper {
+        sheets.push(square(10, 0.1));
+    }
+    let g = 9.81;
+    let settings = Settings {
+        time_step: 1.0 / 240.0,
+        table: Some(Table::default()),
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(sheets, settings).unwrap();
+    let rest = 0.5 * h + 0.5 * gap;
+    let height = if on_paper { rest + h + 0.5 * gap } else { rest };
+    let placed: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x + 0.03, y + 0.03, height])
+        .collect();
+    simulation.set_positions(0, &placed).unwrap();
+    if on_paper {
+        let lying: Vec<[f64; 3]> = simulation
+            .positions(1)
+            .iter()
+            .map(|&[x, y, _]| [x, y, rest])
+            .collect();
+        simulation.set_positions(1, &lying).unwrap();
+        let count = simulation.positions(1).len();
+        for v in 0..count {
+            simulation.hold(1, v, true);
+        }
+    }
+    let run = |simulation: &mut Simulation, steps: u32| {
+        for step in 0..steps {
+            let report = simulation.step().unwrap();
+            assert!(report.converged, "step {step}: {report:?}");
+            assert!(report.least_gap > 0.0, "step {step}: {report:?}");
+        }
+    };
+    run(&mut simulation, 60);
+    let mean = |values: &[[f64; 3]]| {
+        values.iter().map(|p| p[0]).sum::<f64>() / f64::from(u32::try_from(values.len()).unwrap())
+    };
+    let settled = mean(simulation.positions(0));
+    simulation
+        .set_settings(Settings {
+            gravity: [g * tilt.sin(), 0.0, -g * tilt.cos()],
+            ..settings
+        })
+        .unwrap();
+    run(&mut simulation, steps);
+    let slip = mean(simulation.positions(0)) - settled;
+    (mean(simulation.velocities(0)), slip)
+}
+
+#[test]
+fn kami_slides_down_an_incline_steeper_than_its_friction_angle() {
+    // Past the friction angle, the square slides with acceleration g (sin θ − μ cos θ).
+    let mu = Contact::default().friction;
+    for (tilt, on_paper) in [(0.5, false), (0.45, true)] {
+        let steps = 48;
+        let (velocity, _) = incline(tilt, on_paper, steps);
+        let expected = 9.81 * (tilt.sin() - mu * tilt.cos()) * f64::from(steps) / 240.0;
+        assert!(
+            (velocity / expected - 1.0).abs() < 0.01,
+            "the square slides at {velocity} m/s, Coulomb's law says {expected}"
+        );
+    }
+}
+
+#[test]
+fn kami_sticks_on_an_incline_gentler_than_its_friction_angle() {
+    // Below the friction angle, friction holds the square: it creeps by less than the stick
+    // distance a step.
+    for on_paper in [false, true] {
+        let steps = 120;
+        let (_, slip) = incline(0.25, on_paper, steps);
+        let bound = Contact::default().stick * f64::from(steps);
+        assert!(
+            slip.abs() < bound,
+            "the square slips {slip} m, past {bound} m"
+        );
+    }
+}
+
+#[test]
+fn kami_falls_flat_at_the_terminal_velocity_that_drag_sets() {
+    // A square of kami falls flat through still air. Per area, drag ½ ρ C v² balances the
+    // weight m g at the terminal velocity v = √(2 m g / ρ C). Each time step takes implicit
+    // Euler of v' = −g + k v², with k = ρ C / 2m. The square follows it to that velocity.
+    // A tight tolerance lets the velocities match implicit Euler's to 10 nm/s.
+    let (kami, air, g) = (Material::kami(), Air::default(), 9.81);
+    let dt = 1.0 / 120.0;
+    let settings = Settings {
+        time_step: dt,
+        solver: Solver {
+            tolerance: 1e-12,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let sheet = Sheet::new(Mesh::grid(4, 4, 0.1, 0.1).unwrap(), kami).unwrap();
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let k = air.density * air.drag / (2.0 * kami.mass_per_area);
+    let mut expected: f64 = 0.0;
+    for step in 0..120 {
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "step {step}: {report:?}");
+        // The root of dt k v² − v + (v₀ − g dt) = 0 nearest v₀ − g dt, in a stable form.
+        let c = expected - g * dt;
+        expected = 2.0 * c / (1.0 + (1.0 - 4.0 * dt * k * c).sqrt());
+        for [x, y, z] in simulation.velocities(0) {
+            assert!(
+                x.abs() < 1e-12 && y.abs() < 1e-12 && (z - expected).abs() < 1e-8,
+                "step {step}: a vertex falls at {z} m/s, implicit Euler says {expected}"
+            );
+        }
+    }
+    let terminal = (2.0 * kami.mass_per_area * g / (air.density * air.drag)).sqrt();
+    let [_, _, z] = simulation.velocities(0)[0];
+    assert!(
+        (-z / terminal - 1.0).abs() < 1e-3,
+        "the square falls at {z} m/s, its terminal velocity is {terminal}"
+    );
 }

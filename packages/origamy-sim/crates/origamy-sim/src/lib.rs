@@ -23,7 +23,7 @@ mod system;
 pub use material::{Material, Stiffness, StrainLimit};
 pub use mesh::{Dihedral, Mesh, MeshError, Vertex};
 pub use parameter::ParameterError;
-pub use settings::{Contact, Settings, Solver, Table};
+pub use settings::{Air, Contact, Settings, Solver, Table};
 pub use sheet::{Crease, Sheet, SheetError};
 pub use simulation::{Energy, Report, Simulation, StateError, StepError};
 pub use system::SingularError;

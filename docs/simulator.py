@@ -38,7 +38,7 @@ from origamy_sim import (
 
 RUNS: Final = Path(__file__).resolve().parent / "simulator" / "runs"
 
-type Name = Literal["fold-over", "stack", "strip", "accordion", "miura"]
+type Name = Literal["fold-over", "stack", "strip", "ramps", "accordion", "miura"]
 
 CREASE: Final = Crease(stiffness=0.01)
 """A crease about as stiff as one folded firmly in kami, in N·m per meter per radian."""
@@ -243,6 +243,66 @@ def strip(config: Config) -> Run:
     )
 
 
+def ramps(config: Config) -> Run:
+    """Two squares on ramps of paper: friction holds one, and the other slides off."""
+    length, width, side, lane = 0.16, 0.05, 0.03, 0.08
+    tilts = (math.radians(15), math.radians(30))
+    ramp, square = Mesh.grid(16, 5, length, width), Mesh.grid(6, 6, side, side)
+    meshes = [ramp, ramp, square, square]
+    settings = copy.replace(config.settings, time_step=1 / 240, table=Table(height=0.0))
+    simulation = Simulation([Sheet(mesh, config.material) for mesh in meshes], settings)
+    h, gap = config.material.thickness, config.settings.contact.gap
+
+    def on_ramp(
+        k: int, points: NDArray[np.float64], lift: float
+    ) -> NDArray[np.float64]:
+        """Points in ramp k's plane, lifted along its normal."""
+        tilt = tilts[k]
+        x, y = points[:, 0], points[:, 1]
+        return np.column_stack(
+            [
+                x * math.cos(tilt) - lift * math.sin(tilt),
+                y + k * lane,
+                0.5 * h + 0.5 * gap + x * math.sin(tilt) + lift * math.cos(tilt),
+            ]
+        )
+
+    # Every sheet starts flat at z = 0, on the others. The squares move to their places
+    # first, then the far ramp, then the near one, so no sheet moves into another.
+    top = square.rest + np.array([length - side - 0.01, 0.5 * (width - side)])
+    for k in (0, 1):
+        simulation.set_positions(2 + k, on_ramp(k, top, h + 0.5 * gap))
+    # Mirrored across its width, each ramp lies white side up under its colored square.
+    turned = ramp.rest * np.array([1.0, -1.0]) + np.array([0.0, width])
+    for k in (1, 0):
+        simulation.set_positions(k, on_ramp(k, turned, 0.0))
+        simulation.hold(k, np.arange(len(ramp.rest)))
+    downhill = np.array([-math.cos(tilts[0]), 0.0, -math.sin(tilts[0])])
+    start = simulation.positions(2).mean(axis=0)
+
+    def slide() -> Stats:
+        report = simulation.step()
+        slip = float((simulation.positions(2).mean(axis=0) - start) @ downhill)
+        speed = float(np.linalg.norm(simulation.velocities(3).mean(axis=0)))
+        return {**report_stats(report), "slip": slip, "speed": speed}
+
+    frames = record(simulation, len(meshes), (slide() for _ in range(144)))
+    return Run(
+        title="Squares on two ramps",
+        triangles=triangles_of(meshes),
+        creases=[],
+        seconds_per_frame=settings.time_step,
+        table=0.0,
+        readouts=[
+            ("Time", "time", "s"),
+            ("Slip at 15°", "slip", "m"),
+            ("Speed at 30°", "speed", "m/s"),
+            ("Newton iterations", "iterations", ""),
+        ],
+        frames=frames,
+    )
+
+
 def accordion(config: Config) -> Run:
     """A strip pleated by seven creases, valley and mountain in turn, on the table."""
     columns, rows, length, width, panels = 32, 8, 0.16, 0.04, 8
@@ -388,12 +448,20 @@ def record(
     ]
 
 
-NAMES: Final[tuple[Name, ...]] = ("fold-over", "stack", "strip", "accordion", "miura")
+NAMES: Final[tuple[Name, ...]] = (
+    "fold-over",
+    "stack",
+    "strip",
+    "ramps",
+    "accordion",
+    "miura",
+)
 
 SCENES: Final[dict[Name, Callable[[Config], Run]]] = {
     "fold-over": fold_over,
     "stack": stack,
     "strip": strip,
+    "ramps": ramps,
     "accordion": accordion,
     "miura": miura,
 }

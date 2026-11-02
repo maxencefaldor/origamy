@@ -59,9 +59,9 @@ def test_time_steps_converge_as_newton_does() -> None:
     assert max(report.iterations for report in reports) <= 10
 
 
-def test_a_free_sheet_falls_as_implicit_euler_says() -> None:
+def test_a_free_sheet_falls_in_a_vacuum_as_implicit_euler_says() -> None:
     dt, steps = 0.01, 5
-    simulation = Simulation([Sheet(SQUARE)], Settings(time_step=dt))
+    simulation = Simulation([Sheet(SQUARE)], Settings(time_step=dt, air=None))
     for _ in range(steps):
         report = simulation.step()
         assert report.converged
@@ -70,6 +70,7 @@ def test_a_free_sheet_falls_as_implicit_euler_says() -> None:
     drop = 9.81 * dt * dt * steps * (steps + 1) / 2
     assert simulation.positions(0)[:, 2] == pytest.approx(-drop)
     assert report.time == pytest.approx(dt * steps)
+    assert report.substeps == 1
     assert report.energy.kinetic == pytest.approx(
         0.5 * 0.06 * SIDE * SIDE * (9.81 * dt * steps) ** 2
     )

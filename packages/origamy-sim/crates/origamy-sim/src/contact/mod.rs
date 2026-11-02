@@ -10,6 +10,7 @@
 mod bvh;
 pub(crate) mod ccd;
 pub(crate) mod distance;
+pub(crate) mod friction;
 
 use nalgebra::{SMatrix, Vector3};
 
@@ -20,6 +21,7 @@ use crate::energy::{Barrier, Point};
 use crate::generated::edge_cross_squared;
 use crate::settings::Contact;
 pub(crate) use distance::Kind;
+use friction::{Slip, tangent_plane};
 
 /// Every primitive of a scene's sheets, in the scene's vertex numbering.
 #[derive(Clone, Debug)]
@@ -180,12 +182,61 @@ impl Contact {
                 + weight_hessian * value,
         ))
     }
+
+    /// A pair's friction at positions `x`, fixed for a time step: `None` where its barrier does
+    /// not push, or paper has no friction.
+    pub(crate) fn pair_slip(
+        &self,
+        pair: &Pair,
+        x: &[Point],
+        thickness: f64,
+        fade: Option<f64>,
+    ) -> Option<Slip> {
+        let points = pair.at(x);
+        let squared = distance::squared(pair.kind, &points);
+        let [_, slope, _] = self.pair(squared, thickness)?;
+        if slope == 0.0 || self.friction == 0.0 {
+            return None;
+        }
+        let weight = fade.map_or(1.0, |fade| {
+            let [start, end, other_start, other_end] = points;
+            let cross = (end - start).cross(&(other_end - other_start));
+            mollifier(cross.norm_squared(), fade)[0]
+        });
+        let weights = distance::closest_weights(pair.kind, &points);
+        let between: Point = points.iter().zip(weights).map(|(p, w)| p * w).sum();
+        let distance = between.norm();
+        // The barrier is a function of the squared distance D, so its push along the distance
+        // d is its slope in D times 2d.
+        let normal = -slope * 2.0 * distance * weight;
+        Some(Slip {
+            stencil: pair.stencil(),
+            weights,
+            tangent: tangent_plane(&(between / distance)),
+            force: self.friction * normal,
+        })
+    }
+
+    /// A vertex's friction with the table, fixed for a time step, from its clearance: `None`
+    /// where the table does not push, or has no friction.
+    pub(crate) fn table_slip(&self, vertex: u32, clearance: f64, friction: f64) -> Option<Slip> {
+        let [_, slope, _] = self.table(clearance)?;
+        if slope == 0.0 || friction == 0.0 {
+            return None;
+        }
+        Some(Slip {
+            stencil: [Some(vertex), None, None, None],
+            weights: [1.0, 0.0, 0.0, 0.0],
+            tangent: tangent_plane(&Vector3::z()),
+            force: friction * -slope,
+        })
+    }
 }
 
 /// The weight that fades two edges' barrier as they turn parallel, with its derivatives.
 ///
-/// The weight is a function of the squared cross product `cross` of the edges' directions. It
-/// is 1 from `fade` up, and falls smoothly to 0 as the edges turn parallel.
+/// The weight is a function of the squared cross product `cross` of the edges' directions. The
+/// weight is 1 from `fade` up, and falls smoothly to 0 as the edges turn parallel.
 ///
 /// Parallel edges have no single closest pair of points, so their distance is not smooth there.
 /// The points and triangles around them hold them apart instead. The weight follows incremental

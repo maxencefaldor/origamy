@@ -19,9 +19,11 @@ Every physical and numerical quantity is an input, in SI units, with a documente
 
 ## Status
 
-Phases 0 to 2 of the plan are done: the foundations, the elastic sheet, and contact with real thickness.
+Phases 0 to 3 of the plan are done: the foundations, the elastic sheet, contact with real thickness, and friction and dynamics.
 A sheet stretches, bends and folds along sharp creases, under gravity and held vertices, in implicit or quasi-static time steps.
 Paper never comes closer than its thickness to paper or to the table.
+Coulomb friction holds paper on paper and on the table, and air drags paper moving across its surface.
+A time step that does not converge retries as two half steps.
 Benchmarks hold it to known solutions:
 
 - A cantilever bent by its own weight to 30% of its length matches the elastica within 0.1%.
@@ -30,9 +32,12 @@ Benchmarks hold it to known solutions:
 - A strip curved at rest rolls into its rest shape within 1 nm.
 - Four sheets dropped on the table stack a thickness apart, each within the barrier's 2 µm gap.
 - A strip folded over itself onto the table never brings paper within its thickness of paper.
+- A square of kami slides down an incline, on the table or on paper, within 1% of Coulomb's law.
+- Below its friction angle, the square creeps by less than the 0.1 µm stick distance a step.
+- A sheet falling flat through air follows implicit Euler within 10 nm/s, to its terminal velocity of 0.91 m/s within 0.1%.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Friction and dynamics come next, in phase 3.
+Paper itself comes next, in phase 4: crease bands, plasticity, aging and presets calibrated on measurements.
 
 ## Install
 

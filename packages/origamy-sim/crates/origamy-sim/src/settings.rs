@@ -16,6 +16,8 @@ pub struct Settings {
     pub contact: Contact,
     /// The table paper rests on, if any.
     pub table: Option<Table>,
+    /// The air paper moves through, if any.
+    pub air: Option<Air>,
 }
 
 /// How the solver minimizes each time step: Newton's method with a backtracking line search.
@@ -23,8 +25,15 @@ pub struct Settings {
 pub struct Solver {
     /// The largest vertex move of a Newton update at which a time step has converged, in meters.
     pub tolerance: f64,
-    /// The most Newton iterations a time step may take.
+    /// The most Newton iterations a time step may take, in each lag of friction.
     pub iteration_limit: usize,
+    /// The most times a time step lags friction: from its start, then from each solution it
+    /// reaches, until the solution stays where it is.
+    pub lags: usize,
+    /// The shortest time step a time step that fails may halve to, in seconds.
+    ///
+    /// A time step whose solve fails retries as two time steps of half its length.
+    pub shortest_step: f64,
     /// The longest move of any vertex a time step's first Newton update may take, in meters.
     ///
     /// A longer update shrinks to this trust radius. An update shrunk and then taken whole
@@ -51,6 +60,49 @@ pub struct Contact {
     /// The squared sine of the angle under which two edges' barrier fades as they turn
     /// parallel, at their rest lengths; between 0 and 1.
     pub parallel: f64,
+    /// Coulomb's coefficient of friction between two pieces of paper.
+    pub friction: f64,
+    /// The slip within one time step under which friction holds a contact, in meters.
+    ///
+    /// Below it, the friction force grows smoothly with the slip, so a held contact creeps by
+    /// less than this distance a step.
+    pub stick: f64,
+}
+
+/// The air paper moves through, which resists paper moving across its surface.
+///
+/// Drag pushes each patch of paper against its velocity along the patch's normal. The force is
+/// half the air's density, times the drag coefficient, the patch's area and that velocity
+/// squared.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Air {
+    /// The air's density, in kilograms per cubic meter.
+    pub density: f64,
+    /// The drag coefficient of paper moving across its surface.
+    pub drag: f64,
+}
+
+impl Default for Air {
+    /// Dry air at 20 °C at sea level, of density 1.204 kg/m³. The drag coefficient, 1.17, is a
+    /// square plate's across the flow, from Hoerner's Fluid-Dynamic Drag.
+    fn default() -> Self {
+        Self {
+            density: 1.204,
+            drag: 1.17,
+        }
+    }
+}
+
+impl Air {
+    /// Checks that every setting takes a value it may.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first setting outside its values.
+    pub fn check(&self) -> Result<(), ParameterError> {
+        positive("air density", self.density)?;
+        positive("drag coefficient", self.drag)
+    }
 }
 
 /// A table: the horizontal plane paper cannot pass below.
@@ -58,10 +110,22 @@ pub struct Contact {
 pub struct Table {
     /// The height of the table's top, in meters.
     pub height: f64,
+    /// Coulomb's coefficient of friction between paper and the table.
+    pub friction: f64,
+}
+
+impl Default for Table {
+    /// A table at height zero, as rough as paper.
+    fn default() -> Self {
+        Self {
+            height: 0.0,
+            friction: Contact::default().friction,
+        }
+    }
 }
 
 impl Default for Settings {
-    /// Earth's gravity along −z, time steps of a sixtieth of a second, and no table.
+    /// Earth's gravity along −z, time steps of a sixtieth of a second, air, and no table.
     fn default() -> Self {
         Self {
             gravity: [0.0, 0.0, -9.81],
@@ -69,17 +133,21 @@ impl Default for Settings {
             solver: Solver::default(),
             contact: Contact::default(),
             table: None,
+            air: Some(Air::default()),
         }
     }
 }
 
 impl Default for Solver {
     /// A tolerance of 10 nm within 200 iterations, and a line search that halves updates. The
-    /// trust radius is a quarter meter, about the size of a sheet of origami paper.
+    /// trust radius is a quarter meter, about the size of a sheet of origami paper. Friction
+    /// lags up to three times a step, and a step halves down to 10 µs.
     fn default() -> Self {
         Self {
             tolerance: 1e-8,
             iteration_limit: 200,
+            lags: 3,
+            shortest_step: 1e-5,
             trust_radius: 0.25,
             sufficient_decrease: 1e-4,
             backtracking: 0.5,
@@ -90,12 +158,16 @@ impl Default for Solver {
 
 impl Default for Contact {
     /// A barrier that starts 2 µm beyond the thickness, with an energy scale of 10 nJ. The
-    /// barrier between two edges fades within about 1.8° of parallel.
+    /// barrier between two edges fades within about 1.8° of parallel. Friction between paper
+    /// has a coefficient of 0.4, inside the measured ranges: 0.17 to 0.44 sliding, and 0.33 to
+    /// 0.61 at rest. Friction holds contacts that slip less than 0.1 µm a step.
     fn default() -> Self {
         Self {
             gap: 2e-6,
             stiffness: 1e-8,
             parallel: 1e-3,
+            friction: 0.4,
+            stick: 1e-7,
         }
     }
 }
@@ -118,7 +190,8 @@ impl Settings {
         )?;
         self.solver.check()?;
         self.contact.check()?;
-        self.table.as_ref().map_or(Ok(()), Table::check)
+        self.table.as_ref().map_or(Ok(()), Table::check)?;
+        self.air.as_ref().map_or(Ok(()), Air::check)
     }
 }
 
@@ -140,6 +213,12 @@ impl Solver {
             self.iteration_limit > 0,
             "at least 1",
         )?;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the count only appears in a message"
+        )]
+        require("lags", self.lags as f64, self.lags > 0, "at least 1")?;
+        positive("shortest step", self.shortest_step)?;
         positive("trust radius", self.trust_radius)?;
         fraction("sufficient decrease", self.sufficient_decrease)?;
         fraction("backtracking", self.backtracking)?;
@@ -156,7 +235,14 @@ impl Contact {
     pub fn check(&self) -> Result<(), ParameterError> {
         positive("contact gap", self.gap)?;
         positive("contact stiffness", self.stiffness)?;
-        fraction("parallel", self.parallel)
+        fraction("parallel", self.parallel)?;
+        require(
+            "friction",
+            self.friction,
+            self.friction >= 0.0 && self.friction.is_finite(),
+            "zero or positive, and finite",
+        )?;
+        positive("stick", self.stick)
     }
 }
 
@@ -167,7 +253,13 @@ impl Table {
     ///
     /// Returns the first setting outside its values.
     pub fn check(&self) -> Result<(), ParameterError> {
-        finite("table height", self.height)
+        finite("table height", self.height)?;
+        require(
+            "table friction",
+            self.friction,
+            self.friction >= 0.0 && self.friction.is_finite(),
+            "zero or positive, and finite",
+        )
     }
 }
 
@@ -179,7 +271,10 @@ mod tests {
     fn the_defaults_are_valid() {
         Settings::default().check().unwrap();
         let with_table = Settings {
-            table: Some(Table { height: -0.1 }),
+            table: Some(Table {
+                height: -0.1,
+                ..Table::default()
+            }),
             time_step: f64::INFINITY,
             ..Settings::default()
         };
@@ -238,6 +333,7 @@ mod tests {
                 Settings {
                     table: Some(Table {
                         height: f64::NEG_INFINITY,
+                        ..Table::default()
                     }),
                     ..base
                 },

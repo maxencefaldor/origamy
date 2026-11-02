@@ -4,6 +4,7 @@ import math
 import re
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hypothesis import given
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic_settings import CliApp, SettingsConfigDict
 
 from origamy_sim import (
+    Air,
     Config,
     Contact,
     Crease,
@@ -93,42 +95,53 @@ def test_pydantic_accepts_a_crease_exactly_when_the_core_does(stiffness: float) 
     assert validates(Crease, {"stiffness": stiffness}) == core
 
 
-@given(
-    st.tuples(NUMBERS, NUMBERS, NUMBERS),
-    NUMBERS,
-    st.fixed_dictionaries(
+def settings_data() -> st.SearchStrategy[dict[str, Any]]:
+    return st.fixed_dictionaries(
         {
-            "tolerance": NUMBERS,
-            "iteration_limit": st.integers(-2, 2),
-            "trust_radius": NUMBERS,
-            "sufficient_decrease": NUMBERS,
-            "backtracking": NUMBERS,
-            "shortest_update": NUMBERS,
+            "gravity": st.tuples(NUMBERS, NUMBERS, NUMBERS),
+            "time_step": NUMBERS,
+            "solver": st.fixed_dictionaries(
+                {
+                    "iteration_limit": st.integers(-2, 2),
+                    "lags": st.integers(-2, 2),
+                    **dict.fromkeys(
+                        (
+                            "tolerance",
+                            "shortest_step",
+                            "trust_radius",
+                            "sufficient_decrease",
+                            "backtracking",
+                            "shortest_update",
+                        ),
+                        NUMBERS,
+                    ),
+                }
+            ),
+            "contact": st.fixed_dictionaries(
+                dict.fromkeys(
+                    ("gap", "stiffness", "parallel", "friction", "stick"), NUMBERS
+                )
+            ),
+            "table": st.none()
+            | st.fixed_dictionaries(dict.fromkeys(("height", "friction"), NUMBERS)),
+            "air": st.none()
+            | st.fixed_dictionaries(dict.fromkeys(("density", "drag"), NUMBERS)),
         }
-    ),
-    st.fixed_dictionaries({"gap": NUMBERS, "stiffness": NUMBERS, "parallel": NUMBERS}),
-    st.none() | st.fixed_dictionaries({"height": NUMBERS}),
-)
+    )
+
+
+@given(settings_data())
 def test_pydantic_accepts_settings_exactly_when_the_core_does(
-    gravity: tuple[float, float, float],
-    time_step: float,
-    solver: dict[str, float],
-    contact: dict[str, float],
-    table: dict[str, float] | None,
+    data: dict[str, Any],
 ) -> None:
-    data = {
-        "gravity": gravity,
-        "time_step": time_step,
-        "solver": solver,
-        "contact": contact,
-        "table": table,
-    }
+    table, air = data["table"], data["air"]
     unchecked = Settings.model_construct(
-        gravity=gravity,
-        time_step=time_step,
-        solver=Solver.model_construct(None, **solver),
-        contact=Contact.model_construct(None, **contact),
+        gravity=data["gravity"],
+        time_step=data["time_step"],
+        solver=Solver.model_construct(None, **data["solver"]),
+        contact=Contact.model_construct(None, **data["contact"]),
         table=None if table is None else Table.model_construct(None, **table),
+        air=None if air is None else Air.model_construct(None, **air),
     )
     try:
         Simulation([], unchecked)

@@ -3,7 +3,9 @@
 //! The models validate in Python, and the core checks the values again, so a model built
 //! without validation still meets the core's checks.
 
-use origamy_sim::{Contact, Crease, Material, Settings, Solver, Stiffness, StrainLimit, Table};
+use origamy_sim::{
+    Air, Contact, Crease, Material, Settings, Solver, Stiffness, StrainLimit, Table,
+};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -142,6 +144,8 @@ impl Parameters for Solver {
         Ok(Self {
             tolerance: field(model, "tolerance")?,
             iteration_limit: field(model, "iteration_limit")?,
+            lags: field(model, "lags")?,
+            shortest_step: field(model, "shortest_step")?,
             trust_radius: field(model, "trust_radius")?,
             sufficient_decrease: field(model, "sufficient_decrease")?,
             backtracking: field(model, "backtracking")?,
@@ -152,6 +156,8 @@ impl Parameters for Solver {
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("tolerance", self.tolerance)?;
         fields.set_item("iteration_limit", self.iteration_limit)?;
+        fields.set_item("lags", self.lags)?;
+        fields.set_item("shortest_step", self.shortest_step)?;
         fields.set_item("trust_radius", self.trust_radius)?;
         fields.set_item("sufficient_decrease", self.sufficient_decrease)?;
         fields.set_item("backtracking", self.backtracking)?;
@@ -167,13 +173,17 @@ impl Parameters for Contact {
             gap: field(model, "gap")?,
             stiffness: field(model, "stiffness")?,
             parallel: field(model, "parallel")?,
+            friction: field(model, "friction")?,
+            stick: field(model, "stick")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("gap", self.gap)?;
         fields.set_item("stiffness", self.stiffness)?;
-        fields.set_item("parallel", self.parallel)
+        fields.set_item("parallel", self.parallel)?;
+        fields.set_item("friction", self.friction)?;
+        fields.set_item("stick", self.stick)
     }
 }
 
@@ -183,11 +193,29 @@ impl Parameters for Table {
     fn read(model: &Bound<'_, PyAny>) -> PyResult<Self> {
         Ok(Self {
             height: field(model, "height")?,
+            friction: field(model, "friction")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
-        fields.set_item("height", self.height)
+        fields.set_item("height", self.height)?;
+        fields.set_item("friction", self.friction)
+    }
+}
+
+impl Parameters for Air {
+    const MODEL: &'static str = "Air";
+
+    fn read(model: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            density: field(model, "density")?,
+            drag: field(model, "drag")?,
+        })
+    }
+
+    fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
+        fields.set_item("density", self.density)?;
+        fields.set_item("drag", self.drag)
     }
 }
 
@@ -201,6 +229,7 @@ impl Parameters for Settings {
             solver: field::<Model<Solver>>(model, "solver")?.0,
             contact: field::<Model<Contact>>(model, "contact")?.0,
             table: field::<Option<Model<Table>>>(model, "table")?.map(|t| t.0),
+            air: field::<Option<Model<Air>>>(model, "air")?.map(|a| a.0),
         })
     }
 
@@ -210,6 +239,7 @@ impl Parameters for Settings {
         fields.set_item("time_step", self.time_step)?;
         fields.set_item("solver", Model(self.solver))?;
         fields.set_item("contact", Model(self.contact))?;
-        fields.set_item("table", self.table.map(Model))
+        fields.set_item("table", self.table.map(Model))?;
+        fields.set_item("air", self.air.map(Model))
     }
 }

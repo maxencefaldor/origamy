@@ -13,6 +13,7 @@ use std::cell::OnceCell;
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
+use crate::contact::friction::Slip;
 use crate::contact::{self, Kind, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::membrane::{self, Stretching};
@@ -35,6 +36,11 @@ pub struct Energy {
     pub creases: f64,
     /// The energy of contact's barrier, between sheets and with the table.
     pub contact: f64,
+    /// The work friction does against the slip of contacts over the time step, up to the
+    /// smoothing below the stick distance.
+    pub friction: f64,
+    /// The work air drag does against the paper over the time step.
+    pub drag: f64,
     /// The potential energy of gravity, zero at the origin.
     pub gravity: f64,
     /// The kinetic energy.
@@ -49,7 +55,7 @@ impl Energy {
     }
 
     /// Every term, in a fixed order.
-    fn terms(&self) -> [f64; 7] {
+    fn terms(&self) -> [f64; 9] {
         // The destructuring names every field, so a new term cannot be left out of the total.
         let Self {
             stretching,
@@ -57,6 +63,8 @@ impl Energy {
             bending,
             creases,
             contact,
+            friction,
+            drag,
             gravity,
             kinetic,
         } = *self;
@@ -66,6 +74,8 @@ impl Energy {
             bending,
             creases,
             contact,
+            friction,
+            drag,
             gravity,
             kinetic,
         ]
@@ -96,10 +106,13 @@ impl Potential {
 /// What a time step did.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Report {
-    /// Whether the step reached its tolerance.
+    /// Whether the step reached its tolerance, in every time step it took.
     pub converged: bool,
-    /// The Newton iterations the step took.
+    /// The Newton iterations the step took, over every time step and every lag of friction.
     pub iterations: usize,
+    /// The time steps the step took: 1, or more where a time step that did not converge was
+    /// halved.
+    pub substeps: usize,
     /// The largest vertex move of the last Newton update, in meters: the residual.
     pub update: f64,
     /// The energy after the step.
@@ -420,12 +433,17 @@ impl Simulation {
     #[must_use]
     pub fn energy(&self) -> Energy {
         let x: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
-        let mut energy = self.potential(&x, &x, 0.0, &self.candidates(&x, &x)).energy;
+        let mut energy = self
+            .potential(&x, &Incremental::still(&x), &self.candidates(&x, &x))
+            .energy;
         energy.kinetic = self.kinetic();
         energy
     }
 
     /// Advances the simulation by one time step.
+    ///
+    /// A time step whose solve does not converge retries as two of half its length, down to
+    /// the solver's shortest time step.
     ///
     /// # Errors
     ///
@@ -434,6 +452,44 @@ impl Simulation {
     /// to the table. A refused step leaves the state as it was.
     pub fn step(&mut self) -> Result<Report, StepError> {
         let dt = self.settings.time_step;
+        self.advance(dt)
+    }
+
+    /// Advances the simulation by `dt`, halving the time step wherever it does not converge,
+    /// down to the shortest time step. A refused step leaves the state as it was.
+    fn advance(&mut self, dt: f64) -> Result<Report, StepError> {
+        let (positions, velocities, time) =
+            (self.positions.clone(), self.velocities.clone(), self.time);
+        let report = self.attempt(dt)?;
+        let half = 0.5 * dt;
+        if report.converged || !dt.is_finite() || half < self.settings.solver.shortest_step {
+            return Ok(report);
+        }
+        self.positions.clone_from(&positions);
+        self.velocities.clone_from(&velocities);
+        self.time = time;
+        let halves = self
+            .advance(half)
+            .and_then(|first| Ok((first, self.advance(half)?)));
+        match halves {
+            Ok((first, second)) => Ok(Report {
+                converged: first.converged && second.converged,
+                iterations: report.iterations + first.iterations + second.iterations,
+                substeps: first.substeps + second.substeps,
+                ..second
+            }),
+            Err(error) => {
+                (self.positions, self.velocities, self.time) = (positions, velocities, time);
+                Err(error)
+            }
+        }
+    }
+
+    /// One time step of length `dt`, reported whether it converged or not.
+    ///
+    /// Friction lags from the step's start, then from each solution the step reaches, until
+    /// the solution stays where it is or the lags run out.
+    fn attempt(&mut self, dt: f64) -> Result<Report, StepError> {
         let start: Vec<Point> = self.positions.iter().map(|&p| Point::from(p)).collect();
         self.trees = Trees::new(&self.primitives, &start);
         let predicted: Vec<Point> = if dt.is_finite() {
@@ -447,8 +503,38 @@ impl Simulation {
             start.clone()
         };
         let inertia = if dt.is_finite() { 1.0 / (dt * dt) } else { 0.0 };
-        let mut x = start.clone();
-        let mut potential = self.potential(&x, &predicted, inertia, &self.candidates(&x, &x));
+        let mut slips = self.slips(&start);
+        let normals = self.normals(&start);
+        let mut solve = Solve {
+            x: start.clone(),
+            potential: Potential::default(),
+            converged: false,
+            iterations: 0,
+            update: f64::INFINITY,
+        };
+        let mut iterations = 0;
+        for lag in 0..self.settings.solver.lags {
+            let incremental = Incremental {
+                start: &start,
+                predicted: &predicted,
+                inertia,
+                slips: &slips,
+                normals: &normals,
+            };
+            solve = self.minimize(solve.x, &incremental)?;
+            iterations += solve.iterations;
+            let settled = lag > 0 && solve.iterations <= 1;
+            if !solve.converged || slips.is_empty() || settled {
+                break;
+            }
+            slips = self.slips(&solve.x);
+        }
+        Ok(self.finish(dt, &start, &solve, iterations))
+    }
+
+    /// The minimum of a time step's incremental potential, by Newton's method from `x`.
+    fn minimize(&self, mut x: Vec<Point>, incremental: &Incremental) -> Result<Solve, StepError> {
+        let mut potential = self.potential(&x, incremental, &self.candidates(&x, &x));
         if !potential.total().is_finite() {
             return Err(StepError::Overlapping);
         }
@@ -462,7 +548,7 @@ impl Simulation {
         while iterations < self.settings.solver.iteration_limit {
             iterations += 1;
             let near = self.candidates(&x, &x);
-            let derivatives = self.derivatives(&x, &predicted, inertia, &near);
+            let derivatives = self.derivatives(&x, incremental, &near);
             self.grow(&mut grown, &derivatives.pairs);
             let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
@@ -504,8 +590,7 @@ impl Simulation {
             let displacement = moved(&vec![Point::zeros(); x.len()], &direction, 1.0);
             let (safe, swept) = self.safe_fraction(&x, &displacement);
             let search = Search {
-                predicted: &predicted,
-                inertia,
+                incremental,
                 rigidity: &rigidity,
                 potential,
                 slope,
@@ -524,7 +609,13 @@ impl Simulation {
                 None => break,
             }
         }
-        Ok(self.finish(&start, &x, potential, converged, iterations, update))
+        Ok(Solve {
+            x,
+            potential,
+            converged,
+            iterations,
+            update,
+        })
     }
 
     /// Grows the system's pattern where active contacts join vertices it does not hold.
@@ -553,18 +644,10 @@ impl Simulation {
         }
     }
 
-    /// Ends a time step at positions `x`, from `start`, and reports it.
-    fn finish(
-        &mut self,
-        start: &[Point],
-        x: &[Point],
-        potential: Potential,
-        converged: bool,
-        iterations: usize,
-        update: f64,
-    ) -> Report {
-        let dt = self.settings.time_step;
-        for (i, point) in x.iter().enumerate() {
+    /// Ends a time step of length `dt` from `start` at the solution `solve`, and reports it with
+    /// the Newton iterations of all its lags.
+    fn finish(&mut self, dt: f64, start: &[Point], solve: &Solve, iterations: usize) -> Report {
+        for (i, point) in solve.x.iter().enumerate() {
             let velocity = if dt.is_finite() {
                 (point - start[i]) / dt
             } else {
@@ -578,15 +661,16 @@ impl Simulation {
         }
         let energy = Energy {
             kinetic: self.kinetic(),
-            ..potential.energy
+            ..solve.potential.energy
         };
-        let (contacts, least_gap) = self.contacts(x);
+        let (contacts, least_gap) = self.contacts(&solve.x);
         Report {
-            converged,
+            converged: solve.converged,
             iterations,
-            update,
+            substeps: 1,
+            update: solve.update,
             energy,
-            greatest_strain: self.greatest_strain(x),
+            greatest_strain: self.greatest_strain(&solve.x),
             contacts,
             least_gap,
             time: self.time,
@@ -617,8 +701,7 @@ impl Simulation {
         let mut fraction = search.safe;
         while fraction >= self.settings.solver.shortest_update {
             let trial = moved(x, direction, fraction);
-            let trial_potential =
-                self.potential(&trial, search.predicted, search.inertia, search.pairs);
+            let trial_potential = self.potential(&trial, search.incremental, search.pairs);
             if accepts(&trial_potential, fraction) {
                 return Some((trial, trial_potential, fraction));
             }
@@ -628,7 +711,7 @@ impl Simulation {
                 let (safe, pairs) = self.safe_fraction(x, &way);
                 if safe >= 1.0 {
                     let retracted_potential =
-                        self.potential(&retracted, search.predicted, search.inertia, &pairs);
+                        self.potential(&retracted, search.incremental, &pairs);
                     if accepts(&retracted_potential, fraction) {
                         return Some((retracted, retracted_potential, fraction));
                     }
@@ -703,17 +786,18 @@ impl Simulation {
     ///
     /// The strain barrier is infinite past the strain cap, and contact is infinite where paper
     /// reaches its thickness.
-    fn potential(
-        &self,
-        x: &[Point],
-        predicted: &[Point],
-        inertia: f64,
-        pairs: &[Pair],
-    ) -> Potential {
+    fn potential(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> Potential {
         let gravity = Point::from(self.settings.gravity);
         let mut energy = Energy::default();
         let mut inertia_term = 0.0;
         let contact = self.settings.contact;
+        let frictions: Vec<f64> = incremental
+            .slips
+            .par_iter()
+            .map(|slip| slip.energy(x, incremental.start, contact.stick))
+            .collect();
+        energy.friction = frictions.iter().sum();
+        let (predicted, inertia) = (incremental.predicted, incremental.inertia);
         let barriers: Vec<f64> = pairs
             .par_iter()
             .map(|pair| {
@@ -739,6 +823,10 @@ impl Simulation {
                 energy.gravity -= mass * gravity.dot(&x[v]);
                 if !self.held[offset + v] {
                     inertia_term += 0.5 * mass * inertia * (x[v] - predicted[v]).norm_squared();
+                    if let Some(drag) = self.drag(incremental, offset + v, *area) {
+                        let across = (x[v] - incremental.start[offset + v]).dot(&drag.normal);
+                        energy.drag += drag.scale * across.abs().powi(3) / 3.0;
+                    }
                 }
             }
             let mesh = sheet.mesh();
@@ -795,14 +883,9 @@ impl Simulation {
     }
 
     /// Every element's gradient and Hessian at positions `x`, with contact between `pairs`.
-    fn derivatives(
-        &self,
-        x: &[Point],
-        predicted: &[Point],
-        inertia: f64,
-        pairs: &[Pair],
-    ) -> Derivatives {
+    fn derivatives(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> Derivatives {
         let contact = self.settings.contact;
+        let (predicted, inertia) = (incremental.predicted, incremental.inertia);
         let mut derivatives = Derivatives {
             pairs: pairs
                 .par_iter()
@@ -811,6 +894,14 @@ impl Simulation {
                     let (gradient, hessian) =
                         contact.pair_derivatives(pair, x, self.pair_thickness(pair), fade)?;
                     Some((pair.stencil(), gradient, hessian))
+                })
+                .collect(),
+            friction: incremental
+                .slips
+                .par_iter()
+                .map(|slip| {
+                    let (gradient, hessian) = slip.derivatives(x, incremental.start, contact.stick);
+                    (slip.stencil, gradient, hessian)
                 })
                 .collect(),
             ..Derivatives::default()
@@ -840,6 +931,15 @@ impl Simulation {
                 derivatives
                     .vertices
                     .push((global(vertex), force.into(), mass * inertia));
+                if let Some(drag) = self.drag(incremental, offset + v, *area) {
+                    let across = (x[v] - incremental.start[offset + v]).dot(&drag.normal);
+                    let gradient = drag.normal * (drag.scale * across.abs() * across);
+                    let hessian =
+                        drag.normal * drag.normal.transpose() * (2.0 * drag.scale * across.abs());
+                    derivatives
+                        .drag
+                        .push(([Some(global(vertex))], gradient, hessian));
+                }
             }
             derivatives.triangles.par_extend(
                 mesh.triangles()
@@ -934,6 +1034,66 @@ fn bend(
 }
 
 impl Simulation {
+    /// The air drag on a vertex with lumped area `area`, in a time step.
+    ///
+    /// The drag is `None` without air, in quasi-static steps, and for a vertex without a
+    /// normal. Otherwise the drag is the potential k |w·n|³ / 3, with k = ρ C A / 2Δt². Here w
+    /// is the vertex's move over the step, and n its normal at the step's start. The potential's
+    /// gradient is the drag force ½ ρ C A |v·n| (v·n) n, with v = w / Δt the vertex's velocity.
+    fn drag(&self, incremental: &Incremental, vertex: usize, area: f64) -> Option<Drag> {
+        let air = self.settings.air?;
+        let normal = *incremental.normals.get(vertex)?;
+        (incremental.inertia > 0.0 && normal != Point::zeros()).then_some(Drag {
+            normal,
+            scale: 0.5 * air.density * air.drag * area * incremental.inertia,
+        })
+    }
+
+    /// Each vertex's unit normal at positions `x`: the mean of its triangles' normals, weighted
+    /// by their areas.
+    fn normals(&self, x: &[Point]) -> Vec<Point> {
+        let mut normals = vec![Point::zeros(); x.len()];
+        for (s, sheet) in self.sheets.iter().enumerate() {
+            let offset = self.offsets[s];
+            for triangle in sheet.mesh().triangles() {
+                let [a, b, c] = triangle.map(|v| offset + v as usize);
+                // The cross product's size is twice the triangle's area.
+                let weighted = (x[b] - x[a]).cross(&(x[c] - x[a]));
+                for v in [a, b, c] {
+                    normals[v] += weighted;
+                }
+            }
+        }
+        for normal in &mut normals {
+            let size = normal.norm();
+            if size > 0.0 {
+                *normal /= size;
+            }
+        }
+        normals
+    }
+
+    /// Each contact's friction at positions `x`, fixed for a time step that starts there.
+    fn slips(&self, x: &[Point]) -> Vec<Slip> {
+        let contact = self.settings.contact;
+        let pairs = self.candidates(x, x);
+        let mut slips: Vec<Slip> = pairs
+            .par_iter()
+            .filter_map(|pair| {
+                let fade = contact.fade(&self.primitives, pair);
+                contact.pair_slip(pair, x, self.pair_thickness(pair), fade)
+            })
+            .collect();
+        if let Some(table) = self.settings.table {
+            for (v, p) in x.iter().enumerate() {
+                let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
+                let clearance = self.clearance(v, p).expect("the scene has a table");
+                slips.extend(contact.table_slip(vertex, clearance, table.friction));
+            }
+        }
+        slips
+    }
+
     /// A vertex's clearance at position `p`: its height over the table less its half
     /// thickness, or `None` without a table.
     fn clearance(&self, vertex: usize, p: &Point) -> Option<f64> {
@@ -1065,6 +1225,10 @@ struct Derivatives {
     table: Vec<(u32, f64, f64)>,
     /// The contact barrier of each pair within reach.
     pairs: Vec<Element<4, 12>>,
+    /// The friction of each contact lagged from the step's start, positive semi-definite already.
+    friction: Vec<Element<4, 12>>,
+    /// The air drag on each vertex, positive semi-definite already.
+    drag: Vec<Element<1, 3>>,
     /// Each triangle's stretching.
     triangles: Vec<Element<3, 9>>,
     /// Each triangle's plate bending in the half-angle sines, positive semi-definite already.
@@ -1084,6 +1248,8 @@ impl Derivatives {
             assembly.add_vertex_z(vertex, slope, curvature);
         }
         scatter_elements(&self.pairs, assembly, projected);
+        scatter_elements(&self.friction, assembly, false);
+        scatter_elements(&self.drag, assembly, false);
         scatter_elements(&self.triangles, assembly, projected);
         scatter_elements(&self.plates, assembly, false);
         scatter_elements(&self.dihedrals, assembly, projected);
@@ -1111,10 +1277,53 @@ fn scatter_elements<const N: usize, const D: usize>(
     }
 }
 
+/// Air drag on one vertex in a time step: the direction it acts along, and its scale.
+struct Drag {
+    normal: Point,
+    /// The scale k = ρ C A / 2Δt², in kilograms per square meter.
+    scale: f64,
+}
+
+/// Where Newton's method ended a time step's minimization, and how.
+struct Solve {
+    x: Vec<Point>,
+    potential: Potential,
+    converged: bool,
+    iterations: usize,
+    /// The largest vertex move of the last Newton update, in meters.
+    update: f64,
+}
+
+/// The terms of a time step's incremental potential that the step holds fixed.
+///
+/// The terms are where the step starts, where inertia carries each vertex, each contact's
+/// friction and each vertex's normal.
+struct Incremental<'a> {
+    start: &'a [Point],
+    predicted: &'a [Point],
+    /// The inertia term's weight, 1 / Δt², or zero for quasi-static steps.
+    inertia: f64,
+    slips: &'a [Slip],
+    /// Each vertex's unit normal at the step's start, along which air drags it.
+    normals: &'a [Point],
+}
+
+impl<'a> Incremental<'a> {
+    /// The terms of no time step: positions `x` alone, without inertia or friction.
+    fn still(x: &'a [Point]) -> Self {
+        Self {
+            start: x,
+            predicted: x,
+            inertia: 0.0,
+            slips: &[],
+            normals: &[],
+        }
+    }
+}
+
 /// What a line search needs from its Newton iteration.
 struct Search<'a, 'b> {
-    predicted: &'b [Point],
-    inertia: f64,
+    incremental: &'b Incremental<'b>,
     rigidity: &'a OnceCell<Result<Factor<'a>, SingularError>>,
     /// The incremental potential where the update starts.
     potential: Potential,
@@ -1208,7 +1417,7 @@ mod tests {
     use super::*;
     use crate::material::Material;
     use crate::mesh::Mesh;
-    use crate::settings::Table;
+    use crate::settings::{Solver, Table};
     use crate::sheet::Crease;
 
     /// A small deterministic wobble, to keep every quantity away from symmetric values.
@@ -1220,8 +1429,23 @@ mod tests {
 
     /// Checks the assembled gradient and Hessian at `x` against central differences of the
     /// incremental potential and of the gradient, to a relative tolerance.
-    fn check(simulation: &Simulation, x: &[Point], predicted: &[Point], step: f64) {
-        let inertia = 3600.0;
+    ///
+    /// The time step starts at `start`, where friction is lagged, and inertia carries every
+    /// vertex about a millimeter from there.
+    fn check(simulation: &Simulation, x: &[Point], start: &[Point], step: f64) {
+        let predicted: Vec<Point> = start
+            .iter()
+            .map(|p| p + Point::new(0.3, -0.2, 1.0) * 1e-3)
+            .collect();
+        let slips = simulation.slips(start);
+        let normals = simulation.normals(start);
+        let incremental = Incremental {
+            start,
+            predicted: &predicted,
+            inertia: 3600.0,
+            slips: &slips,
+            normals: &normals,
+        };
         let pairs = simulation.candidates(x, x);
         let pattern = Pattern::new(
             x.len(),
@@ -1234,14 +1458,14 @@ mod tests {
         let assemble = |y: &[Point]| {
             let mut assembly = Assembly::new(&pattern, &simulation.held);
             simulation
-                .derivatives(y, predicted, inertia, &pairs)
+                .derivatives(y, &incremental, &pairs)
                 .scatter(&mut assembly, false);
             assembly
         };
         let gradient = |y: &[Point]| assemble(y).gradient;
         let at_x = assemble(x);
         let hessian = at_x.dense();
-        let potential = |y: &[Point]| simulation.potential(y, predicted, inertia, &pairs).total();
+        let potential = |y: &[Point]| simulation.potential(y, &incremental, &pairs).total();
         // Rounding limits the differences to about the scale of a column. Each entry is held to
         // a tolerance relative to itself and to its column.
         let gradient_scale = at_x.gradient.iter().fold(0.0, |m: f64, g| m.max(g.abs()));
@@ -1303,10 +1527,17 @@ mod tests {
                 turned + wobble(v, 2e-7)
             })
             .collect();
-        let energy = simulation.potential(&x, &x, 0.0, &[]).energy;
+        let energy = simulation
+            .potential(&x, &Incremental::still(&x), &[])
+            .energy;
         assert!(energy.strain_barrier > 0.0 && energy.creases > 0.0 && energy.bending > 0.0);
-        let predicted: Vec<Point> = x.iter().map(|p| p + Point::new(0.0, 0.0, 1e-3)).collect();
-        check(&simulation, &x, &predicted, 1e-9);
+        // The step started a tenth of a millimeter away, so inertia and air drag act.
+        let start: Vec<Point> = x
+            .iter()
+            .enumerate()
+            .map(|(v, p)| p - wobble(v + 3, 1e-4))
+            .collect();
+        check(&simulation, &x, &start, 1e-9);
     }
 
     #[test]
@@ -1320,7 +1551,7 @@ mod tests {
             let upper =
                 Sheet::new(Mesh::grid(2, 2, 0.006, 0.006).unwrap(), Material::kami()).unwrap();
             let settings = Settings {
-                table: Some(Table { height: 0.0 }),
+                table: Some(Table::default()),
                 ..Settings::default()
             };
             let simulation = Simulation::new(vec![lower, upper], settings).unwrap();
@@ -1340,14 +1571,89 @@ mod tests {
                 })
                 .collect();
             let pairs = simulation.candidates(&x, &x);
-            let energy = simulation.potential(&x, &x, 0.0, &pairs).energy;
+            let energy = simulation
+                .potential(&x, &Incremental::still(&x), &pairs)
+                .energy;
             assert!(
                 energy.contact > 0.0 && pairs.len() > 10,
                 "{} pairs",
                 pairs.len()
             );
-            let predicted: Vec<Point> = x.iter().map(|p| p - Point::new(0.0, 0.0, 1e-3)).collect();
-            check(&simulation, &x, &predicted, 1e-9);
+            // The step started where each vertex lay up to 0.3 µm away in the plane. Some
+            // contacts thus slip past the stick distance, and some within it.
+            let start: Vec<Point> = x
+                .iter()
+                .enumerate()
+                .map(|(v, p)| {
+                    let shift = wobble(v + 7, 3e-7);
+                    p - Point::new(shift[0], shift[1], 0.0)
+                })
+                .collect();
+            let slips = simulation.slips(&start);
+            assert!(slips.len() > 10, "{} slips", slips.len());
+            // The differences step well under the stick distance and the barrier's gap.
+            check(&simulation, &x, &start, 1e-10);
         }
+    }
+
+    /// A square of kami gliding at 1 m/s in its plane through a vacuum.
+    ///
+    /// The trust radius is a millimeter, and the time steps last 1/60 s.
+    fn glide(solver: Solver) -> Simulation {
+        let settings = Settings {
+            time_step: 1.0 / 60.0,
+            air: None,
+            solver: Solver {
+                trust_radius: 1e-3,
+                ..solver
+            },
+            ..Settings::default()
+        };
+        let sheet = Sheet::new(Mesh::grid(2, 2, 0.1, 0.1).unwrap(), Material::kami()).unwrap();
+        let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+        simulation.set_velocities(0, &[[1.0, 0.0, 0.0]; 9]).unwrap();
+        simulation
+    }
+
+    #[test]
+    fn a_time_step_the_solver_cannot_finish_halves_into_two_it_can() {
+        // A step moves the square 17 mm. The update starts at the trust radius and doubles,
+        // so Newton's method spans the step in six iterations and each half step in five.
+        let mut simulation = glide(Solver {
+            iteration_limit: 5,
+            ..Solver::default()
+        });
+        let rest = simulation.positions(0).to_vec();
+        let report = simulation.step().unwrap();
+        assert!(report.converged && report.substeps == 2, "{report:?}");
+        assert_eq!(
+            report.iterations, 15,
+            "the halves follow five spent iterations"
+        );
+        let dt = 1.0 / 60.0;
+        assert!((report.time - dt).abs() < f64::EPSILON);
+        // Implicit Euler over two half steps h: the speed gains g h twice, and the drop is
+        // h (g h + 2 g h).
+        let h = 0.5 * dt;
+        let drop = 3.0 * 9.81 * h * h;
+        for (p, r) in simulation.positions(0).iter().zip(&rest) {
+            assert!((p[0] - r[0] - dt).abs() < 1e-12 && (p[2] + drop).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_time_step_that_never_converges_halves_down_to_the_shortest_time_step() {
+        // One iteration never confirms a move, so every attempt fails. A fifth of the time
+        // step lies between a quarter and an eighth of it, so the step ends as four quarters.
+        let dt = 1.0 / 60.0;
+        let mut simulation = glide(Solver {
+            iteration_limit: 1,
+            shortest_step: 0.2 * dt,
+            ..Solver::default()
+        });
+        let report = simulation.step().unwrap();
+        assert!(!report.converged && report.substeps == 4, "{report:?}");
+        assert_eq!(report.iterations, 1 + 2 + 4);
+        assert!((report.time - dt).abs() < f64::EPSILON);
     }
 }

@@ -39,7 +39,10 @@ fn clamp(simulation: &mut Simulation, cells: u32) {
 /// A square of 64 by 64 cells landing on the table: contact at every vertex.
 fn drop_on_table() -> Simulation {
     let settings = Settings {
-        table: Some(Table { height: -1e-3 }),
+        table: Some(Table {
+            height: -1e-3,
+            ..Table::default()
+        }),
         ..Settings::default()
     };
     let mut simulation = Simulation::new(vec![square(64)], settings).unwrap();

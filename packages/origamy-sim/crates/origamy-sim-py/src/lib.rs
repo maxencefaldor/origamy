@@ -320,6 +320,10 @@ struct PyEnergy {
     creases: f64,
     /// The energy of contact's barrier, between sheets and with the table.
     contact: f64,
+    /// The work friction does against the slip of contacts over the time step.
+    friction: f64,
+    /// The work air drag does against the paper over the time step.
+    drag: f64,
     /// The potential energy of gravity, zero at the origin.
     gravity: f64,
     /// The kinetic energy.
@@ -334,6 +338,8 @@ impl From<Energy> for PyEnergy {
             bending: e.bending,
             creases: e.creases,
             contact: e.contact,
+            friction: e.friction,
+            drag: e.drag,
             gravity: e.gravity,
             kinetic: e.kinetic,
         }
@@ -351,6 +357,8 @@ impl PyEnergy {
             bending: self.bending,
             creases: self.creases,
             contact: self.contact,
+            friction: self.friction,
+            drag: self.drag,
             gravity: self.gravity,
             kinetic: self.kinetic,
         }
@@ -359,12 +367,14 @@ impl PyEnergy {
 
     fn __repr__(&self) -> String {
         format!(
-            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, contact={:?}, gravity={:?}, kinetic={:?})",
+            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, contact={:?}, friction={:?}, drag={:?}, gravity={:?}, kinetic={:?})",
             self.stretching,
             self.strain_barrier,
             self.bending,
             self.creases,
             self.contact,
+            self.friction,
+            self.drag,
             self.gravity,
             self.kinetic
         )
@@ -375,10 +385,13 @@ impl PyEnergy {
 #[pyclass(name = "Report", module = "origamy_sim", frozen, eq, get_all)]
 #[derive(Clone, Copy, PartialEq)]
 struct PyReport {
-    /// Whether the step reached its tolerance.
+    /// Whether the step reached its tolerance, in every time step it took.
     converged: bool,
-    /// The Newton iterations the step took.
+    /// The Newton iterations the step took, over every time step and every lag of friction.
     iterations: usize,
+    /// The time steps the step took: 1, or more where a time step that did not converge was
+    /// halved.
+    substeps: usize,
     /// The largest vertex move of the last Newton update, in meters: the residual.
     update: f64,
     /// The energy after the step.
@@ -399,6 +412,7 @@ impl From<Report> for PyReport {
         Self {
             converged: r.converged,
             iterations: r.iterations,
+            substeps: r.substeps,
             update: r.update,
             energy: r.energy.into(),
             greatest_strain: r.greatest_strain,
@@ -413,9 +427,10 @@ impl From<Report> for PyReport {
 impl PyReport {
     fn __repr__(&self) -> String {
         format!(
-            "Report(converged={}, iterations={}, update={:?}, energy={}, greatest_strain={:?}, contacts={}, least_gap={:?}, time={:?})",
+            "Report(converged={}, iterations={}, substeps={}, update={:?}, energy={}, greatest_strain={:?}, contacts={}, least_gap={:?}, time={:?})",
             if self.converged { "True" } else { "False" },
             self.iterations,
+            self.substeps,
             self.update,
             self.energy.__repr__(),
             self.greatest_strain,
@@ -635,6 +650,9 @@ impl PySimulation {
     }
 
     /// Advances the simulation by one time step.
+    ///
+    /// A time step whose solve does not converge retries as two of half its length, down to
+    /// the solver's shortest time step.
     ///
     /// Returns:
     ///     What the step did, with whether it reached its tolerance.

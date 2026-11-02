@@ -161,7 +161,20 @@ class Solver(_Parameters):
     """The largest vertex move of a Newton update that ends a time step, in meters."""
 
     iteration_limit: Annotated[int, Field(gt=0)] = 200
-    """The most Newton iterations a time step may take."""
+    """The most Newton iterations a time step may take, in each lag of friction."""
+
+    lags: Annotated[int, Field(gt=0)] = 3
+    """The most times a time step lags friction.
+
+    Friction lags first from the step's start, then from each solution the step reaches,
+    until the solution stays where it is.
+    """
+
+    shortest_step: Positive = 1e-5
+    """The shortest time step a time step that fails may halve to, in seconds.
+
+    A time step whose solve fails retries as two time steps of half its length.
+    """
 
     trust_radius: Positive = 0.25
     """The longest vertex move of a time step's first Newton update, in meters.
@@ -197,12 +210,53 @@ class Contact(_Parameters):
     """The squared sine of the angle under which two edges' barrier fades as they turn
     parallel, at their rest lengths: 0.001 is about 1.8°."""
 
+    friction: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.4
+    """Coulomb's coefficient of friction between two pieces of paper.
+
+    The default lies inside the measured ranges for copy paper and sticky notes: 0.17
+    to 0.44 sliding, and 0.33 to 0.61 at rest.
+    """
+
+    stick: Positive = 1e-7
+    """The slip within one time step under which friction holds a contact, in meters.
+
+    Below it, the friction force grows smoothly with the slip, so a held contact creeps
+    by less than this distance a step.
+    """
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""
 
     height: Finite = 0.0
     """The height of the table's top, in meters."""
+
+    friction: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.4
+    """Coulomb's coefficient of friction between paper and the table.
+
+    The default takes a table as rough as paper.
+    """
+
+
+class Air(_Parameters):
+    """The air paper moves through, which resists paper moving across its surface.
+
+    Drag pushes each patch of paper against its velocity along the patch's normal. The
+    force is half the air's density, times the drag coefficient, the patch's area and
+    that velocity squared.
+    """
+
+    density: Positive = 1.204
+    """The air's density, in kilograms per cubic meter.
+
+    The default is dry air's, at 20 °C at sea level.
+    """
+
+    drag: Positive = 1.17
+    """The drag coefficient of paper moving across its surface.
+
+    The default is a square plate's, from Hoerner's Fluid-Dynamic Drag.
+    """
 
 
 class Settings(_Parameters):
@@ -222,6 +276,9 @@ class Settings(_Parameters):
 
     table: Table | None = None
     """The table paper rests on, if any."""
+
+    air: Air | None = Air()
+    """The air paper moves through, if any."""
 
 
 class Config(BaseSettings):

@@ -53,7 +53,7 @@ macro_rules! project {
     )*};
 }
 
-project!(2, 9, 12, 18);
+project!(2, 3, 9, 12, 18);
 
 /// The barrier that keeps a quantity `d` above zero: zero from `onset` up, smooth, and growing
 /// without bound as `d` falls to zero.

@@ -130,6 +130,12 @@ def test_a_mesh_that_makes_no_sheet_says_why(
         Mesh(rest, triangles)
 
 
+def test_the_api_page_documents_every_export() -> None:
+    page = Path(__file__).parents[3] / "docs" / "simulator" / "api.md"
+    documented = re.findall(r"^::: origamy_sim\.(\w+)$", page.read_text(), re.MULTILINE)
+    assert sorted(documented) == sorted(origamy_sim.__all__)
+
+
 def test_the_stub_types_everything_the_compiled_core_defines() -> None:
     stub = ast.parse(Path(origamy_sim.__file__).with_name("_core.pyi").read_text())
     classes = {node.name: node for node in stub.body if isinstance(node, ast.ClassDef)}

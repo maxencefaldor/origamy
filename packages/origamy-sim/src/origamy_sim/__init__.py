@@ -17,6 +17,7 @@ from origamy_sim._core import (
     SingularError,
 )
 from origamy_sim.parameters import (
+    Air,
     Config,
     Contact,
     Crease,
@@ -29,6 +30,7 @@ from origamy_sim.parameters import (
 )
 
 __all__ = [
+    "Air",
     "Config",
     "Contact",
     "Crease",
