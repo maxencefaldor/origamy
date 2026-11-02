@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from origamy.field import Number, radicands, tower
+from origamy.field import Number, radicands, remembered, tower
 
 rationals = st.fractions(max_denominator=50).filter(lambda q: abs(q) < 1000)
 numbers = st.builds(
@@ -99,3 +99,18 @@ def test_a_tower_reads_back_in_a_fresh_context() -> None:
             return float(Number.from_data(data))
 
     assert Context().run(read) == float(root)
+
+
+def test_a_tower_remembers_answers_for_as_long_as_it_lasts() -> None:
+    asked: list[Number] = []
+
+    @remembered
+    def double(number: Number) -> Number:
+        asked.append(number)
+        return number * 2
+
+    with tower(()):
+        assert double(Number.of("1/3")) == double(Number.of("1/3")) == Number.of("2/3")
+    with tower(()):
+        double(Number.of("1/3"))
+    assert len(asked) == 2

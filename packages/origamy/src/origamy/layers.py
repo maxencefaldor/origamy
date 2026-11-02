@@ -26,6 +26,7 @@ from origamy.geometry import (
     Line,
     Point,
     bounds,
+    box,
     collinear_overlap,
     intersection,
     overlaps,
@@ -166,7 +167,7 @@ class Problem:
 
     def _crossings(self, creases: list[Crease]) -> None:
         folded = self.state.folded
-        boxes = [bounds(polygon) for polygon in folded]
+        boxes = [box(polygon) for polygon in folded]
         for crease in creases:
             low_x, low_y, high_x, high_y = bounds(crease.ends)
             for face, (x0, y0, x1, y1) in enumerate(boxes):

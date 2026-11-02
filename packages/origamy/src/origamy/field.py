@@ -16,14 +16,15 @@ arithmetic decides the rest. Each build grows its own tower from the rationals, 
 """
 
 import re
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Hashable, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import wraps
 from math import gcd, inf, isqrt, lcm
 from math import sqrt as float_sqrt
-from typing import Final, override
+from typing import Final, cast, override
 
 type Real = int | Fraction | Number
 """What arithmetic with a `Number` accepts."""
@@ -378,6 +379,12 @@ class _Tower:
         """Each level's radicand as integer coefficients, as long as half that level."""
         self._roots: list[tuple[float, float]] = []
         self._bases: dict[int, list[tuple[float, float]]] = {}
+        self.memo: dict[Hashable, object] = {}
+        """Answers worked out from numbers of this tower, true for as long as it lasts.
+
+        A level added later leaves every number already made, and so every answer,
+        as it was.
+        """
         for radicand in radicands:
             self.add(radicand)
 
@@ -431,6 +438,26 @@ def _tower() -> _Tower:
         levels = _Tower()
         _TOWER.set(levels)
     return levels
+
+
+def remembered[**P, T](compute: Callable[P, T]) -> Callable[P, T]:
+    """Remember a function's answers for the numbers of the current tower.
+
+    Folding asks the same questions of the same faces step after step, and a tower's
+    numbers keep their meaning while it lasts, so its answers keep too. The arguments
+    must be hashable.
+    """
+
+    @wraps(compute)
+    def answer(*args: P.args, **kwargs: P.kwargs) -> T:
+        memo = _tower().memo
+        key = (compute, args, tuple(kwargs.items()))
+        if key in memo:
+            return cast("T", memo[key])
+        value = memo[key] = compute(*args, **kwargs)
+        return value
+
+    return answer
 
 
 def radicands() -> tuple[Number, ...]:

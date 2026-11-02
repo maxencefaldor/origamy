@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import override
 
-from origamy.field import ONE, ZERO, Exact, Number, Real
+from origamy.field import ONE, ZERO, Exact, Number, Real, remembered
 
 type PointLike = Point | tuple[Exact, Exact]
 """What a script may write for a point: a `Point`, or a pair of exact numbers."""
@@ -272,6 +272,7 @@ class Isometry:
         """The image of a line."""
         return Line.through(self(line.point), self(line.point + line.direction))
 
+    @remembered
     def polygon(self, polygon: Polygon) -> Polygon:
         """The image of a polygon, its corners still counterclockwise."""
         image = tuple(self(p) for p in polygon)
@@ -297,6 +298,8 @@ def area(polygon: Sequence[Point]) -> Number:
 
 def orientation(p: Point, q: Point, r: Point) -> int:
     """Return 1, -1 or 0 as ``r`` lies left of, right of or on the line ``pq``."""
+    if r in (p, q) or p == q:
+        return 0
     estimate = (q.x.estimate() - p.x.estimate()) * (r.y.estimate() - p.y.estimate()) - (
         q.y.estimate() - p.y.estimate()
     ) * (r.x.estimate() - p.x.estimate())
@@ -318,6 +321,7 @@ def clip(polygon: Polygon, line: Line, keep: int) -> Polygon:
     return _clipped(polygon, [line.side(p) * keep for p in polygon], line.value)
 
 
+@remembered
 def intersection(first: Polygon, second: Polygon) -> Polygon:
     """The intersection of two convex polygons, possibly empty or without area."""
     if all(covers(second, p) for p in first):
@@ -336,6 +340,7 @@ def intersection(first: Polygon, second: Polygon) -> Polygon:
     return result
 
 
+@remembered
 def overlaps(first: Polygon, second: Polygon) -> bool:
     """Whether two convex polygons of positive area share some area.
 
@@ -364,6 +369,7 @@ def crosses(polygon: Polygon, line: Line) -> bool:
     return 1 in found and -1 in found
 
 
+@remembered
 def through_inside(polygon: Polygon, p: Point, q: Point) -> bool:
     """Whether the segment from ``p`` to ``q`` runs through a polygon's inside.
 
@@ -381,6 +387,7 @@ def through_inside(polygon: Polygon, p: Point, q: Point) -> bool:
     )
 
 
+@remembered
 def collinear_overlap(first: tuple[Point, Point], second: tuple[Point, Point]) -> bool:
     """Whether two segments on one line share a stretch of positive length."""
     p, q = first
@@ -400,9 +407,15 @@ def bounds(points: Iterable[Point]) -> tuple[Number, Number, Number, Number]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+@remembered
+def box(polygon: Polygon) -> tuple[Number, Number, Number, Number]:
+    """The smallest box around a polygon, as `bounds` gives it."""
+    return bounds(polygon)
+
+
 def _boxes_meet(first: Polygon, second: Polygon) -> bool:
-    ax0, ay0, ax1, ay1 = bounds(first)
-    bx0, by0, bx1, by1 = bounds(second)
+    ax0, ay0, ax1, ay1 = box(first)
+    bx0, by0, bx1, by1 = box(second)
     return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
 
 
