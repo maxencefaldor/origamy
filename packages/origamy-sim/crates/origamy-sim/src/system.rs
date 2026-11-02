@@ -73,6 +73,11 @@ impl Pattern {
         }
     }
 
+    /// Whether the pattern holds the block of a pair of vertices.
+    pub fn contains(&self, a: u32, b: u32) -> bool {
+        self.blocks.binary_search(&(a.max(b), a.min(b))).is_ok()
+    }
+
     /// Where the block of rows `a` and columns `b` lies in the values, and whether it lies
     /// transposed there.
     fn block(&self, a: u32, b: u32) -> (usize, bool) {
@@ -156,6 +161,16 @@ impl<'a> Assembly<'a> {
         for c in 0..3 {
             self.values[offset + 4 * c] += diagonal;
         }
+    }
+
+    /// Adds to a vertex's gradient and Hessian along z alone, as a force from the table does.
+    pub fn add_vertex_z(&mut self, vertex: u32, slope: f64, curvature: f64) {
+        if self.held[vertex as usize] {
+            return;
+        }
+        self.gradient[3 * vertex as usize + 2] += slope;
+        let (offset, _) = self.pattern.block(vertex, vertex);
+        self.values[offset + 8] += curvature;
     }
 
     /// The Cholesky factorization of the Hessian.

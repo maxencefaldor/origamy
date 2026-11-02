@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod contact;
 mod energy;
 mod generated;
 pub mod material;
@@ -20,5 +21,5 @@ mod system;
 pub use material::{Material, ParameterError, Stiffness};
 pub use mesh::{Dihedral, Mesh, MeshError, Vertex};
 pub use sheet::{Crease, Sheet, SheetError};
-pub use simulation::{Energy, Report, Settings, Simulation, StateError};
+pub use simulation::{Energy, Report, Settings, Simulation, StateError, StepError};
 pub use system::SingularError;

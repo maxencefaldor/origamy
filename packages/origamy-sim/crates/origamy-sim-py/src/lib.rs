@@ -13,10 +13,11 @@ use numpy::{
     Element, IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyUntypedArray, PyUntypedArrayMethods,
 };
 use origamy_sim::{
-    Crease, Energy, Material, Mesh, Report, Settings, Sheet, Simulation, Stiffness, Vertex,
+    Crease, Energy, Material, Mesh, Report, Settings, Sheet, Simulation, StepError, Stiffness,
+    Vertex,
 };
 use pyo3::create_exception;
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -486,8 +487,13 @@ impl PySheet {
 ///         requires, between 0 and 1.
 ///     shortest_update: The shortest fraction of a Newton update a line search tries, between
 ///         0 and 1.
+///     contact_gap: The gap beyond a paper thickness at which contact starts to push back, in
+///         meters.
+///     contact_stiffness: The energy scale of contact's barrier, in joules.
+///     table: The height of the table's top, in meters; minus infinity for no table.
 ///
 /// Raises:
+///     TypeError: When a name is not a setting.
 ///     ValueError: When a setting lies outside its values.
 #[pyclass(name = "Settings", module = "origamy_sim", frozen, eq, from_py_object)]
 #[derive(Clone, Copy, PartialEq)]
@@ -496,48 +502,38 @@ struct PySettings(Settings);
 #[pymethods]
 impl PySettings {
     #[new]
-    #[pyo3(signature = (*, gravity = None, time_step = None, tolerance = None, iteration_limit = None, sufficient_decrease = None, shortest_update = None))]
-    fn new(
-        gravity: Option<[f64; 3]>,
-        time_step: Option<f64>,
-        tolerance: Option<f64>,
-        iteration_limit: Option<usize>,
-        sufficient_decrease: Option<f64>,
-        shortest_update: Option<f64>,
-    ) -> PyResult<Self> {
-        Self(Settings::default()).replace(
-            gravity,
-            time_step,
-            tolerance,
-            iteration_limit,
-            sufficient_decrease,
-            shortest_update,
-        )
+    #[pyo3(signature = (**settings))]
+    fn new(settings: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        Self(Settings::default()).replace(settings)
     }
 
-    /// A copy with some settings changed.
+    /// A copy with some settings changed, named as the constructor names them.
     ///
     /// Raises:
+    ///     TypeError: When a name is not a setting.
     ///     ValueError: When a setting lies outside its values.
-    #[pyo3(signature = (*, gravity = None, time_step = None, tolerance = None, iteration_limit = None, sufficient_decrease = None, shortest_update = None))]
-    fn replace(
-        &self,
-        gravity: Option<[f64; 3]>,
-        time_step: Option<f64>,
-        tolerance: Option<f64>,
-        iteration_limit: Option<usize>,
-        sufficient_decrease: Option<f64>,
-        shortest_update: Option<f64>,
-    ) -> PyResult<Self> {
-        let base = self.0;
-        let settings = Settings {
-            gravity: gravity.unwrap_or(base.gravity),
-            time_step: time_step.unwrap_or(base.time_step),
-            tolerance: tolerance.unwrap_or(base.tolerance),
-            iteration_limit: iteration_limit.unwrap_or(base.iteration_limit),
-            sufficient_decrease: sufficient_decrease.unwrap_or(base.sufficient_decrease),
-            shortest_update: shortest_update.unwrap_or(base.shortest_update),
-        };
+    #[pyo3(signature = (**changes))]
+    fn replace(&self, changes: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let mut settings = self.0;
+        for (key, value) in changes.into_iter().flat_map(PyDictMethods::iter) {
+            let key: String = key.extract()?;
+            match key.as_str() {
+                "gravity" => settings.gravity = value.extract()?,
+                "time_step" => settings.time_step = value.extract()?,
+                "tolerance" => settings.tolerance = value.extract()?,
+                "iteration_limit" => settings.iteration_limit = value.extract()?,
+                "sufficient_decrease" => settings.sufficient_decrease = value.extract()?,
+                "shortest_update" => settings.shortest_update = value.extract()?,
+                "contact_gap" => settings.contact_gap = value.extract()?,
+                "contact_stiffness" => settings.contact_stiffness = value.extract()?,
+                "table" => settings.table = value.extract()?,
+                other => {
+                    return Err(PyTypeError::new_err(format!(
+                        "Settings has no setting {other}"
+                    )));
+                }
+            }
+        }
         settings.check().map_err(value_error)?;
         Ok(Self(settings))
     }
@@ -579,16 +575,37 @@ impl PySettings {
         self.0.shortest_update
     }
 
+    /// The gap beyond a paper thickness at which contact starts to push back, in meters.
+    #[getter]
+    fn contact_gap(&self) -> f64 {
+        self.0.contact_gap
+    }
+
+    /// The energy scale of contact's barrier, in joules.
+    #[getter]
+    fn contact_stiffness(&self) -> f64 {
+        self.0.contact_stiffness
+    }
+
+    /// The height of the table's top, in meters; minus infinity for no table.
+    #[getter]
+    fn table(&self) -> f64 {
+        self.0.table
+    }
+
     fn __repr__(&self) -> String {
         let s = self.0;
         format!(
-            "Settings(gravity={:?}, time_step={:?}, tolerance={:?}, iteration_limit={}, sufficient_decrease={:?}, shortest_update={:?})",
+            "Settings(gravity={:?}, time_step={:?}, tolerance={:?}, iteration_limit={}, sufficient_decrease={:?}, shortest_update={:?}, contact_gap={:?}, contact_stiffness={:?}, table={:?})",
             self.gravity(),
             s.time_step,
             s.tolerance,
             s.iteration_limit,
             s.sufficient_decrease,
-            s.shortest_update
+            s.shortest_update,
+            s.contact_gap,
+            s.contact_stiffness,
+            s.table
         )
     }
 }
@@ -605,6 +622,8 @@ struct PyEnergy {
     bending: f64,
     /// The elastic energy of sharp creases.
     creases: f64,
+    /// The energy of contact's barrier, between sheets and with the table.
+    contact: f64,
     /// The potential energy of gravity, zero at the origin.
     gravity: f64,
     /// The kinetic energy.
@@ -618,6 +637,7 @@ impl From<Energy> for PyEnergy {
             strain_barrier: e.strain_barrier,
             bending: e.bending,
             creases: e.creases,
+            contact: e.contact,
             gravity: e.gravity,
             kinetic: e.kinetic,
         }
@@ -628,11 +648,12 @@ impl From<Energy> for PyEnergy {
 impl PyEnergy {
     fn __repr__(&self) -> String {
         format!(
-            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, gravity={:?}, kinetic={:?})",
+            "Energy(stretching={:?}, strain_barrier={:?}, bending={:?}, creases={:?}, contact={:?}, gravity={:?}, kinetic={:?})",
             self.stretching,
             self.strain_barrier,
             self.bending,
             self.creases,
+            self.contact,
             self.gravity,
             self.kinetic
         )
@@ -653,6 +674,11 @@ struct PyReport {
     energy: PyEnergy,
     /// The greatest norm of any triangle's Green strain after the step.
     greatest_strain: f64,
+    /// The pairs of primitives, and the vertices on the table, that contact pushes apart.
+    contacts: usize,
+    /// The least gap beyond the thickness within contact's reach, in meters; infinite where
+    /// nothing is that close.
+    least_gap: f64,
     /// The simulated time after the step, in seconds.
     time: f64,
 }
@@ -665,6 +691,8 @@ impl From<Report> for PyReport {
             update: r.update,
             energy: r.energy.into(),
             greatest_strain: r.greatest_strain,
+            contacts: r.contacts,
+            least_gap: r.least_gap,
             time: r.time,
         }
     }
@@ -674,12 +702,14 @@ impl From<Report> for PyReport {
 impl PyReport {
     fn __repr__(&self) -> String {
         format!(
-            "Report(converged={}, iterations={}, update={:?}, energy={}, greatest_strain={:?}, time={:?})",
+            "Report(converged={}, iterations={}, update={:?}, energy={}, greatest_strain={:?}, contacts={}, least_gap={:?}, time={:?})",
             if self.converged { "True" } else { "False" },
             self.iterations,
             self.update,
             self.energy.__repr__(),
             self.greatest_strain,
+            self.contacts,
+            self.least_gap,
             self.time
         )
     }
@@ -862,11 +892,15 @@ impl PySimulation {
     ///
     /// Raises:
     ///     SingularError: When some motion costs no energy, so the step has no unique result.
+    ///     ValueError: When paper starts closer than its thickness to itself or to the table.
     fn step(&mut self, py: Python<'_>) -> PyResult<PyReport> {
         let simulation = &mut self.0;
         let report = py
             .detach(|| simulation.step())
-            .map_err(|error| SingularError::new_err(error.to_string()))?;
+            .map_err(|error| match error {
+                StepError::Singular(_) => SingularError::new_err(error.to_string()),
+                StepError::Overlapping => PyValueError::new_err(error.to_string()),
+            })?;
         Ok(report.into())
     }
 

@@ -113,6 +113,51 @@ def dihedral() -> tuple[sp.Basic, list[sp.Symbol]]:
     return sp.atan2(sine, cosine), [*e, *p, *q]
 
 
+def vectors(names: str) -> list[sp.Matrix]:
+    """One symbolic 3-vector per letter, with components such as `p0`, `p1`, `p2`."""
+    return [sp.Matrix(sp.symbols(f"{name}0:3", real=True)) for name in names]
+
+
+def distances() -> dict[str, tuple[str, sp.Basic, list[sp.Symbol]]]:
+    """The squared distances between the closest features of two primitives.
+
+    Each holds where its features are closest: the point-to-line distance where the
+    point lies beside the segment, the point-to-plane distance where it lies over the
+    triangle, and the line-to-line distance where both segments' closest points lie
+    inside them.
+    """
+    p, q = vectors("pq")
+    point_point = (p - q).dot(p - q)
+    p, a, b = vectors("pab")
+    side = (b - a).cross(p - a)
+    point_line = side.dot(side) / (b - a).dot(b - a)
+    p, a, b, c = vectors("pabc")
+    normal = (b - a).cross(c - a)
+    point_plane = (p - a).dot(normal) ** 2 / normal.dot(normal)
+    a, b, c, d = vectors("abcd")
+    normal = (b - a).cross(d - c)
+    line_line = (c - a).dot(normal) ** 2 / normal.dot(normal)
+    flat = lambda *vs: [s for v in vs for s in v]  # noqa: E731
+    return {
+        "point_point": ("between the points `p` and `q`", point_point, flat(*vectors("pq"))),
+        "point_line": (
+            "from the point `p` to the line through `a` and `b`",
+            point_line,
+            flat(*vectors("pab")),
+        ),
+        "point_plane": (
+            "from the point `p` to the plane through `a`, `b` and `c`",
+            point_plane,
+            flat(*vectors("pabc")),
+        ),
+        "line_line": (
+            "between the line through `a` and `b` and the line through `c` and `d`",
+            line_line,
+            flat(*vectors("abcd")),
+        ),
+    }
+
+
 def derivatives(
     name: str, doc: str, function: sp.Basic, variables: list[sp.Symbol]
 ) -> str:
@@ -127,7 +172,7 @@ def derivatives(
         optimizations="basic",
     )
     value, rest = reduced[0], reduced[1:]
-    names = sorted({str(v)[0] for v in variables})
+    names = list(dict.fromkeys(str(v)[0] for v in variables))
     arguments = ", ".join(f"{a}: [f64; 3]" for a in names)
     returns = f"(f64, [f64; {n}], [[f64; {n}]; {n}])"
     lines = [
@@ -159,6 +204,15 @@ def main() -> None:
         "The angle lies in (-π, π]."
     )
     modules = {"dihedral": derivatives("dihedral_angle", doc, angle, variables)}
+    modules["distance"] = "\n".join(
+        derivatives(
+            f"{name}_distance",
+            f"The squared distance {between}, with its gradient and Hessian.",
+            value,
+            symbols,
+        )
+        for name, (between, value, symbols) in distances().items()
+    )
     GENERATED.mkdir(exist_ok=True)
     for name, code in modules.items():
         (GENERATED / f"{name}.rs").write_text(HEADER + "\n" + code)

@@ -5,5 +5,7 @@
 #![allow(clippy::pedantic, reason = "the code is generated, not written")]
 
 mod dihedral;
+mod distance;
 
 pub use dihedral::*;
+pub use distance::*;
