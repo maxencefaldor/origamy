@@ -679,6 +679,9 @@ Phase 6 adds these findings so far:
   Folding a square in half twice jams at kami's thickness, before and after crease bands, with locked or soft creases, and when hands carry the flap.
   At a twentieth of the thickness, with crease bands, it folds; with sharp creases it jams even there.
   Each move the simulator cannot fold yet is a strict expected failure, so a fix shows as a pass.
+- **Tipping points.**
+  The rolled strip at a twentieth of the thickness folds on the continuous integration machines and stops short on others.
+  Threads change nothing, so the last bits of rounding in each machine's math library decide the fold's way.
 - **Which way a face turns.**
   A face's first triangle could lie in a crease band, curled round, so it read the face's side wrongly.
   Folding a square in half a third time then turned paper both up and down; each face's largest triangle reads its side instead.

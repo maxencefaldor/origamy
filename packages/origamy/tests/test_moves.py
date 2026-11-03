@@ -3,11 +3,14 @@
 
 Each move is a short fold script of a square. It folds at kami's thickness, and with
 contact that keeps a twentieth of it, nearly the mathematical sheet. A move the
-simulator cannot fold yet is a strict expected failure, with what stops it.
+simulator cannot fold yet is a strict expected failure, with what stops it. A fold at
+a tipping point folds on some machines and not on others, so its expected failure may
+pass.
 """
 
 import math
 from collections.abc import Callable
+from typing import Final
 
 import pytest
 
@@ -74,9 +77,12 @@ MOVES: dict[str, Callable[[], Paper]] = {
     "pleats in half": pleats_in_half,
 }
 
+TIPPING: Final = "the second fold folds on some machines and stops short on others"
+"""A fold at a tipping point, where the last bits of rounding decide its way."""
+
 STOPS: dict[tuple[str, float], str | None] = {
     ("rolled strip", FULL): "the second fold reaches Newton's iteration limit",
-    ("rolled strip", THIN): "the second fold stops short of its state",
+    ("rolled strip", THIN): TIPPING,
     (
         "half twice",
         FULL,
@@ -99,7 +105,9 @@ does."""
         pytest.param(
             name,
             share,
-            marks=[] if stop is None else [pytest.mark.xfail(reason=stop, strict=True)],
+            marks=[]
+            if stop is None
+            else [pytest.mark.xfail(reason=stop, strict=stop is not TIPPING)],
         )
         for (name, share), stop in STOPS.items()
     ],
