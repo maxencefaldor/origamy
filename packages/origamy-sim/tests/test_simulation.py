@@ -221,7 +221,9 @@ def test_a_body_moves_along_its_path_and_feels_the_paper() -> None:
         simulation.add_body(Body(radius=0.01), [[0.05, 0.05, 0.0]])
     with pytest.raises(ValueError, match="a body has 1 point, for a sphere, or 2"):
         simulation.add_body(Body(radius=0.01), np.zeros((3, 3)))
-    with pytest.raises(ValueError, match="the body has 1 point, so 2 points cannot move it"):
+    with pytest.raises(
+        ValueError, match="the body has 1 point, so 2 points cannot move it"
+    ):
         simulation.move_body(finger, np.zeros((2, 3)))
     with pytest.raises(IndexError, match="the simulation has 1 bodies, so no body 1"):
         simulation.body_points(1)
