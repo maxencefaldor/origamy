@@ -94,6 +94,15 @@ def test_a_precrease_leaves_a_flat_crease() -> None:
     assert not state.above
 
 
+@pytest.mark.parametrize("sense", list(Sense))
+def test_a_precrease_passes_through_its_fold(sense: Sense) -> None:
+    flap = P(("1/2", "3/4"))
+    outcome = precrease(SHEET, MIDDLE, flap, None, sense)
+    folded = fold(SHEET, MIDDLE, flap, None, sense).state
+    assert outcome.through == folded
+    assert outcome.through.patterns == outcome.state.patterns
+
+
 def test_turning_over_reverses_the_stack() -> None:
     state = book()
     turned = turn_over(state).state

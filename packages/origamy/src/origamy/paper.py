@@ -58,6 +58,9 @@ class Step:
     """The turn the step makes in space, when it shapes or turns shaped paper over."""
     path: tuple[Form, ...] = ()
     """The forms a flex passes through on its way, in order, for the viewer."""
+    through: State | None = None
+    """The folded paper a precrease passes through before it unfolds; its faces are the
+    step's faces."""
 
 
 type CreaseLike = Line | tuple[PointLike, PointLike]
@@ -469,6 +472,7 @@ class Paper:
                 form=outcome.form,
                 turn=outcome.turn,
                 path=outcome.path,
+                through=outcome.through,
             )
         )
 

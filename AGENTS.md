@@ -42,6 +42,7 @@ Each module imports only from the modules listed before it:
 1. `moves`, `shape`, `flex`: named moves, such as reverse and petal folds, which compute their creases and collapse; shape steps and tilts; and rigid flexes.
 1. `provenance`, `paper`: the script lines behind actions, and the `Paper` a fold script folds.
 1. `result`, `runner`: a build as exact data, and fold scripts run in their own process.
+1. `physics`: a build folded step by step on the simulator, from the flat sheet, and measured against each state.
 1. `draw`, `render`, `exports`, `viewer`: SVG views, PNG pictures through Chromium, FOLD files, and the standalone 3D viewer.
 1. `service`, `cli`: every command defined once, and the command line that adapts it.
 
@@ -70,7 +71,8 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 - **Exactness:** every coordinate is a `Number`, and every decision is exact.
   A float estimate carries an error bound and decides a sign only where the bound leaves it clear.
   Floats otherwise appear only in what people read: pictures, the viewer, FOLD files and the angles a message states.
-  The form is the one exception: shaping turns paper by any angle, so a form is floats, and its checks compare motions within a tolerance.
+  The form is one exception: shaping turns paper by any angle, so a form is floats, and its checks compare motions within a tolerance.
+  Physics is the other: the simulator folds paper in floats, and its measures compare with exact states within tolerances.
   A square root that no level of the tower holds adds a level, so the first five Huzita-Justin axioms stay exact.
   A build carries its tower in its data.
 - **Store once:** a state stores its vertices, faces with their places, and the stacking.
@@ -148,6 +150,8 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | hold | A hand keeping a vertex where it lies, or carrying it to a target over a time step |
 | body | A rigid sphere or capsule on a path that touches paper, as a fingertip or a tool does |
 | grip | Paper vertices tied to a body, which carries them as it moves, as a pinch does |
+| drive | The crease a simulated fold makes, turning toward the angle each step gives it |
+| stage | One fold of a simulated build: to a step's state, or to the paper a precrease passes through |
 | lag | One solve of a time step with friction fixed at a state: the step's start, then each solution it reaches |
 | stick distance | The slip within one time step under which friction holds a contact |
 

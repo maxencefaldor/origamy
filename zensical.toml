@@ -46,6 +46,7 @@ nav = [
       { "Constructions" = "reference/constructions.md" },
       { "Geometry" = "reference/geometry.md" },
       { "Numbers" = "reference/field.md" },
+      { "Physics" = "reference/physics.md" },
     ] },
   ] },
   { "Contributing" = "contributing.md" },

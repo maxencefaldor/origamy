@@ -14,6 +14,6 @@ The reference pages list every command, rule and Python function, generated from
 
 -   🐍 **[Python API](paper.md)**
 
-    The paper, the constructions, geometry and exact numbers, from their docstrings.
+    The paper, the constructions, geometry, exact numbers and physics, from their docstrings.
 
 </div>

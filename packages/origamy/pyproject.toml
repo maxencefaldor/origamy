@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.3",
+    "origamy-sim",
     "playwright>=1.64",
     "pydantic>=2.14",
     "pydantic-settings>=2.15",

@@ -59,6 +59,8 @@ class Outcome:
     """The turn in space that a shape step, or turning shaped paper over, makes."""
     path: tuple[Form, ...] = ()
     """The forms a flex passes through on its way, in order."""
+    through: State | None = None
+    """The folded paper a precrease passes through before it unfolds."""
 
 
 def fold(
@@ -96,8 +98,8 @@ def precrease(
     cut, moved, hinges = grab(state, line, flap, layers, unfolding=False)
     up = sense is Sense.VALLEY
     check_hinges(cut, line, hinges, up=up)
-    turn(cut, line, [moved], _hinged(hinges, sense), up=up)
-    return Outcome(cut, frozenset())
+    folded = turn(cut, line, [moved], _hinged(hinges, sense), up=up)
+    return Outcome(cut, frozenset(), through=folded.state)
 
 
 def _hinged(hinges: Iterable[Hinge], sense: Sense) -> dict[Pair, str]:

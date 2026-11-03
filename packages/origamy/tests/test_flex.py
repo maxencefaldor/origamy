@@ -106,10 +106,28 @@ def test_a_flex_needs_a_crease() -> None:
     assert caught.value.refusal.rule == "no-crease"
 
 
+def test_faces_that_keep_their_places_stay_still_on_the_way() -> None:
+    # The preliminary base's collapse keeps two faces in place, joined by a flat crease.
+    paper = example("preliminary_base")
+    before, after = paper.steps[-2].state, paper.steps[-1].state
+    parents = before.parents(after)
+    kept = [
+        f
+        for f, face in enumerate(after.faces)
+        if face.place == before.faces[parents[f]].place
+    ]
+    assert len(kept) == 2
+    forms = path(before, after, [k / 8 for k in range(8)])
+    assert forms is not None
+    for form in forms:
+        for f in kept:
+            assert form.motions[f] == pytest.approx(STILL, abs=1e-12)
+
+
 def test_a_collapse_follows_a_whole_path_from_flat_paper() -> None:
     paper = example("preliminary_base")
     before, after = paper.steps[-2].state, paper.steps[-1].state
-    forms = path(before, after, 6)
+    forms = path(before, after, [k / 6 for k in range(6)])
     assert forms is not None
     assert len(forms) == 6
     for form in forms:

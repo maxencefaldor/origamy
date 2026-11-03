@@ -233,7 +233,7 @@ def _step(step: Step, previous: Step | None, *, motion: bool) -> Data:
         # A collapse turns many creases at once: follow them as rigid origami, so the
         # paper stays whole on its way, where a rigid motion takes it there. A face
         # that turns over on the way starts its layer gap on its other side.
-        forms = flex.path(previous.state, state, _FRAMES)
+        forms = flex.path(previous.state, state, [k / _FRAMES for k in range(_FRAMES)])
         if forms is not None:
             form_before, path = forms[0], [form.motions for form in forms[1:]]
             turned = [

@@ -549,6 +549,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
 Phases 0 to 5 are done.
+Phase 6 has begun: `origamy.physics` folds the preliminary and waterbomb bases from the flat sheet, each layer in origamy's order.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -619,9 +620,29 @@ Phase 5 adds these findings:
   Real paper bends round the layer's edge within a fraction of a millimeter, which 5 mm cells cannot follow.
   Every model is therefore folded from the flat sheet, step by step.
 
-Phase 6 deletes origamy's rigid 3D layer.
+Phase 6 adds these findings so far:
+
+- **Still faces stay still.**
+  The rigid path of the preliminary base's collapse once turned the flat crease between its two fixed faces.
+  Holding both faces then fought the path, and folds lagged by 6°.
+  The path now keeps every crease between faces that keep their places.
+  Without gravity or a table, the collapse then follows the path with 10⁻¹⁴ J of elastic energy.
+- **Kami sags.**
+  A 7.5 cm flap of kami droops about 2 cm under its own weight.
+  On a table, the sag sent collapses down other branches, such as a valley pressed flat into the table.
+  Hands now carry the weight of the paper a fold moves, then let go, and the paper settles under gravity.
+- **Flat paper branches.**
+  Every fold from flat paper starts where several ways to fold meet.
+  With even rates, a first turn of 6° pressed a valley of the waterbomb base flat into the table.
+  Turns now ease in and out as a cosine, so the first of 30 increments turns half a degree.
+- **Drives that press too hard.**
+  Drives a thousand times as stiff as kami's crease pressed closing layers so hard that Newton stalled.
+  A hundred times keeps creases within 0.2° of their path, and every increment converges.
+
+Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
 Shaping becomes crease actuation and hands; animation becomes simulated motion.
+The rigid collapse paths stay, because the simulated folds follow them.
 
 A research track runs alongside, with ambitious targets:
 
@@ -639,6 +660,9 @@ A research track runs alongside, with ambitious targets:
 | Inextensibility | Real modulus plus a strain barrier | Very stiff springs, ill conditioned; hard constraints, brittle |
 | Creases | Plastic bands, reducing to sharp creases | Sharp creases only, with no width at the fold and no springback |
 | Folded states | Folding from the flat sheet, step by step, as paper is folded | Thickening a flat fold into a stack, which cannot wrap a layer that ends at a fold's crease on a coarse mesh |
+| Fold paths | Creases driven along origamy's rigid folding path, where one exists | Creases turning at even rates, which bend faces off any rigid motion |
+| Weight while folding | Hands carry the weight of the paper a fold moves | Paper lifted only by its creases, which sags kami into other folds |
+| Mountain folds | Folding up from the turned-over sheet, then turning it back | Folding down into the table, which the table forbids |
 | Meshes | A constrained Delaunay triangulation of the crease pattern, refined by Ruppert's algorithm | Regular grids, whose edges cross creases at arbitrary angles |
 | Core language | Rust | C++, NumPy, JAX |
 | Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |

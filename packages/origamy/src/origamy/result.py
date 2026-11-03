@@ -134,6 +134,10 @@ class StepData(_Data):
     path: tuple[tuple[tuple[float, ...], ...], ...] = Field(
         default=(), description="The forms a flex passes through on its way, in order."
     )
+    through: StateData | None = Field(
+        default=None,
+        description="The folded paper a precrease passes through before it unfolds.",
+    )
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -164,6 +168,7 @@ class StepData(_Data):
                 else None
             ),
             path=tuple(form.motions for form in step.path),
+            through=StateData.of(step.through) if step.through else None,
         )
 
     def step(self) -> Step:
@@ -188,6 +193,7 @@ class StepData(_Data):
             if self.turn
             else None,
             tuple(Form(motions) for motions in self.path),
+            self.through.state() if self.through else None,
         )
 
 

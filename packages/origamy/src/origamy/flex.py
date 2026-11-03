@@ -237,14 +237,17 @@ def _ids(faces: Sequence[int]) -> str:
     return ", ".join(str(f) for f in faces)
 
 
-def path(before: State, after: State, frames: int) -> tuple[Form, ...] | None:
+def path(
+    before: State, after: State, shares: Sequence[float]
+) -> tuple[Form, ...] | None:
     """The forms flat paper passes through as a step turns its creases together.
 
     Each crease turns from its angle before the step to its angle after it, and every
-    loop of creases stays closed, as rigid origami. The forms are motions from where
-    faces lie after the step: where they lay before it, then one per share of the
-    way. No forms come back when no face keeps its place, or when no rigid motion
-    follows the creases.
+    loop of creases stays closed, as rigid origami. The creases between faces that keep
+    their places stay as they are, so those faces stay still on the way. The forms are
+    motions from where faces lie after the step, one at each share of the way. Share
+    zero is where they lay before it, and share one where they lie after it. No forms
+    come back when no face keeps its place, or when no rigid motion follows the creases.
     """
     parents = before.parents(after)
     start = [embedding(before.faces[p].place) for p in parents]
@@ -258,11 +261,16 @@ def path(before: State, after: State, frames: int) -> tuple[Form, ...] | None:
     )
     finish = crease_angles(after, end)
     loops = _loops(after, {edge: i for i, edge in enumerate(creases)})
-    forms = [_form(after, start)]
-    for frame in range(1, frames):
-        share = frame / frames
+    # The paper between faces that keep their places stays still on the way.
+    kept = {f for f in range(len(end)) if same(start[f], end[f])}
+    still = {i for i, e in enumerate(creases) if set(after.creases[e]) <= kept}
+    forms = []
+    for share in shares:
+        if share == 0:
+            forms.append(_form(after, start))
+            continue
         angles = [begin[e] + (finish[e] - begin[e]) * share for e in creases]
-        if not _close(loops, angles, set()):
+        if not _close(loops, angles, still):
             return None
         forms.append(_form(after, _place(after, creases, angles, root, end[root])))
     return tuple(forms)

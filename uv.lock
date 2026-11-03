@@ -738,6 +738,7 @@ version = "0.0.0"
 source = { editable = "packages/origamy" }
 dependencies = [
     { name = "numpy" },
+    { name = "origamy-sim" },
     { name = "playwright" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -746,6 +747,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.3" },
+    { name = "origamy-sim", editable = "packages/origamy-sim" },
     { name = "playwright", specifier = ">=1.64" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.15" },

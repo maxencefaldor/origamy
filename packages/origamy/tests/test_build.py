@@ -19,6 +19,7 @@ from origamy import (
 )
 from origamy.geometry import PointLike
 from origamy.layers import BudgetError, NoStackingError, Problem, solve
+from origamy.result import StepData
 from origamy.state import State
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
@@ -52,6 +53,23 @@ def test_the_paper_records_each_step_and_its_line() -> None:
         "test_the_paper_records_each_step_and_its_line"
     )
     assert paper.where((1, 1)) == paper.where((0, 1))
+
+
+def test_a_precrease_keeps_the_fold_it_passes_through_as_data() -> None:
+    paper = Paper.square()
+    upright = Line.through(("1/2", 0), ("1/2", 1))
+    paper.precrease(upright, flap=("3/4", "1/2"), mountain=True)
+    step = paper.steps[-1]
+    assert step.through is not None
+    # The mountain fold lands the moved half under the half that stays.
+    (moved,) = (
+        f for f, face in enumerate(step.through.faces) if face != step.state.faces[f]
+    )
+    assert step.through.above == {(1 - moved, moved)}
+    data = StepData.of(step, Path(__file__).parent)
+    assert StepData.model_validate_json(data.model_dump_json()).step().through == (
+        step.through
+    )
 
 
 def test_a_refused_action_keeps_the_steps_before_it() -> None:

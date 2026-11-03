@@ -18,7 +18,7 @@ The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each examp
 
 ## Install
 
-Python 3.14 or newer runs origamy, and a Chromium draws its pictures.
+Python 3.14 or newer runs origamy, a Rust toolchain builds its simulator, and a Chromium draws its pictures.
 
 ```sh
 uv init --bare --pin-python --python 3.14 my-models  # a project for your fold scripts

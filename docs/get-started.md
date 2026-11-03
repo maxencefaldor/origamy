@@ -4,7 +4,7 @@ The tutorial folds a square in half into a triangle, folds the triangle in half,
 
 ## Install
 
-Python 3.14 or newer runs origamy, and a Chromium draws its pictures.
+Python 3.14 or newer runs origamy, a [Rust toolchain](https://rustup.rs) builds its simulator, and a Chromium draws its pictures.
 A clone of the repository holds origamy and its examples, and [uv](https://docs.astral.sh/uv/) installs Python and every dependency:
 
 ```sh
