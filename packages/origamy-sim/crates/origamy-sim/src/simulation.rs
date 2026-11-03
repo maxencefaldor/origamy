@@ -13,7 +13,7 @@ use std::cell::OnceCell;
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
-use crate::body::{Body, BodyError};
+use crate::body::{Body, BodyError, Motion};
 use crate::contact::friction::Slip;
 use crate::contact::{self, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
@@ -189,6 +189,14 @@ pub enum StateError {
         /// The vertex.
         vertex: usize,
     },
+    /// A vertex to move is gripped, so its body moves it.
+    #[error("vertex {vertex} is gripped by body {body}, so only the body moves it")]
+    Gripped {
+        /// The vertex.
+        vertex: usize,
+        /// The body that grips it.
+        body: usize,
+    },
 }
 
 /// Sheets in space, stepped through time.
@@ -200,6 +208,8 @@ pub struct Simulation {
     positions: Vec<[f64; 3]>,
     velocities: Vec<[f64; 3]>,
     held: Vec<bool>,
+    /// The body that grips each vertex, if any; a gripped vertex is held.
+    grips: Vec<Option<usize>>,
     /// Where each moving held vertex goes over the next time step.
     targets: Vec<Option<Point>>,
     /// The held vertices that stay where they are over the time step being solved.
@@ -213,6 +223,9 @@ pub struct Simulation {
     bodies: Vec<Body>,
     /// The first point of each body, after the paper's vertices.
     body_starts: Vec<usize>,
+    /// Where each body's hand holds its points, in order after the paper's vertices: where its
+    /// path has reached.
+    hands: Vec<Point>,
     time: f64,
     pattern: Pattern,
     pairs: Vec<(u32, u32)>,
@@ -261,6 +274,7 @@ impl Simulation {
         Ok(Self {
             velocities: vec![[0.0; 3]; positions.len()],
             held: vec![false; positions.len()],
+            grips: vec![None; positions.len()],
             targets: vec![None; positions.len()],
             fixed: vec![false; positions.len()],
             forces: vec![[0.0; 3]; positions.len()],
@@ -268,6 +282,7 @@ impl Simulation {
             pressures: vec![0.0; sheets.len()],
             bodies: Vec::new(),
             body_starts: Vec::new(),
+            hands: Vec::new(),
             sheets,
             offsets,
             settings,
@@ -461,17 +476,78 @@ impl Simulation {
 
     /// Holds a vertex where it lies, or lets it go.
     ///
+    /// A hold takes the vertex from any body that grips it.
+    ///
     /// # Panics
     ///
     /// Panics when the simulation has no such sheet or the sheet no such vertex.
     pub fn hold(&mut self, sheet: usize, vertex: usize, held: bool) {
         let range = self.range(sheet);
         assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
-        self.held[range.start + vertex] = held;
-        self.targets[range.start + vertex] = None;
+        let vertex = range.start + vertex;
+        self.held[vertex] = held;
+        self.grips[vertex] = None;
+        self.targets[vertex] = None;
         if held {
-            self.velocities[range.start + vertex] = [0.0; 3];
+            self.velocities[vertex] = [0.0; 3];
         }
+    }
+
+    /// Ties vertices of a sheet to a body, which then carries them as it moves, as a pinch does.
+    ///
+    /// The vertices are held, and each time step carries them by the motion of the body's
+    /// hand. A sphere carries them as its center moves. A capsule keeps each vertex's share of
+    /// the way along its axis. The vertex's offset from the axis turns as the axis turns, by
+    /// the least rotation. A vertex another body grips moves to this one.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such body or sheet, or the sheet no such vertex.
+    pub fn grip(&mut self, body: usize, sheet: usize, vertices: &[usize]) {
+        assert!(
+            body < self.bodies.len(),
+            "the simulation has no body {body}"
+        );
+        let range = self.range(sheet);
+        for &vertex in vertices {
+            assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
+        }
+        for &vertex in vertices {
+            let vertex = range.start + vertex;
+            self.held[vertex] = true;
+            self.grips[vertex] = Some(body);
+            self.targets[vertex] = None;
+            self.velocities[vertex] = [0.0; 3];
+        }
+    }
+
+    /// Lets go of every vertex a body grips.
+    ///
+    /// Each vertex falls free with the velocity the body last gave it.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such body.
+    pub fn release(&mut self, body: usize) {
+        assert!(
+            body < self.bodies.len(),
+            "the simulation has no body {body}"
+        );
+        for (grip, held) in self.grips.iter_mut().zip(&mut self.held) {
+            if *grip == Some(body) {
+                (*grip, *held) = (None, false);
+            }
+        }
+    }
+
+    /// Which body grips each vertex of a sheet, if any.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn grips(&self, sheet: usize) -> &[Option<usize>] {
+        &self.grips[self.range(sheet)]
     }
 
     /// Moves held vertices of a sheet, each to its position, over the next time step, as a hand
@@ -482,8 +558,9 @@ impl Simulation {
     ///
     /// # Errors
     ///
-    /// Returns [`StateError::NotHeld`] when a vertex is not held, and [`StateError::NotFinite`]
-    /// when a coordinate is not finite. A refused move changes nothing.
+    /// Returns [`StateError::NotHeld`] when a vertex is not held, [`StateError::Gripped`] when
+    /// a body grips it, and [`StateError::NotFinite`] when a coordinate is not finite. A refused
+    /// move changes nothing.
     ///
     /// # Panics
     ///
@@ -498,6 +575,9 @@ impl Simulation {
             assert!(vertex < range.len(), "the sheet has no vertex {vertex}");
             if !self.held[range.start + vertex] {
                 return Err(StateError::NotHeld { vertex });
+            }
+            if let Some(body) = self.grips[range.start + vertex] {
+                return Err(StateError::Gripped { vertex, body });
             }
             if !position.iter().all(|c| c.is_finite()) {
                 return Err(StateError::NotFinite { vertex });
@@ -650,6 +730,7 @@ impl Simulation {
         self.positions.extend_from_slice(points);
         self.velocities.extend(std::iter::repeat_n([0.0; 3], count));
         self.held.extend(std::iter::repeat_n(true, count));
+        self.grips.extend(std::iter::repeat_n(None, count));
         self.targets.extend(std::iter::repeat_n(None, count));
         self.fixed.extend(std::iter::repeat_n(true, count));
         self.forces.extend(std::iter::repeat_n([0.0; 3], count));
@@ -660,6 +741,7 @@ impl Simulation {
         self.trees = trees;
         self.bodies.push(body);
         self.body_starts.push(start);
+        self.hands.extend(points.iter().map(|&p| Point::from(p)));
         Ok(self.bodies.len() - 1)
     }
 
@@ -682,7 +764,9 @@ impl Simulation {
     /// Moves a body's points to `points` over the next time step, as a hand carries it.
     ///
     /// The body moves within the step, so collision detection covers its path, and paper in
-    /// its way moves aside. The step converges only once the body reaches its points.
+    /// its way moves aside. The step converges only once the body reaches its points. A body
+    /// its hand holds by a spring stops instead where the spring balances the paper's push, and
+    /// presses on until the hand moves again.
     ///
     /// # Errors
     ///
@@ -709,13 +793,17 @@ impl Simulation {
 
     /// The force a body exerted on the paper at the end of the last time step, in newtons.
     ///
+    /// The force sums the body's contact with the paper and its grip on it.
+    ///
     /// # Panics
     ///
     /// Panics when the simulation has no such body.
     #[must_use]
     pub fn body_force(&self, body: usize) -> [f64; 3] {
-        self.hold_forces[self.body_range(body)]
-            .iter()
+        let gripped = (0..self.primitives.sheet.len()).filter(|&v| self.grips[v] == Some(body));
+        self.body_range(body)
+            .chain(gripped)
+            .map(|v| self.hold_forces[v])
             .fold([0.0; 3], |[a, b, c], [x, y, z]| [a + x, b + y, c + z])
     }
 
@@ -763,6 +851,7 @@ impl Simulation {
             self.time,
             self.sheets.clone(),
             self.targets.clone(),
+            self.hands.clone(),
         );
         // The first half carries each moving hold halfway, and the second the rest of the way.
         for (target, &position) in self.targets.iter_mut().zip(&self.positions) {
@@ -788,6 +877,7 @@ impl Simulation {
                     self.time,
                     self.sheets,
                     self.targets,
+                    self.hands,
                 ) = saved;
                 Err(error)
             }
@@ -815,19 +905,22 @@ impl Simulation {
         let mut slips = self.slips(&start);
         let normals = self.normals(&start);
         // A moving held vertex is free in the solve, pulled to its target; the others stay.
+        let targets = self.destinations();
         self.fixed = self
             .held
             .iter()
-            .zip(&self.targets)
+            .zip(&targets)
             .map(|(&held, target)| held && target.is_none())
             .collect();
-        let mut holds: Vec<Option<Hold>> = self
-            .targets
+        let springs = self.springs();
+        let mut holds: Vec<Option<Hold>> = targets
             .iter()
-            .map(|target| {
+            .zip(&springs)
+            .map(|(target, &spring)| {
                 target.map(|target| Hold {
                     target,
                     multiplier: Point::zeros(),
+                    spring,
                 })
             })
             .collect();
@@ -905,10 +998,14 @@ impl Simulation {
             };
             let solve = self.minimize(x, &incremental)?;
             iterations += solve.iterations;
+            // A hold by a spring stops where its forces balance, short of its target.
             let gap = holds
                 .iter()
                 .zip(&solve.x)
-                .filter_map(|(hold, p)| hold.map(|hold| (p - hold.target).norm()))
+                .filter_map(|(hold, p)| {
+                    hold.filter(|hold| hold.spring.is_none())
+                        .map(|hold| (p - hold.target).norm())
+                })
                 .fold(0.0, f64::max);
             if !solve.converged || gap <= solver.tolerance {
                 return Ok(Solve {
@@ -917,7 +1014,7 @@ impl Simulation {
                 });
             }
             for (hold, p) in holds.iter_mut().zip(&solve.x) {
-                if let Some(hold) = hold {
+                if let Some(hold) = hold.as_mut().filter(|hold| hold.spring.is_none()) {
                     hold.multiplier -= (p - hold.target) * stiffness;
                 }
             }
@@ -934,6 +1031,15 @@ impl Simulation {
         solve.iterations += iterations;
         solve.converged = false;
         Ok(solve)
+    }
+
+    /// The force rounding leaves in the gradient at positions `x`, in newtons.
+    ///
+    /// A position rounds by about 10⁻¹⁶ of its size, and a stiff sheet feels that strain. The
+    /// stiffest sheet's stiffness times the largest coordinate, times 10⁻¹², bounds the force.
+    fn rounding(&self, x: &[Point]) -> f64 {
+        let size = x.iter().map(Point::amax).fold(0.0, f64::max);
+        1e-12 * self.stiffest() * size
     }
 
     /// The largest stretching stiffness of any sheet, Young's modulus times thickness, in newtons
@@ -965,7 +1071,10 @@ impl Simulation {
             iterations += 1;
             let near = self.candidates(&x, &x);
             let derivatives = self.derivatives(&x, incremental, &near);
-            self.grow(&mut grown, &derivatives.pairs);
+            self.grow(
+                &mut grown,
+                derivatives.pairs.iter().chain(&derivatives.friction),
+            );
             let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
             // definite; elsewhere each element's Hessian is projected to be.
@@ -976,7 +1085,7 @@ impl Simulation {
             } else {
                 assembly = Assembly::new(pattern, &self.fixed);
                 derivatives.scatter(&mut assembly, true);
-                assembly.factor().map_err(StepError::Singular)?
+                assembly.factor_within(radius, self.rounding(&x))?
             };
             let negative: Vec<f64> = assembly.gradient.iter().map(|g| -g).collect();
             let mut direction = factor.solve(&negative);
@@ -1034,14 +1143,18 @@ impl Simulation {
         })
     }
 
-    /// Grows the system's pattern where active contacts join vertices it does not hold.
+    /// Grows the system's pattern where active contacts, or the friction lagged from earlier
+    /// contacts, join vertices it does not hold.
     ///
     /// The pattern only grows within a time step, so contacts that come and go do not rebuild
     /// it again and again.
-    fn grow(&self, grown: &mut Option<(Pattern, Vec<(u32, u32)>)>, contacts: &[Element<4, 12>]) {
+    fn grow<'e>(
+        &self,
+        grown: &mut Option<(Pattern, Vec<(u32, u32)>)>,
+        contacts: impl Iterator<Item = &'e Element<4, 12>>,
+    ) {
         let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
         let missing: Vec<(u32, u32)> = contacts
-            .iter()
             .flat_map(|(stencil, _, _)| vertex_pairs(*stencil))
             .filter(|&(a, b)| !pattern.contains(a, b))
             .collect();
@@ -1071,6 +1184,13 @@ impl Simulation {
         } = attempt;
         for (force, hold) in self.hold_forces.iter_mut().zip(holding) {
             *force = (*hold).into();
+        }
+        // Each hand reaches where its path goes, whether or not a spring stops its body short.
+        let first = self.primitives.sheet.len();
+        for (hand, target) in self.hands.iter_mut().zip(&self.targets[first..]) {
+            if let Some(target) = target {
+                *hand = *target;
+            }
         }
         for (i, point) in solve.x.iter().enumerate() {
             let velocity = if dt.is_finite() {
@@ -1173,9 +1293,9 @@ impl Simulation {
     /// The factorized system of the as-rigid-as-possible fit, which minimizes Σ Ā |F − R|².
     ///
     /// The sum runs over triangles, with F a triangle's deformation gradient and R its nearest
-    /// rotation. Held vertices that do not move stay where they are.
+    /// rotation. Held vertices stay where the update puts them, so the paper turns about them.
     fn rigidity(&self) -> Result<Factor<'_>, SingularError> {
-        let mut assembly = Assembly::new(&self.pattern, &self.fixed);
+        let mut assembly = Assembly::new(&self.pattern, &self.held);
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset =
                 u32::try_from(self.offsets[s]).expect("a scene counts its vertices in 32 bits");
@@ -1222,8 +1342,8 @@ impl Simulation {
                 }
             }
         }
-        for (v, &fixed) in self.fixed.iter().enumerate() {
-            if fixed {
+        for (v, &held) in self.held.iter().enumerate() {
+            if held {
                 pull[3 * v..3 * v + 3].fill(0.0);
             }
         }
@@ -1656,6 +1776,50 @@ impl Simulation {
         self.body_starts.partition_point(|&start| start <= vertex) - 1
     }
 
+    /// Where each moving held vertex goes over the time step: to its own target, or where its
+    /// body's hand carries it.
+    ///
+    /// A grip follows its hand's motion. A body its hand holds by a spring keeps pulling toward
+    /// the hand, though the hand stays.
+    fn destinations(&self) -> Vec<Option<Point>> {
+        let first = self.primitives.sheet.len();
+        let motions: Vec<Option<Motion>> = (0..self.bodies.len())
+            .map(|body| {
+                let range = self.body_range(body);
+                let to: Option<Vec<Point>> = self.targets[range.clone()].iter().copied().collect();
+                let from = &self.hands[range.start - first..range.end - first];
+                to.map(|to| Motion::of(from, &to))
+            })
+            .collect();
+        let springs = self.springs();
+        self.grips
+            .iter()
+            .zip(&self.targets)
+            .zip(&self.positions)
+            .enumerate()
+            .map(|(v, ((grip, target), &p))| match grip {
+                Some(body) => motions[*body].map(|motion| motion.carry(&p.into())),
+                None if springs[v].is_some() => target.or(Some(self.hands[v - first])),
+                None => *target,
+            })
+            .collect()
+    }
+
+    /// The stiffness of the spring that holds each vertex, where a body's hand holds its points
+    /// by one: the body's stiffness shared among its points.
+    fn springs(&self) -> Vec<Option<f64>> {
+        let mut springs = vec![None; self.positions.len()];
+        for (body, &Body { stiffness, .. }) in self.bodies.iter().enumerate() {
+            if stiffness.is_finite() {
+                let range = self.body_range(body);
+                #[expect(clippy::cast_precision_loss, reason = "a body has 1 point or 2")]
+                let share = stiffness / range.len() as f64;
+                springs[range].fill(Some(share));
+            }
+        }
+        springs
+    }
+
     /// The global indices of a body's points.
     fn body_range(&self, body: usize) -> std::ops::Range<usize> {
         let start = self.body_starts[body];
@@ -1944,12 +2108,17 @@ struct VertexTerms {
 struct Hold {
     target: Point,
     multiplier: Point,
+    /// The stiffness of a hand that holds the vertex by a spring, or `None` for one that carries
+    /// it exactly.
+    spring: Option<f64>,
 }
 
 impl Hold {
     /// The augmented Lagrangian at position `p`, with spring stiffness `k`: its value, its
-    /// gradient and the diagonal of its Hessian.
+    /// gradient and the diagonal of its Hessian. A hold by a spring takes the spring's
+    /// stiffness, and its multiplier stays zero.
     fn terms(&self, p: &Point, k: f64) -> (f64, Point, f64) {
+        let k = self.spring.unwrap_or(k);
         let gap = p - self.target;
         (
             0.5 * k * gap.norm_squared() - self.multiplier.dot(&gap),
@@ -2097,9 +2266,11 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(v, p)| {
+                // Every other hold is a hand's spring.
                 (v % 5 == 0).then(|| Hold {
                     target: p + wobble(v + 11, 1e-5),
                     multiplier: wobble(v + 13, 1e-3),
+                    spring: (v % 10 == 5).then_some(700.0),
                 })
             })
             .collect();
@@ -2293,6 +2464,7 @@ mod tests {
                 Body {
                     radius: finger,
                     friction: 0.7,
+                    stiffness: f64::INFINITY,
                 },
                 &[[0.002, 0.004, above], [0.008, 0.006, above]],
             )
@@ -2303,6 +2475,7 @@ mod tests {
                 Body {
                     radius: ball,
                     friction: 0.2,
+                    stiffness: f64::INFINITY,
                 },
                 &[[0.0045, 0.0052, below]],
             )
@@ -2341,6 +2514,7 @@ mod tests {
         let finger = Body {
             radius: 0.002,
             friction: 0.5,
+            stiffness: f64::INFINITY,
         };
         let refusals = [
             (finger, vec![[0.0; 3]; 3], BodyError::Points { given: 3 }),
@@ -2390,6 +2564,158 @@ mod tests {
             Err(BodyError::Degenerate)
         );
         assert!(simulation.targets.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn friction_lagged_from_a_touch_outlasts_the_touch() {
+        // A sphere touching paper on the table lifts off it, while another pushes paper into the
+        // table. The push takes the augmented Lagrangian round after round. Each round keeps
+        // the friction lagged from the lifted sphere's touch, though its contact has gone.
+        let kami = Material::kami();
+        let gap = Settings::default().contact.gap;
+        let sheet = Sheet::new(Mesh::grid(4, 4, 0.02, 0.02).unwrap(), kami).unwrap();
+        let dt = 1.0 / 240.0;
+        let settings = Settings {
+            time_step: dt,
+            table: Some(Table::default()),
+            solver: Solver {
+                shortest_step: 0.6 * dt,
+                ..Solver::default()
+            },
+            ..Settings::default()
+        };
+        let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+        let lying = 0.5 * kami.thickness + 0.5 * gap;
+        let flat: Vec<[f64; 3]> = simulation
+            .positions(0)
+            .iter()
+            .map(|&[x, y, _]| [x, y, lying])
+            .collect();
+        simulation.set_positions(0, &flat).unwrap();
+        let radius = 0.003;
+        let touching = lying + 0.5 * kami.thickness + radius + 0.5 * gap;
+        let body = Body {
+            radius,
+            friction: 0.5,
+            stiffness: f64::INFINITY,
+        };
+        let lifted = simulation
+            .add_body(body, &[[0.006, 0.01, touching]])
+            .unwrap();
+        let pushing = simulation
+            .add_body(body, &[[0.014, 0.01, touching]])
+            .unwrap();
+        simulation
+            .move_body(lifted, &[[0.006, 0.01, touching + 1e-3]])
+            .unwrap();
+        simulation
+            .move_body(pushing, &[[0.014, 0.01, touching - 1e-4]])
+            .unwrap();
+        let report = simulation.step().unwrap();
+        assert!(!report.converged && report.least_gap > 0.0, "{report:?}");
+    }
+
+    #[test]
+    fn a_grip_holds_paper_until_its_body_lets_go() {
+        let sheet = Sheet::new(Mesh::grid(2, 2, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+        let mut simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        let finger = Body {
+            radius: 0.002,
+            friction: 0.5,
+            stiffness: f64::INFINITY,
+        };
+        let tip = simulation
+            .add_body(finger, &[[0.0, 0.0, 0.01], [0.0, 0.01, 0.01]])
+            .unwrap();
+        let other = simulation.add_body(finger, &[[0.01, 0.0, 0.01]]).unwrap();
+        simulation.grip(tip, 0, &[0, 3, 6]);
+        simulation.grip(other, 0, &[6]);
+        let gripped: Vec<Option<usize>> = (0..9)
+            .map(|v| match v {
+                0 | 3 => Some(tip),
+                6 => Some(other),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(simulation.grips(0), gripped);
+        assert!(simulation.held(0)[6]);
+        assert_eq!(
+            simulation.move_held(0, &[(3, [0.0; 3])]),
+            Err(StateError::Gripped {
+                vertex: 3,
+                body: tip
+            })
+        );
+        // A hand's hold takes a vertex from its grip, and a release frees the rest.
+        simulation.hold(0, 3, true);
+        assert_eq!(simulation.grips(0)[3], None);
+        simulation.release(tip);
+        assert_eq!(simulation.grips(0)[0], None);
+        assert_eq!(simulation.held(0)[..4], [false, false, false, true]);
+        assert_eq!(simulation.grips(0)[6], Some(other));
+    }
+
+    #[test]
+    fn a_turning_capsule_carries_the_paper_it_grips() {
+        // A capsule a centimeter over a square grips its near edge. The capsule then turns a
+        // quarter turn about the vertical and rises 2 cm, in four quasi-static steps. The edge
+        // turns and rises with it, and the capsule carries the square's weight.
+        let side = 0.02;
+        let sheet = Sheet::new(Mesh::grid(4, 4, side, side).unwrap(), Material::kami()).unwrap();
+        let settings = Settings {
+            time_step: f64::INFINITY,
+            solver: Solver {
+                tolerance: 1e-12,
+                ..Solver::default()
+            },
+            ..Settings::default()
+        };
+        let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+        let ends = [[0.0, 0.0, 0.01], [0.0, side, 0.01]].map(Point::from);
+        let tip = simulation
+            .add_body(
+                Body {
+                    radius: 0.002,
+                    friction: 0.5,
+                    stiffness: f64::INFINITY,
+                },
+                &ends.map(Into::into),
+            )
+            .unwrap();
+        let edge: Vec<usize> = (0..25).filter(|v| v % 5 == 0).collect();
+        simulation.grip(tip, 0, &edge);
+        for step in 1..=4 {
+            let turn = nalgebra::Rotation3::from_axis_angle(
+                &Vector3::z_axis(),
+                std::f64::consts::FRAC_PI_8 * f64::from(step),
+            );
+            let lift = Vector3::new(0.0, 0.0, 0.005 * f64::from(step));
+            let moved = ends.map(|p| turn * p + lift);
+            let from: Vec<Point> = simulation
+                .body_points(tip)
+                .iter()
+                .map(|&p| p.into())
+                .collect();
+            let motion = Motion::of(&from, &moved);
+            let before = simulation.positions(0).to_vec();
+            simulation.move_body(tip, &moved.map(Into::into)).unwrap();
+            let report = simulation.step().unwrap();
+            assert!(report.converged, "{report:?}");
+            for &v in &edge {
+                let carried = motion.carry(&before[v].into());
+                let p = Point::from(simulation.positions(0)[v]);
+                assert!(
+                    (p - carried).norm() < 1e-12,
+                    "vertex {v} lies {p}, not {carried}"
+                );
+            }
+        }
+        let weight = Material::kami().mass_per_area * side * side * 9.81;
+        let [x, y, z] = simulation.body_force(tip);
+        assert!(
+            (z / weight - 1.0).abs() < 1e-6 && x.abs().max(y.abs()) < 1e-6 * weight,
+            "the capsule carries [{x}, {y}, {z}] N of a {weight} N weight"
+        );
     }
 
     /// A square of kami gliding at 1 m/s in its plane through a vacuum.

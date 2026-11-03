@@ -55,3 +55,14 @@ Every crease's rest angle follows the rigid folding of the pattern, in quasi-sta
 The sheet folds from flat to 132° without stretching, its folds within 2 × 10⁻⁷ rad of the rigid folding.
 
 <iframe class="origamy-run" src="viewer.html?run=miura" title="Miura-ori" loading="lazy"></iframe>
+
+## A fingertip folding a strip in half
+
+A strip of kami 6 by 1.5 cm lies on the table, with a crease across its middle.
+A hand holds its far edge down.
+A fingertip of the finger pad's 14 mm radius pinches the near edge and carries it over onto the far edge.
+The fingertip lets go, comes down beside the fold, and presses it with 2 N through a pad that yields at 700 N/m.
+The fingertip lifts, the hand lets go, and the fold springs open to 35°, within the 30° to 40° that creased paper measures.
+The time steps last 1/240 s.
+
+<iframe class="origamy-run" src="viewer.html?run=fingertip" title="A fingertip folding a strip in half" loading="lazy"></iframe>

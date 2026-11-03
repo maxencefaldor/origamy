@@ -16,8 +16,8 @@ import copy
 import json
 import math
 import time
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Final, Literal
 
@@ -27,6 +27,7 @@ from pydantic import Field
 from pydantic_settings import CliApp, SettingsConfigDict
 
 from origamy_sim import (
+    Body,
     Config,
     Crease,
     Mesh,
@@ -38,7 +39,9 @@ from origamy_sim import (
 
 RUNS: Final = Path(__file__).resolve().parent / "simulator" / "runs"
 
-type Name = Literal["fold-over", "stack", "strip", "ramps", "accordion", "miura"]
+type Name = Literal[
+    "fold-over", "stack", "strip", "ramps", "accordion", "miura", "fingertip"
+]
 
 CREASE: Final = Crease.kami()
 """A crease in kami, which yields and springs back as measured."""
@@ -54,6 +57,9 @@ class Frame:
 
     positions: NDArray[np.float64]
     """Every vertex of every sheet, in meters, of shape (n, 3)."""
+
+    points: NDArray[np.float64]
+    """Every point of every body, in meters, of shape (m, 3)."""
 
     stats: Stats
     """The step's figures the viewer reads out."""
@@ -82,6 +88,10 @@ class Run:
 
     frames: list[Frame]
 
+    bodies: list[tuple[float, int]] = field(default_factory=list)
+    """Each body's radius, in meters, and its count of points: 1 for a sphere, 2 for a
+    capsule."""
+
 
 def report_stats(report: Report) -> Stats:
     """The figures every step reports."""
@@ -98,6 +108,12 @@ def report_stats(report: Report) -> Stats:
 def everything(simulation: Simulation, sheets: int) -> NDArray[np.float64]:
     """Every vertex of every sheet, in turn."""
     return np.concatenate([simulation.positions(s) for s in range(sheets)])
+
+
+def body_points(simulation: Simulation) -> NDArray[np.float64]:
+    """Every point of every body, in turn."""
+    points = [simulation.body_points(b) for b in range(len(simulation.bodies))]
+    return np.concatenate(points) if points else np.zeros((0, 3))
 
 
 def triangles_of(meshes: Iterable[Mesh]) -> list[int]:
@@ -432,20 +448,134 @@ def miura(config: Config) -> Run:
     )
 
 
+@dataclass
+class Fingertip:
+    """A fingertip pressing paper on the table, and the moves its hand makes."""
+
+    simulation: Simulation
+    finger: int
+    crease: list[int]
+    """The dihedrals of the crease the fingertip folds."""
+
+    width: float
+    """The width of the strip, which the capsule spans, in meters."""
+
+    def take(self) -> Stats:
+        """Takes a time step, and reads out the fold and the fingertip's push."""
+        report = self.simulation.step()
+        folded = self.simulation.fold_angles(0)
+        fold = float(np.mean(folded[self.crease]))
+        return {
+            **report_stats(report),
+            "opening": math.degrees(math.pi - fold),
+            "force": float(-self.simulation.body_force(self.finger)[2]),
+        }
+
+    def move(self, x: float, z: float) -> Stats:
+        """Moves the hand to x along the strip and z up, over one time step."""
+        ends = [[x, 0.0, z], [x, self.width, z]]
+        self.simulation.move_body(self.finger, ends)
+        return self.take()
+
+    def path(
+        self, count: int, at: Callable[[float], tuple[float, float]]
+    ) -> Iterator[Stats]:
+        """Moves the hand along a path over `count` steps, easing in and out."""
+        for k in range(1, count + 1):
+            yield self.move(*at(0.5 - 0.5 * math.cos(math.pi * k / count)))
+
+
+def fingertip(config: Config) -> Run:
+    """A fingertip folding a strip in half and creasing it, its far edge held down."""
+    columns, rows, length, width = 12, 6, 0.06, 0.015
+    mesh = Mesh.grid(columns, rows, length, width)
+    sheet = Sheet(mesh, config.material)
+    edges = [
+        (j * (columns + 1) + columns // 2, (j + 1) * (columns + 1) + columns // 2)
+        for j in range(rows)
+    ]
+    for edge in edges:
+        sheet.set_crease(edge, CREASE)
+    settings = copy.replace(config.settings, time_step=1 / 240, table=Table(height=0.0))
+    simulation = Simulation([sheet], settings)
+    h, gap = config.material.thickness, config.settings.contact.gap
+    lying = 0.5 * h + 0.5 * gap
+    lie_on_table(simulation, 0, lying)
+    radius, pad = 0.014, 700.0
+    touch = lying + 0.5 * h + radius + gap
+    finger = simulation.add_body(
+        Body(radius=radius, friction=0.5, stiffness=pad),
+        [[0.0, 0.0, touch], [0.0, width, touch]],
+    )
+    index = {tuple(d[:2]): i for i, d in enumerate(mesh.dihedrals.tolist())}
+    hand = Fingertip(simulation, finger, [index[e] for e in edges], width)
+    near = [j * (columns + 1) for j in range(rows + 1)]
+    far = [j * (columns + 1) + columns for j in range(rows + 1)]
+    hinge, high = 0.5 * length, lying + 0.045
+    closed = lying + h + gap + 0.5 * h + radius + gap
+    deep = closed - 2.0 / pad
+
+    def choreography() -> Iterator[Stats]:
+        yield from (hand.take() for _ in range(10))
+        # A hand holds the far edge, and the fingertip carries the near edge onto it.
+        simulation.hold(0, far)
+        simulation.grip(finger, 0, near)
+        yield from hand.path(
+            180,
+            lambda s: (
+                hinge * (1 - math.cos(math.pi * s)) - 2e-4 * s,
+                touch + hinge * math.sin(math.pi * s) + (h + gap) * s,
+            ),
+        )
+        # The fingertip lets go, rises, and comes down 2 mm in from the fold.
+        simulation.release(finger)
+        x, _, z = simulation.body_points(finger)[0]
+        yield from hand.path(36, lambda s: (x, z + (high - z) * s))
+        over = float(simulation.positions(0)[:, 0].min()) + 0.002
+        yield from hand.path(48, lambda s: (x + (over - x) * s, high))
+        yield from hand.path(96, lambda s: (over, high + (closed + 3e-4 - high) * s))
+        # The hand runs 2 N over the pad's stiffness past the closed fold, and stays.
+        yield from hand.path(
+            48, lambda s: (over, closed + 3e-4 - (closed + 3e-4 - deep) * s)
+        )
+        yield from (hand.take() for _ in range(60))
+        yield from hand.path(24, lambda s: (over, deep + 0.02 * s))
+        simulation.hold(0, far, held=False)
+        yield from (hand.take() for _ in range(120))
+
+    return Run(
+        title="A fingertip folding a strip in half",
+        triangles=triangles_of([mesh]),
+        creases=crease_lines(simulation.sheet(0)),
+        seconds_per_frame=settings.time_step,
+        table=0.0,
+        readouts=[
+            ("Time", "time", "s"),
+            ("Fold opening", "opening", "°"),
+            ("Fingertip's push", "force", "N"),
+            ("Newton iterations", "iterations", ""),
+        ],
+        frames=record(simulation, 1, choreography()),
+        bodies=[(radius, 2)],
+    )
+
+
 def record(
     simulation: Simulation,
     sheets: int,
     steps: Iterable[Stats],
 ) -> list[Frame]:
     """The first state of a run, then the state after each of its steps."""
-    first = Frame(
-        positions=everything(simulation, sheets),
-        stats={"iterations": 0, "converged": True, "time": 0.0},
-    )
-    return [
-        first,
-        *(Frame(positions=everything(simulation, sheets), stats=s) for s in steps),
-    ]
+
+    def frame(stats: Stats) -> Frame:
+        return Frame(
+            positions=everything(simulation, sheets),
+            points=body_points(simulation),
+            stats=stats,
+        )
+
+    first = frame({"iterations": 0, "converged": True, "time": 0.0})
+    return [first, *(frame(s) for s in steps)]
 
 
 NAMES: Final[tuple[Name, ...]] = (
@@ -455,6 +585,7 @@ NAMES: Final[tuple[Name, ...]] = (
     "ramps",
     "accordion",
     "miura",
+    "fingertip",
 )
 
 SCENES: Final[dict[Name, Callable[[Config], Run]]] = {
@@ -464,12 +595,14 @@ SCENES: Final[dict[Name, Callable[[Config], Run]]] = {
     "ramps": ramps,
     "accordion": accordion,
     "miura": miura,
+    "fingertip": fingertip,
 }
 
 
 def write(name: str, run: Run) -> Path:
     """Writes a run's data for the viewer: positions as base64 float32, in meters."""
     positions = np.stack([frame.positions for frame in run.frames]).astype(np.float32)
+    points = np.stack([frame.points for frame in run.frames]).astype(np.float32)
     data = {
         "title": run.title,
         "triangles": run.triangles,
@@ -480,6 +613,8 @@ def write(name: str, run: Run) -> Path:
         "vertices": positions.shape[1],
         "frames": positions.shape[0],
         "positions": base64.b64encode(positions.tobytes()).decode(),
+        "bodies": [{"radius": r, "points": k} for r, k in run.bodies],
+        "bodyPositions": base64.b64encode(points.tobytes()).decode(),
         "stats": [frame.stats for frame in run.frames],
     }
     path = RUNS / f"{name}.json"

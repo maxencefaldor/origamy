@@ -344,7 +344,19 @@ class Body(_Parameters):
     friction: NonNegative = 0.4
     """Coulomb's coefficient of friction between the body and paper.
 
-    The default takes the body as rough as paper.
+    The default takes the body as rough as paper. Skin on paper measures between 0.26
+    and 0.68, from Vilhena, Afonso and Ramalho, 2023, so the default suits a fingertip
+    too.
+    """
+
+    stiffness: Annotated[float, Field(gt=0)] = math.inf
+    """The stiffness of the hand that moves the body, in newtons per meter.
+
+    The default, infinite, carries the body exactly along its path. A finite stiffness
+    is a spring between the body and its path, shared among its points, as a finger pad
+    yields when it presses. The body then presses with the stiffness times how far its
+    path runs past where the paper stops it. The body presses on while the hand stays.
+    A finger pad yields at about 700 N/m under a few newtons, from Dzidek et al., 2017.
     """
 
 

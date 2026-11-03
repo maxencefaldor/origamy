@@ -272,7 +272,7 @@ The simulator provides each as an input to the same model:
 | Input | Physics | Uses |
 | --- | --- | --- |
 | Rigid bodies on paths | Moving shapes, such as a fingertip capsule, a bone folder or the table, that touch paper through the contact barrier and friction | Lifting a flap, pushing a reverse fold in, pressing a crease flat |
-| Grips | Stiff springs from a patch of paper to a moving body, made and released over time | Pinching a corner, holding a flap while another moves |
+| Grips | Holds that tie a patch of paper to a moving body, made and released over time | Pinching a corner, carrying an edge over |
 | Holds | Held vertices fixed where they lie, or carried to a target over each time step | Holding a corner, carrying a flap over |
 | Forces | Point forces and pressure, constant or varying over time | Pulling a point toward a target, flattening a stack |
 | Crease actuation | A crease's rest curvature and stiffness, set over time | Shaping a model, or self-folding sheets |
@@ -295,6 +295,21 @@ Its points join the solve as moving holds, so a hand carries a body exactly as i
 Paper keeps its half thickness plus the body's radius from the body, through the same barrier, friction and collision detection as paper on paper.
 The pairs are the body's points against the paper's triangles, and a capsule's axis against the paper's edges and points.
 Each body has its own coefficient of friction, and reports the force it exerts on the paper.
+A hand may hold a body by a spring, as a finger pad yields when it presses.
+The body then presses with the spring's stiffness times how far its path runs past where the paper stops it.
+The spring presses on while the hand stays, until the hand moves again.
+A finger pad of 14 mm radius and modulus 36 kPa yields at about 700 N/m under a few newtons, from Dzidek et al., 2017.
+A rigid path instead presses stacked paper with whatever force its height demands, which a micrometer can make a thousand newtons.
+
+**Grips.**
+A grip ties paper vertices to a body, as a pinch does, and the body carries them as it moves.
+The gripped vertices are moving holds, so the augmented Lagrangian carries them within each time step.
+A sphere carries its grip as its center moves.
+A capsule keeps each gripped vertex's share of the way along its axis.
+The vertex's offset from the axis turns by the least rotation from the old axis to the new.
+A released vertex falls free with the velocity the body gave it.
+A body's force sums its contact with the paper and its grip on it.
+A grip follows the hand, so a pad's spring lets the body yield without dragging the grip along.
 
 ### 3.8 Solver
 
@@ -308,12 +323,15 @@ Each time step minimizes the incremental potential with a projected Newton metho
   No Newton update moves a vertex farther than a trust radius in meters.
   The radius doubles each time an update it shortened is taken whole.
   Where some motion costs nearly no energy, as for a sheet held along one line, the update would otherwise run off by millions of meters.
+  Where some motion costs no energy at all, the Hessian is singular, and a Levenberg–Marquardt shift of |g|∞ / r takes its place.
+  The shift sends that motion down the gradient g by at most the trust radius r.
+  A gradient within rounding of zero leaves the step no unique result, and the step reports it.
 - **Linear solve.**
   A sparse Cholesky factorization solves each Newton system, with its symbolic analysis reused while the contact set keeps its pattern.
 - **Line search.**
   Backtracking from the longest update that collision detection allows, until the energy decreases enough.
   Each fraction of the update is tried as it is, then retracted: refitted, as rigid as possible, to its triangles' rotations.
-  The retraction turns paper without stretching it.
+  The retraction turns paper without stretching it, about the held vertices where the update puts them.
 - **Convergence.**
   The largest vertex move of the Newton update falls below a tolerance in meters.
 - **Recovery.**
@@ -348,7 +366,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
-| Bodies and grips | Shapes, paths, grip stiffness, the times grips close and open |
+| Bodies and grips | Shapes, radii, friction, the stiffness of the hand, paths, and the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
 | Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
 
@@ -498,7 +516,9 @@ The simulator is excellent when it passes all of these, in CI:
 | A sheet hanging from a hand, then lifted | Statics: the hand carries the weight | The hand reaches its target within 10⁻¹² m, and carries the weight within 10⁻⁶ |
 | A sheet pulled across the table by a hand | Coulomb's law: the friction coefficient times the weight the table bears | Pull within 1% |
 | A hand pushing paper into the table | No crossing | The step reports that it did not converge, with paper above the table |
-| A fingertip pressing paper on the table, then sliding | Coulomb's law: the paper follows a fingertip that grips harder than the table | The paper moves within 1% of the fingertip, or stays within 1% |
+| A fingertip pressing paper on the table, then sliding | Coulomb's law: the paper follows a fingertip whose friction beats the table's | The paper moves within 1% of the fingertip, or stays within 1% |
+| A finger pad's hand running 1 mm past paper on the table, then staying | Hooke's law: the pad's stiffness times its overrun | The push within 10⁻⁶ of the pad's spring, and within the barrier's gap of 0.7 N |
+| A fingertip folding kami in half, then creasing it with 1 N and with 4 N | Measured springback, and a crease that does not harden | Each fold opens between 30° and 40°, the two within 1°, every step converged |
 | Pressure pulling a sheet with its weight per area, and twice that | Newton's laws | The sheet stays still, or rises at g, within 10⁻⁷ m/s |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -528,7 +548,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 4 are done, and phase 5 has moving holds, loads and rigid bodies.
+Phases 0 to 5 are done.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -613,6 +633,8 @@ A research track runs alongside, with ambitious targets:
 | Crease aging | Thermally activated creep, Eyring's law, in the same update | A spectrum of relaxation times, which ages a briefly pressed fold only over the press's own time |
 | Moving holds | The augmented Lagrangian inside each time step, as in incremental potential contact | Moving held vertices between steps, which collision detection cannot follow |
 | Rigid bodies | Spheres and capsules whose points are moving holds | Signed distance fields, general but without exact derivatives at sharp features |
+| Pressing | A spring of the finger pad's stiffness between a body and its path | A rigid path, whose force on stacked paper jumps with its height |
+| Grips | Moving holds that follow the body's motion | Springs between paper and body, which let a pinch slip under load |
 
 ## 9. References
 

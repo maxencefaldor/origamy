@@ -618,6 +618,8 @@ impl PySimulation {
 
     /// Holds vertices of a sheet where they lie, or with `held=False` lets them go.
     ///
+    /// A hold takes a vertex from any body that grips it.
+    ///
     /// Args:
     ///     sheet: The sheet.
     ///     vertices: A vertex, or an integer array of vertices.
@@ -649,8 +651,8 @@ impl PySimulation {
     /// Raises:
     ///     TypeError: When the vertices are not integers.
     ///     IndexError: When the simulation has no such sheet, or the sheet no such vertex.
-    ///     ValueError: When a vertex is not held, or a position is not finite. A refused move
-    ///         changes nothing.
+    ///     ValueError: When a vertex is not held, a body grips it, or a position is not finite.
+    ///         A refused move changes nothing.
     fn move_held(
         &mut self,
         sheet: usize,
@@ -773,7 +775,8 @@ impl PySimulation {
     /// Moves a body's points over the next time step, as a hand carries it.
     ///
     /// The body moves within the step, so collision detection covers its path, and paper in
-    /// its way moves aside. The step converges only once the body reaches its points.
+    /// its way moves aside. The step converges only once the body reaches its points. A body
+    /// its hand holds by a spring stops instead where the spring balances the paper's push.
     ///
     /// Raises:
     ///     IndexError: When the simulation has no such body.
@@ -793,6 +796,55 @@ impl PySimulation {
     fn body_force<'py>(&self, py: Python<'py>, body: usize) -> PyResult<Bound<'py, PyArray1<f64>>> {
         self.check_body(body)?;
         Ok(PyArray1::from_slice(py, &self.0.body_force(body)))
+    }
+
+    /// Ties vertices of a sheet to a body, which then carries them as it moves, as a pinch does.
+    ///
+    /// The vertices are held, and each time step carries them by the motion of the body's
+    /// hand. A sphere carries them as its center moves. A capsule keeps each vertex's share of
+    /// the way along its axis. The vertex's offset from the axis turns as the axis turns, by
+    /// the least rotation. A vertex another body grips moves to this one.
+    ///
+    /// Args:
+    ///     body: The body.
+    ///     sheet: The sheet.
+    ///     vertices: A vertex, or an integer array of vertices.
+    ///
+    /// Raises:
+    ///     TypeError: When the vertices are not integers.
+    ///     IndexError: When the simulation has no such body or sheet, or the sheet no such
+    ///         vertex.
+    fn grip(&mut self, body: usize, sheet: usize, vertices: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.check_body(body)?;
+        let vertices = self.vertices(sheet, vertices)?;
+        self.0.grip(body, sheet, &vertices);
+        Ok(())
+    }
+
+    /// Lets go of every vertex a body grips.
+    ///
+    /// Each vertex falls free with the velocity the body last gave it.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such body.
+    fn release(&mut self, body: usize) -> PyResult<()> {
+        self.check_body(body)?;
+        self.0.release(body);
+        Ok(())
+    }
+
+    /// The body that grips each vertex of a sheet, or -1 where none does, of shape (n,).
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn grips<'py>(&self, py: Python<'py>, sheet: usize) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        self.check(sheet)?;
+        let grips = self.0.grips(sheet).iter().map(|grip| {
+            grip.map_or(-1, |body| {
+                i64::try_from(body).expect("a scene counts its bodies in 64 bits")
+            })
+        });
+        Ok(PyArray1::from_iter(py, grips))
     }
 
     /// The dihedral angle along each interior edge of a sheet, in radians.

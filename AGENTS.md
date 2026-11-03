@@ -145,8 +145,9 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | plastic rotation | The rotation a crease has yielded and crept through, which hardening reads |
 | aging | The creep of a crease's rest angle toward its fold, faster the larger its moment |
 | time step | One interval of simulated time: a minimization of the incremental potential |
-| hold | A hand's grip on a vertex: fixed where it lies, or carried to a target over a time step |
+| hold | A hand keeping a vertex where it lies, or carrying it to a target over a time step |
 | body | A rigid sphere or capsule on a path that touches paper, as a fingertip or a tool does |
+| grip | Paper vertices tied to a body, which carries them as it moves, as a pinch does |
 | lag | One solve of a time step with friction fixed at a state: the step's start, then each solution it reaches |
 | stick distance | The slip within one time step under which friction holds a contact |
 

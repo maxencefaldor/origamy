@@ -229,6 +229,27 @@ def test_a_body_moves_along_its_path_and_feels_the_paper() -> None:
         simulation.body_points(1)
 
 
+def test_a_body_carries_the_paper_it_grips_until_it_lets_go() -> None:
+    simulation = Simulation([Sheet(SQUARE)], Settings(time_step=0.01))
+    finger = simulation.add_body(Body(radius=0.01), [[0.0, 0.0, 0.05]])
+    simulation.grip(finger, 0, [0, 1])
+    assert simulation.grips(0).tolist() == [0, 0, -1, -1]
+    assert simulation.held(0).tolist() == [True, True, False, False]
+    with pytest.raises(ValueError, match="vertex 1 is gripped by body 0"):
+        simulation.move_held(0, 1, [[0.0, 0.0, 1.0]])
+    rest = simulation.positions(0)
+    simulation.move_body(finger, [[0.0, 0.0, 0.06]])
+    assert simulation.step().converged
+    # The grip carries both vertices up with the sphere, within the solver's tolerance.
+    lifted = rest[:2] + np.array([0.0, 0.0, 0.01])
+    assert simulation.positions(0)[:2] == pytest.approx(lifted, abs=1e-8)
+    simulation.release(finger)
+    assert simulation.grips(0).tolist() == [-1, -1, -1, -1]
+    assert not simulation.held(0).any()
+    with pytest.raises(IndexError, match="the simulation has 1 bodies, so no body 2"):
+        simulation.grip(2, 0, [0])
+
+
 def test_creases_and_rest_angles_lie_along_interior_edges() -> None:
     sheet = Sheet(SQUARE)
     with pytest.raises(ValueError, match="no interior edge from vertex 0 to vertex 1"):

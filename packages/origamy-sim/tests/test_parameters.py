@@ -84,7 +84,9 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     assert validates(Material, data) == core
 
 
-@given(st.fixed_dictionaries(dict.fromkeys(("radius", "friction"), NUMBERS)))
+@given(
+    st.fixed_dictionaries(dict.fromkeys(("radius", "friction", "stiffness"), NUMBERS))
+)
 def test_pydantic_accepts_a_body_exactly_when_the_core_does(
     body: dict[str, float],
 ) -> None:

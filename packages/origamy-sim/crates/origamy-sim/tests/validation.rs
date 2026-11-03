@@ -755,13 +755,13 @@ fn fold_band(x: f64, lines: &[f64], fold: f64) -> [f64; 2] {
     [along, up]
 }
 
-#[test]
-fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
-    // A strip 6 cm by 5 mm has cells 5 mm long, and five lines of edges 0.1 mm apart across its
-    // middle. The lines make a crease band 0.4 mm wide. A hand folds the band fully flat, its far
-    // half 0.3 mm over its near half, as a sharp crease cannot for the thickness. Released, the
-    // band springs back to the 36° that paper measures, as its sharp crease would.
-    let (rows, width) = (10, 0.005);
+/// A strip of kami 6 cm long and `width` wide, in `rows` rows, with a crease band across its
+/// middle.
+///
+/// The cells are 5 mm long, and five lines of edges 0.1 mm apart cross the strip's middle. The
+/// lines make a crease band 0.4 mm wide. Returns the sheet, the band's edges and where each line
+/// lies along the strip.
+fn banded_strip(rows: u32, width: f64) -> (Sheet, Vec<[u32; 2]>, Vec<f64>) {
     let lines: Vec<f64> = (0..5).map(|i| 0.03 + 1e-4 * (f64::from(i) - 2.0)).collect();
     let mut columns: Vec<f64> = (0..6).map(|i| 0.005 * f64::from(i)).collect();
     columns.extend(&lines);
@@ -793,6 +793,29 @@ fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
     for &edge in &edges {
         sheet.set_crease(edge, Some(band)).unwrap();
     }
+    (sheet, edges, lines)
+}
+
+/// The mean fold angle across a crease band of `edges`, which spans `rows` rows: the sum of its
+/// lines' angles.
+fn band_fold(simulation: &Simulation, edges: &[[u32; 2]], rows: u32) -> f64 {
+    let dihedrals = simulation.sheets()[0].mesh().dihedrals();
+    dihedrals
+        .iter()
+        .zip(simulation.fold_angles(0))
+        .filter(|(d, _)| edges.contains(&d.edge))
+        .map(|(_, angle)| angle)
+        .sum::<f64>()
+        / f64::from(rows)
+}
+
+#[test]
+fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
+    // A strip 6 cm by 5 mm has a crease band across its middle. A hand folds the band fully flat,
+    // its far half 0.3 mm over its near half, as a sharp crease cannot for the thickness.
+    // Released, the band springs back to the 36° that paper measures, as its sharp crease would.
+    let rows = 10;
+    let (sheet, edges, lines) = banded_strip(rows, 0.005);
     let settings = Settings {
         gravity: [0.0; 3],
         time_step: f64::INFINITY,
@@ -819,15 +842,7 @@ fn a_crease_band_of_kami_pressed_flat_springs_back_to_the_measured_angle() {
     }
     let report = simulation.step().unwrap();
     assert!(report.converged, "{report:?}");
-    let dihedrals = simulation.sheets()[0].mesh().dihedrals();
-    let fold: f64 = dihedrals
-        .iter()
-        .zip(simulation.fold_angles(0))
-        .filter(|(d, _)| edges.contains(&d.edge))
-        .map(|(_, angle)| angle)
-        .sum::<f64>()
-        / f64::from(rows);
-    let opening = std::f64::consts::PI - fold;
+    let opening = std::f64::consts::PI - band_fold(&simulation, &edges, rows);
     let springback = Crease::kami().yield_moment / Crease::kami().stiffness;
     assert!(
         (opening - springback).abs() < 1e-6,
@@ -1049,7 +1064,14 @@ fn drag(friction: f64) -> f64 {
     let mut height = rest + 0.5 * h + radius + gap;
     let ends = |x: f64, z: f64| [[x, 0.015, z], [x, 0.035, z]];
     let finger = simulation
-        .add_body(Body { radius, friction }, &ends(0.025, height))
+        .add_body(
+            Body {
+                radius,
+                friction,
+                stiffness: f64::INFINITY,
+            },
+            &ends(0.025, height),
+        )
         .unwrap();
     let weight = kami.mass_per_area * side * side * 9.81;
     // The fingertip pushes the paper down, against z.
@@ -1078,9 +1100,9 @@ fn drag(friction: f64) -> f64 {
 
 #[test]
 fn a_fingertip_drags_paper_whose_table_slips_first() {
-    // A fingertip presses with ten times the square's weight. With friction 0.9 it grips the
-    // paper harder than the table's 0.4 holds it, so the paper moves with it. A fingertip
-    // of friction 0.1 grips it less, so it slides over the paper, which stays.
+    // A fingertip presses with ten times the square's weight. Its friction of 0.9 holds the
+    // paper harder than the table's 0.4, so the paper moves with it. A fingertip of friction
+    // 0.1 holds it less, so it slides over the paper, which stays.
     let carried = drag(0.9);
     assert!(
         (carried / 0.005 - 1.0).abs() < 0.01,
@@ -1090,5 +1112,240 @@ fn a_fingertip_drags_paper_whose_table_slips_first() {
     assert!(
         left.abs() < 0.01 * 0.005,
         "the slipping fingertip moves the paper {left} m"
+    );
+}
+
+#[test]
+fn a_finger_pad_presses_with_its_stiffness_times_its_overrun() {
+    // A fingertip of radius 14 mm whose pad yields at 700 N/m comes down on a square of kami on
+    // the table. Its path runs 1 mm past the paper, so it presses with 0.7 N, less what the
+    // barrier's gap of 2 µm takes. The paper stays a thickness above the table. The fingertip
+    // feels the forces the solve leaves, so a tight tolerance balances them.
+    let kami = Material::kami();
+    let (h, gap) = (kami.thickness, Contact::default().gap);
+    let sheet = Sheet::new(Mesh::grid(8, 8, 0.05, 0.05).unwrap(), kami).unwrap();
+    let settings = Settings {
+        time_step: 1.0 / 240.0,
+        table: Some(Table::default()),
+        solver: Solver {
+            tolerance: 1e-12,
+            ..Solver::default()
+        },
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let rest = 0.5 * h + 0.5 * gap;
+    let lying: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x, y, rest])
+        .collect();
+    simulation.set_positions(0, &lying).unwrap();
+    let (radius, stiffness) = (0.014, 700.0);
+    let touch = rest + 0.5 * h + radius + gap;
+    let ends = |z: f64| [[0.025, 0.015, z], [0.025, 0.035, z]];
+    let finger = simulation
+        .add_body(
+            Body {
+                radius,
+                friction: 0.5,
+                stiffness,
+            },
+            &ends(touch + 1e-3),
+        )
+        .unwrap();
+    // The hand comes down over 24 steps, then stays, and the pad presses on.
+    for step in 1..=48 {
+        if step <= 24 {
+            let z = touch + 1e-3 - 2e-3 * f64::from(step) / 24.0;
+            simulation.move_body(finger, &ends(z)).unwrap();
+        }
+        let report = simulation.step().unwrap();
+        assert!(
+            report.converged && report.least_gap > 0.0,
+            "step {step}: {report:?}"
+        );
+    }
+    // The pad yields by how far its path runs past where the fingertip stops, within the
+    // barriers' gaps of the paper's top.
+    let pressed = -simulation.body_force(finger)[2];
+    let stop = simulation.body_points(finger)[0][2];
+    assert!(
+        (stop - touch).abs() <= 2.0 * gap,
+        "the fingertip stops at {stop} m"
+    );
+    let spring = stiffness * (stop - (touch - 1e-3));
+    assert!(
+        (pressed / spring - 1.0).abs() < 1e-6,
+        "the fingertip presses with {pressed} N, its pad with {spring} N"
+    );
+    assert!((pressed / (stiffness * 1e-3) - 1.0).abs() < 2.0 * gap / 1e-3);
+}
+
+/// A fingertip on a strip of kami, which its hand moves by a capsule across the strip.
+struct Fingertip {
+    simulation: Simulation,
+    finger: usize,
+    width: f64,
+}
+
+impl Fingertip {
+    /// Takes a time step, which converges with the paper above itself and the table.
+    fn step(&mut self, what: &str) {
+        let report = self.simulation.step().unwrap();
+        assert!(
+            report.converged && report.least_gap > 0.0,
+            "{what}: {report:?}"
+        );
+    }
+
+    /// Moves the hand along a path over `count` steps, easing in and out. The path gives where
+    /// along the strip and how high the hand goes, from the share of the way it has come.
+    fn path(&mut self, count: u32, what: &str, at: impl Fn(f64) -> (f64, f64)) {
+        for k in 1..=count {
+            let share = 0.5 - 0.5 * (std::f64::consts::PI * f64::from(k) / f64::from(count)).cos();
+            let (x, z) = at(share);
+            let ends = [[x, 0.0, z], [x, self.width, z]];
+            self.simulation.move_body(self.finger, &ends).unwrap();
+            self.step(what);
+        }
+    }
+}
+
+/// A fingertip folds a strip of kami in half, then creases the fold by pressing with `press`
+/// newtons. A hand holds the strip's far edge to the table.
+///
+/// The strip is 6 by 1.5 cm in 5 mm cells, with a sharp crease across its middle. The
+/// fingertip is a capsule of the finger pad's radius, 14 mm, as wide as the strip. Its pad
+/// yields at 700 N/m, the stiffness of a pad of modulus 36 kPa at a few newtons, from Dzidek et
+/// al., 2017. The time steps last 1/240 s, and every one converges with the paper above itself
+/// and the table.
+///
+/// Returns the fold's opening once the strip, let go, comes to rest, and the force the
+/// fingertip pressed with.
+fn fold_in_half(press: f64) -> (f64, f64) {
+    let kami = Material::kami();
+    let (h, gap) = (kami.thickness, Contact::default().gap);
+    let (columns, rows, length, width) = (12, 6, 0.06, 0.015);
+    let mut sheet = Sheet::new(Mesh::grid(columns, rows, length, width).unwrap(), kami).unwrap();
+    let at = |i: u32, j: u32| j * (columns + 1) + i;
+    let crease: Vec<[u32; 2]> = (0..rows)
+        .map(|j| [at(columns / 2, j), at(columns / 2, j + 1)])
+        .collect();
+    for &edge in &crease {
+        sheet.set_crease(edge, Some(Crease::kami())).unwrap();
+    }
+    let settings = Settings {
+        time_step: 1.0 / 240.0,
+        table: Some(Table::default()),
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let lying = 0.5 * h + 0.5 * gap;
+    let flat: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x, y, lying])
+        .collect();
+    simulation.set_positions(0, &flat).unwrap();
+    let (radius, pad) = (0.014, 700.0);
+    let touch = lying + 0.5 * h + radius + gap;
+    let finger = simulation
+        .add_body(
+            Body {
+                radius,
+                friction: 0.5,
+                stiffness: pad,
+            },
+            &[[0.0, 0.0, touch], [0.0, width, touch]],
+        )
+        .unwrap();
+    let mut hand = Fingertip {
+        simulation,
+        finger,
+        width,
+    };
+    for _ in 0..10 {
+        hand.step("lying");
+    }
+    let edge = |i: u32| -> Vec<usize> { (0..=rows).map(|j| at(i, j) as usize).collect() };
+    for v in edge(columns) {
+        hand.simulation.hold(0, v, true);
+    }
+    // The fingertip pinches the near edge and carries it round the middle, onto the far edge.
+    hand.simulation.grip(finger, 0, &edge(0));
+    let (hinge, turn) = (0.5 * length, std::f64::consts::PI);
+    hand.path(180, "carrying", |s| {
+        (
+            hinge * (1.0 - (turn * s).cos()) - 2e-4 * s,
+            touch + hinge * (turn * s).sin() + (h + gap) * s,
+        )
+    });
+    // The fingertip lets go and rises, and the fold springs open. The fingertip comes down 2 mm
+    // in from the fold, its axis along it.
+    hand.simulation.release(finger);
+    let [x, _, z] = hand.simulation.body_points(finger)[0];
+    let high = lying + 0.045;
+    hand.path(36, "rising", |s| (x, z + (high - z) * s));
+    let apex = hand
+        .simulation
+        .positions(0)
+        .iter()
+        .map(|p| p[0])
+        .fold(f64::INFINITY, f64::min);
+    let over = apex + 0.002;
+    hand.path(48, "moving over", |s| (x + (over - x) * s, high));
+    let closed = lying + h + gap + 0.5 * h + radius + gap;
+    let near = closed + 3e-4;
+    hand.path(96, "coming down", |s| (over, high + (near - high) * s));
+    // The hand runs on past the closed fold by the press over the pad's stiffness, then stays.
+    let deep = closed - press / pad;
+    hand.path(48, "pressing", |s| (over, near + (deep - near) * s));
+    for _ in 0..60 {
+        hand.step("holding the press");
+    }
+    let pressed = -hand.simulation.body_force(finger)[2];
+    hand.path(24, "lifting", |s| (over, deep + 0.02 * s));
+    for v in edge(columns) {
+        hand.simulation.hold(0, v, false);
+    }
+    for _ in 0..120 {
+        hand.step("coming to rest");
+    }
+    let simulation = &hand.simulation;
+    let dihedrals = simulation.sheets()[0].mesh().dihedrals();
+    let fold = dihedrals
+        .iter()
+        .zip(simulation.fold_angles(0))
+        .filter(|(d, _)| crease.contains(&d.edge))
+        .map(|(_, angle)| angle)
+        .sum::<f64>()
+        / f64::from(rows);
+    (std::f64::consts::PI - fold, pressed)
+}
+
+#[test]
+fn a_fingertip_folds_kami_in_half_and_creases_it_alike_however_hard_it_presses() {
+    // Pressed with 1 N or 4 N, the crease yields alike, since kami does not harden. Let go, the
+    // fold opens to between 30° and 40°, as measured creases rest, the two within 1°. The
+    // fold's layers stop the fingertip micrometers short of the hand's aim, so the pad presses
+    // within 2% of the force it aims for.
+    let mut openings = Vec::new();
+    for press in [1.0, 4.0] {
+        let (opening, pressed) = fold_in_half(press);
+        assert!(
+            (pressed / press - 1.0).abs() < 0.02,
+            "the fingertip presses with {pressed} N, not {press} N"
+        );
+        let degrees = opening.to_degrees();
+        assert!(
+            (30.0..=40.0).contains(&degrees),
+            "pressed with {press} N, the fold opens to {degrees}°"
+        );
+        openings.push(degrees);
+    }
+    assert!(
+        (openings[0] - openings[1]).abs() < 1.0,
+        "the folds open to {openings:?}°"
     );
 }

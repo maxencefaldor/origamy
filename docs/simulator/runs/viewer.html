@@ -18,6 +18,7 @@
   --stage: #eeebe5;
   --table: #c9bfae;
   --table-line: #b3a893;
+  --skin: #d9a58a;
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--ink);
   color-scheme: light;
@@ -30,6 +31,7 @@
   --stage: #1b1a18;
   --table: #4a4237;
   --table-line: #5c5345;
+  --skin: #b98670;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -165,10 +167,35 @@ run.creases.forEach(([, , sign], j) => {
 });
 scene.add(new THREE.LineSegments(creaseGeometry, new THREE.LineBasicMaterial({ vertexColors: true })));
 
+// Each body is a sphere round one point, or a capsule round the segment between two.
+const bodyRaw = run.bodies.length
+  ? new Float32Array(Uint8Array.from(atob(run.bodyPositions), (c) => c.charCodeAt(0)).buffer)
+  : new Float32Array(0);
+const bodyPoints = run.bodies.reduce((sum, body) => sum + body.points, 0);
+const skin = new THREE.MeshStandardMaterial({ color: css("--skin"), roughness: 0.55 });
+const up = new THREE.Vector3(0, 1, 0);
+const bodies = run.bodies.map((body) => {
+  const r = body.radius * 1000;
+  const ends = Array.from({ length: body.points }, () => new THREE.Mesh(new THREE.SphereGeometry(r, 48, 24), skin));
+  const shaft = body.points === 2 ? new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 48, 1, true), skin) : null;
+  for (const mesh of shaft ? [...ends, shaft] : ends) {
+    mesh.castShadow = true;
+    scene.add(mesh);
+  }
+  return { ends, shaft };
+});
 // Every frame's bounds frame the camera, the light and the table.
 const bounds = new THREE.Box3();
 const corner = new THREE.Vector3();
 for (let i = 0; i < raw.length; i += 3) bounds.expandByPoint(corner.set(raw[i], raw[i + 1], raw[i + 2]).multiplyScalar(1000));
+for (let frame = 0, i = 0; frame < run.frames; frame++) {
+  for (const body of run.bodies) {
+    for (let k = 0; k < body.points; k++, i += 3) {
+      corner.set(bodyRaw[i], bodyRaw[i + 1], bodyRaw[i + 2]).multiplyScalar(1000);
+      bounds.expandByPoint(corner.clone().addScalar(1000 * body.radius)).expandByPoint(corner.addScalar(-1000 * body.radius));
+    }
+  }
+}
 let table = null;
 if (run.table !== null) {
   const z = run.table * 1000;
@@ -205,6 +232,7 @@ function tableTexture() {
 function paint() {
   scheme();
   renderer.setClearColor(css("--stage"));
+  skin.color.set(css("--skin"));
   if (table) {
     table.material.map?.dispose();
     table.material.map = tableTexture();
@@ -246,6 +274,7 @@ const format = (value, unit) => {
   if (unit === "°") return `${value.toFixed(1)}°`;
   if (unit === "s") return `${value.toFixed(3)} s`;
   if (unit === "m/s") return `${value.toFixed(3)} m/s`;
+  if (unit === "N") return `${value.toFixed(2)} N`;
   if (unit === "rad") return `${scientific(value)} rad`;
   return Number.isInteger(value) ? String(value) : scientific(value);
 };
@@ -276,6 +305,26 @@ function show(t) {
     creasePositions.set(positions.subarray(3 * v, 3 * v + 3), 6 * j + 3);
   });
   creaseGeometry.attributes.position.needsUpdate = true;
+  let offset = 0;
+  run.bodies.forEach((body, j) => {
+    const points = Array.from({ length: body.points }, (_, i) => {
+      const [c, d] = [(k * bodyPoints + offset + i) * 3, (Math.min(k + 1, last) * bodyPoints + offset + i) * 3];
+      return new THREE.Vector3(
+        bodyRaw[c] * (1 - f) + bodyRaw[d] * f,
+        bodyRaw[c + 1] * (1 - f) + bodyRaw[d + 1] * f,
+        bodyRaw[c + 2] * (1 - f) + bodyRaw[d + 2] * f,
+      ).multiplyScalar(1000);
+    });
+    offset += body.points;
+    const { ends, shaft } = bodies[j];
+    points.forEach((point, i) => ends[i].position.copy(point));
+    if (shaft) {
+      const axis = points[1].clone().sub(points[0]);
+      shaft.position.copy(points[0]).addScaledVector(axis, 0.5);
+      shaft.scale.set(1, axis.length(), 1);
+      shaft.quaternion.setFromUnitVectors(up, axis.normalize());
+    }
+  });
   const stats = run.stats[Math.round(at)];
   run.readouts.forEach(([, key, unit], i) => { readouts.children[i].querySelector("b").textContent = format(stats[key], unit); });
   scrub.value = String(Math.round((at / Math.max(last, 1)) * 1000));

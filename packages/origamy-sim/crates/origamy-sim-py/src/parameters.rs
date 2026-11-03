@@ -222,12 +222,14 @@ impl Parameters for Body {
         Ok(Self {
             radius: field(model, "radius")?,
             friction: field(model, "friction")?,
+            stiffness: field(model, "stiffness")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("radius", self.radius)?;
-        fields.set_item("friction", self.friction)
+        fields.set_item("friction", self.friction)?;
+        fields.set_item("stiffness", self.stiffness)
     }
 }
 

@@ -110,6 +110,9 @@ impl Pattern {
     }
 }
 
+/// The most shifts a singular Hessian takes, each tenfold the last, before the step gives up.
+const SHIFTS: usize = 16;
+
 /// A gradient and a Hessian being filled, over the free vertices of a scene.
 pub(crate) struct Assembly<'a> {
     pattern: &'a Pattern,
@@ -191,6 +194,51 @@ impl<'a> Assembly<'a> {
         self.gradient[3 * vertex as usize + 2] += slope;
         let (offset, _) = self.pattern.block(vertex, vertex);
         self.values[offset + 8] += curvature;
+    }
+
+    /// The Cholesky factorization of a positive semidefinite Hessian, shifted where it is
+    /// singular so that the update stays within the trust radius `radius`.
+    ///
+    /// A singular Hessian leaves some motions free in the step's quadratic model. Paper
+    /// hanging flat from a straight line, for one, is free to turn about it. The shift
+    /// μ = |g|∞ / r moves the free motions down the gradient g by at most the trust radius r.
+    /// Levenberg and Marquardt shift a Newton step the same way. The shift grows tenfold while
+    /// rounding still leaves the Hessian singular.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SingularError`] when no component of the gradient exceeds `rounding`, the
+    /// force rounding leaves. Some motion then costs no energy, so the step has no unique
+    /// result. The error also comes when no shift makes the Hessian positive definite.
+    pub fn factor_within(
+        &mut self,
+        radius: f64,
+        rounding: f64,
+    ) -> Result<Factor<'a>, SingularError> {
+        if let Ok(factor) = self.factor() {
+            return Ok(factor);
+        }
+        let largest = self.gradient.iter().fold(0.0, |m: f64, g| m.max(g.abs()));
+        if largest <= rounding {
+            return Err(SingularError);
+        }
+        let mut shift = largest / radius;
+        let mut added = 0.0;
+        for _ in 0..SHIFTS {
+            if !shift.is_finite() {
+                break;
+            }
+            for vertex in 0..self.held.len() {
+                let vertex = u32::try_from(vertex).expect("a mesh counts its vertices in 32 bits");
+                self.add_vertex(vertex, [0.0; 3], shift - added);
+            }
+            added = shift;
+            if let Ok(factor) = self.factor() {
+                return Ok(factor);
+            }
+            shift *= 10.0;
+        }
+        Err(SingularError)
     }
 
     /// The Cholesky factorization of the Hessian.
@@ -305,7 +353,41 @@ mod tests {
     fn a_free_floating_system_is_singular() {
         let pattern = Pattern::new(1, []);
         let held = [false];
-        let assembly = Assembly::new(&pattern, &held);
+        let mut assembly = Assembly::new(&pattern, &held);
         assert!(matches!(assembly.factor(), Err(SingularError)));
+        assert!(matches!(
+            assembly.factor_within(1e-3, 0.0),
+            Err(SingularError)
+        ));
+        // A gradient within rounding of zero leaves the system singular.
+        assembly.add_vertex(0, [1e-20, 0.0, 0.0], 0.0);
+        assert!(matches!(
+            assembly.factor_within(1e-3, 1e-18),
+            Err(SingularError)
+        ));
+    }
+
+    #[test]
+    fn a_singular_system_with_a_gradient_steps_within_the_trust_radius() {
+        // A vertex free along z alone feels a force along z, so Newton's step is undefined. The
+        // shifted step goes down the gradient by the trust radius.
+        let pattern = Pattern::new(1, []);
+        let held = [false];
+        let mut assembly = Assembly::new(&pattern, &held);
+        assembly.add_vertex(0, [0.0, 0.0, 2.0], 0.0);
+        let mut hessian = SMatrix::<f64, 3, 3>::identity() * 5.0;
+        hessian[(2, 2)] = 0.0;
+        assembly.add(&[Some(0)], &SMatrix::zeros(), &hessian);
+        let negative: Vec<f64> = assembly.gradient.iter().map(|g| -g).collect();
+        let update = assembly
+            .factor_within(1e-3, 1e-12)
+            .unwrap()
+            .solve(&negative);
+        assert!(update[0].abs() + update[1].abs() < 1e-15);
+        assert!(
+            (update[2] + 1e-3).abs() < 1e-15,
+            "the vertex moves {} m",
+            update[2]
+        );
     }
 }
