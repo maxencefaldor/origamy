@@ -23,6 +23,7 @@ origamy-sim = { path = "packages/origamy-sim/crates/origamy-sim" }
 proptest = "1.12"
 pyo3 = { version = "0.30", features = ["abi3-py314"] }
 rayon = "1.12"
+spade = "2.15"
 thiserror = "2"
 
 [workspace.lints.rust]

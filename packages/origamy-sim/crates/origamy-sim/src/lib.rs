@@ -12,6 +12,7 @@
 pub mod body;
 mod contact;
 mod energy;
+pub mod faces;
 mod generated;
 pub mod material;
 pub mod mesh;
@@ -22,6 +23,7 @@ pub mod simulation;
 mod system;
 
 pub use body::{Body, BodyError};
+pub use faces::{Faces, FacesError, Refinement};
 pub use material::{Material, Stiffness, StrainLimit};
 pub use mesh::{Dihedral, Mesh, MeshError, Vertex};
 pub use parameter::ParameterError;

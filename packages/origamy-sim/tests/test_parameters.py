@@ -20,6 +20,7 @@ from origamy_sim import (
     Crease,
     Material,
     Mesh,
+    Refinement,
     Settings,
     Sheet,
     Simulation,
@@ -82,6 +83,17 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     else:
         core = True
     assert validates(Material, data) == core
+
+
+@given(st.fixed_dictionaries(dict.fromkeys(("max_area", "min_angle"), NUMBERS)))
+def test_pydantic_accepts_a_refinement_exactly_when_the_core_does(
+    refinement: dict[str, float],
+) -> None:
+    # With no faces the core checks the refinement, then finds no triangle to make.
+    with pytest.raises(ValueError, match=r".") as refused:
+        Mesh.of_faces([[0.0, 0.0]], [], Refinement.model_construct(None, **refinement))
+    core = "no triangles" in str(refused.value)
+    assert validates(Refinement, refinement) == core
 
 
 @given(

@@ -228,17 +228,16 @@ Every state the solver visits, not just every state it returns, is free of cross
 The two sides of a fold meet within the fold's own band.
 Pairs closer along the sheet than the crease band's width do not take the barrier, since their distance is the bend itself.
 
-**Starting from a flat-folded state.**
-Generic simulators cannot start from paper folded flat: its layers coincide, at distance zero, which every barrier forbids.
-The simulator starts instead from the exact layer order that origamy's kernel proves, and thickens the stack.
-A homotopy grows the thickness from nearly zero to h.
-The known order orients the barrier between each overlapping pair, so each layer rises above the layers the kernel puts below it.
-The thickening wraps each fold round the layers inside it, and raises paper where more layers lie under it.
-The result is a physical stack, exactly consistent with the kernel's layer order, and free of crossings from its first instant.
+**Folded states come from folding.**
+Paper folded flat has coincident layers, at distance zero, which every barrier forbids.
+The simulator never starts from such a state.
+Every model starts as the flat sheet, and each step of its fold sequence moves the physical state the step before left.
+Each fold wraps the layers inside it as real paper does, so the stack's thickness comes from the folding itself.
+At every step, the layer order wherever paper overlaps must match the order origamy's kernel proves.
 
 **Faster contact.**
 Offset geometric contact bounds how far each vertex may move without any crossing, with no collision detection over the update.
-The simulator evaluates it as a faster filter in phase 8, and keeps the guarantee whichever filter it uses.
+The simulator evaluates it as a faster filter in phase 7, and keeps the guarantee whichever filter it uses.
 
 ### 3.6 Friction and air
 
@@ -340,12 +339,14 @@ Each time step minimizes the incremental potential with a projected Newton metho
   The report counts the time steps taken.
 
 The solver is the reference: accurate, robust and the one every guarantee is proved for.
-A second solver, vertex block descent with offset contact, joins in phase 8 for interactive speed on GPUs, minimizing the same energy.
+A second solver, vertex block descent with offset contact, joins in phase 7 for interactive speed on GPUs, minimizing the same energy.
 
 ### 3.9 Discretization
 
 - **Meshes that follow creases.**
-  A constrained Delaunay triangulation of the crease pattern makes every crease line a chain of mesh edges, with no angle under 20°.
+  A constrained Delaunay triangulation of the crease pattern makes every crease line a chain of mesh edges.
+  Ruppert's refinement then leaves no angle under 20° and no triangle over an area bound, splitting creases where it must.
+  The spade crate builds both, and each triangle carries the face of the crease pattern it lies in.
 - **Grading.**
   Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
 - **Two levels of detail.**
@@ -397,12 +398,12 @@ Existing tools each solve part of the problem.
 | Origami Simulator | Bar-and-hinge springs on the GPU, all creases at once | Contact, thickness, plasticity; it lets paper cross paper |
 | MERLIN | Bar-and-hinge analysis with nonlinear solvers | Contact and folding sequences |
 | SWOMPS | Bar-and-hinge with barrier contact and sequential loading | Thin-sheet bending, crease plasticity, hands, speed |
-| IPC, C-IPC, OGC | Guaranteed crossing-free contact for shells and cloth | Paper's creases, plasticity, and flat-folded starts |
+| IPC, C-IPC, OGC | Guaranteed crossing-free contact for shells and cloth | Paper's creases, plasticity, and fold sequences |
 
 The simulator combines and extends them:
 
 1. Guaranteed crossing-free contact at paper's real thickness, for stacks of dozens of layers.
-1. Starting from an exactly known flat-folded state, thickened into a physical stack by homotopy.
+1. Every model folded from the flat sheet, step by step, each step's layer order checked against origamy's exact one.
 1. Creases as plastic bands, with yield, springback and aging, reducing exactly to sharp creases at coarse resolution.
 1. Hands, tools and grips as ordinary physical inputs, so folds are performed rather than prescribed.
 1. A certificate of physical feasibility: a fold sequence the simulator performs is one real paper allows, without crossing or tearing.
@@ -472,6 +473,7 @@ docs/simulator.py                       the recorder of the runs the docs show
 | `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
 | `contact` | Bounding volume hierarchies, distances, the barrier and its fade for parallel edges, friction, exclusions, continuous collision detection |
 | `body` | Spheres and capsules on paths, and their parameters |
+| `faces` | Meshes of a crease pattern's faces, refined, with the face of each triangle |
 
 ### 5.5 Engineering standards
 
@@ -529,7 +531,6 @@ Performance targets, on one laptop core:
 | Task | Target |
 | --- | --- |
 | A quasi-static time step of a crane-sized mesh, about 5,000 vertices | Under 100 ms |
-| Thickening the flat crane | Under 2 s |
 | Animating one fold, 60 frames | Under 5 s |
 
 ## 7. Plan
@@ -544,9 +545,8 @@ Each phase ends when its exit tests pass in CI.
 | 3. Friction and dynamics | Lagged friction, air drag, adaptive time steps | Sliding, sticking and falling tests match theory |
 | 4. Paper | Crease bands, plasticity, aging, orthotropy, presets calibrated on published measurements | The springback benchmark passes |
 | 5. Hands | Rigid bodies on paths, grips, forces, pressure | A fingertip folds a sheet in half and creases it, repeatably |
-| 6. Thickening | Physical stacks from exact layer orders | The flat crane thickens with its exact layer order, no crossing, within target time |
-| 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
-| 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
+| 6. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, each step's layer order matching origamy's, and the old rigid 3D code is deleted from origamy |
+| 7. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
 Phases 0 to 5 are done.
 Two findings from phase 1 shape the next phases:
@@ -604,7 +604,22 @@ Phase 4 adds these findings:
   Read per factor of e instead, folds of kami would set 13° deeper a decade.
   A measurement of paper's moment relaxation would settle the aging moment.
 
-Phase 7 deletes origamy's rigid 3D layer.
+Phase 5 adds these findings:
+
+- **Singular quasi-static steps.**
+  Paper hanging flat from a straight line is free to turn about it, so the Hessian is singular there.
+  Newton's update then depended on rounding, and failed on one mesh of four.
+  A Levenberg–Marquardt shift now sends the free motion down the gradient by at most the trust radius.
+- **Retracting about holds.**
+  The retraction once let moving held vertices drift, so a grip's first quasi-static step took 674 Newton iterations.
+  Pinning every held vertex where the update puts it brings that step to 19.
+- **No thickened starts.**
+  Lifting a flat fold's layers apart by convex optimization stacks the preliminary base, but not the petal fold.
+  There a layer ends exactly at the crease of a fold that wraps it, so the fold's two halves would part at one line.
+  Real paper bends round the layer's edge within a fraction of a millimeter, which 5 mm cells cannot follow.
+  Every model is therefore folded from the flat sheet, step by step.
+
+Phase 6 deletes origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
 Shaping becomes crease actuation and hands; animation becomes simulated motion.
 
@@ -623,7 +638,8 @@ A research track runs alongside, with ambitious targets:
 | Contact | Thickness barrier with conservative collision-checked updates | Penalty springs, which let paper cross under load |
 | Inextensibility | Real modulus plus a strain barrier | Very stiff springs, ill conditioned; hard constraints, brittle |
 | Creases | Plastic bands, reducing to sharp creases | Sharp creases only, with no width at the fold and no springback |
-| Start from flat folds | Thickening by homotopy along the exact layer order | Random offsets, which can pick the wrong order |
+| Folded states | Folding from the flat sheet, step by step, as paper is folded | Thickening a flat fold into a stack, which cannot wrap a layer that ends at a fold's crease on a coarse mesh |
+| Meshes | A constrained Delaunay triangulation of the crease pattern, refined by Ruppert's algorithm | Regular grids, whose edges cross creases at arbitrary angles |
 | Core language | Rust | C++, NumPy, JAX |
 | Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |
 | Derivatives | Generated from symbolic energies | Hand derivation, error prone; runtime autodiff, slow in the hot loop |

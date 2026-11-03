@@ -71,6 +71,28 @@ def test_vertices_come_in_any_integer_type(dtype: type[np.integer]) -> None:
     assert Mesh(rest, np.array(HALVES, dtype=dtype)) == Mesh(SQUARE, HALVES)
 
 
+def test_faces_mesh_into_small_triangles_whose_edges_follow_theirs() -> None:
+    # A unit square folded along its diagonal: two faces, meshed finely.
+    points = [[0.0, 0.0], [0.1, 0.0], [0.1, 0.1], [0.0, 0.1]]
+    refinement = origamy_sim.Refinement(max_area=1e-4)
+    mesh, faces = Mesh.of_faces(points, [[0, 1, 2], [0, 2, 3]], refinement)
+    assert mesh.rest[:4] == pytest.approx(np.array(points))
+    corners = mesh.rest[mesh.triangles]
+    sides = corners[:, [1, 2], :] - corners[:, [0, 0], :]
+    areas = 0.5 * (sides[:, 0, 0] * sides[:, 1, 1] - sides[:, 0, 1] * sides[:, 1, 0])
+    assert (areas > 0).all()
+    assert areas.max() <= refinement.max_area * (1 + 1e-9)
+    assert [areas[faces == f].sum() for f in (0, 1)] == pytest.approx([5e-3, 5e-3])
+    # The mesh edges between the faces run along the diagonal.
+    triangle = {frozenset(t): i for i, t in enumerate(mesh.triangles.tolist())}
+    for u, v, a, b in mesh.dihedrals.tolist():
+        left, right = (faces[triangle[frozenset((u, v, w))]] for w in (a, b))
+        if left != right:
+            assert mesh.rest[[u, v], 0] == pytest.approx(mesh.rest[[u, v], 1])
+    with pytest.raises(ValueError, match="face 1 runs clockwise or overlaps another"):
+        Mesh.of_faces(points, [[0, 1, 2], [0, 3, 2]], refinement)
+
+
 def test_a_grid_is_a_rectangle_of_cells() -> None:
     grid = Mesh.grid(3, 2, 0.3, 0.1)
     assert grid.rest.shape == (12, 2)

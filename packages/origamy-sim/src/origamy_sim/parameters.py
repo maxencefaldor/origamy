@@ -331,6 +331,20 @@ class Table(_Parameters):
     """
 
 
+class Refinement(_Parameters):
+    """How finely a mesh of faces is refined: its largest triangle and its least angle.
+
+    Ruppert's refinement inserts points until no triangle exceeds the area and no angle
+    falls under the bound. The refinement ends for bounds up to about 30°.
+    """
+
+    max_area: Positive
+    """The largest area a triangle may have, in square meters."""
+
+    min_angle: Annotated[float, Field(gt=0, le=math.radians(35))] = math.radians(20)
+    """The least angle a triangle may have, in radians; 20° by default."""
+
+
 class Body(_Parameters):
     """A rigid body that touches paper: a sphere or a capsule of a radius.
 

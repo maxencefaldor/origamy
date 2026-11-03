@@ -15,7 +15,8 @@ use numpy::{
     PyUntypedArrayMethods,
 };
 use origamy_sim::{
-    Body, Crease, Energy, Material, Mesh, Report, Settings, Sheet, Simulation, StepError, Vertex,
+    Body, Crease, Energy, Faces, Material, Mesh, Refinement, Report, Settings, Sheet, Simulation,
+    StepError, Vertex,
 };
 use pyo3::create_exception;
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -86,6 +87,52 @@ impl PyMesh {
         Ok(Self(
             Mesh::grid(columns, rows, width, height).map_err(value_error)?,
         ))
+    }
+
+    /// A mesh of faces that meet along their edges, refined into small, well-shaped
+    /// triangles, and the face each triangle lies in.
+    ///
+    /// Every edge of every face becomes a chain of mesh edges, so a sheet can bend sharply
+    /// along it, as a crease pattern's creases need. The mesh keeps each point as a vertex, in
+    /// order, before the vertices the refinement adds.
+    ///
+    /// Args:
+    ///     points: The faces' corners, in meters, of shape (n, 2).
+    ///     faces: Each face's corners, as indices of points, counterclockwise.
+    ///     refinement: The largest area and the least angle of the triangles.
+    ///
+    /// Returns:
+    ///     The mesh, and the face of each triangle, of shape (m,).
+    ///
+    /// Raises:
+    ///     ValueError: When a point is not finite, or two points coincide. The error also
+    ///         names a face with too few corners, faces that cross or overlap, and a
+    ///         refinement that cannot reach its angle.
+    #[staticmethod]
+    fn of_faces<'py>(
+        py: Python<'py>,
+        points: &Bound<'_, PyAny>,
+        faces: Vec<Vec<i64>>,
+        refinement: Model<Refinement>,
+    ) -> PyResult<(Self, Bound<'py, PyArray1<i64>>)> {
+        let points = rows::<f64, 2>("points", points)?;
+        let faces = faces
+            .into_iter()
+            .enumerate()
+            .map(|(face, corners)| {
+                corners
+                    .into_iter()
+                    .map(|c| {
+                        Vertex::try_from(c).map_err(|_| {
+                            PyValueError::new_err(format!("face {face} names point {c}"))
+                        })
+                    })
+                    .collect::<PyResult<Vec<Vertex>>>()
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let meshed = Faces::new(&points, &faces, refinement.0).map_err(value_error)?;
+        let labels: Vec<i64> = meshed.faces.iter().map(|&f| i64::from(f)).collect();
+        Ok((Self(meshed.mesh), labels.into_pyarray(py)))
     }
 
     /// Each vertex's place in the flat sheet, in meters, of shape (n, 2).

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from origamy_sim.parameters import Body, Crease, Material, Settings
+from origamy_sim.parameters import Body, Crease, Material, Refinement, Settings
 
 class SingularError(RuntimeError): ...
 
@@ -14,6 +14,10 @@ class Mesh:
     def __init__(self, rest: ArrayLike, triangles: ArrayLike) -> None: ...
     @staticmethod
     def grid(columns: int, rows: int, width: float, height: float) -> Mesh: ...
+    @staticmethod
+    def of_faces(
+        points: ArrayLike, faces: Sequence[Sequence[int]], refinement: Refinement
+    ) -> tuple[Mesh, NDArray[np.int64]]: ...
     @property
     def rest(self) -> NDArray[np.float64]: ...
     @property

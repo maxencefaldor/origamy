@@ -29,6 +29,7 @@ Held folds age: they lose moment logarithmically in time, and set deeper the lon
 Hands carry held vertices within each time step, so paper never crosses paper on the way, and each hand reports the force it exerts.
 Rigid spheres and capsules, such as fingertips and tools, touch paper with friction of their own.
 A fingertip grips paper and carries it, and its pad yields as it presses.
+A crease pattern meshes into small, well-shaped triangles whose edges follow every crease.
 Point forces and pressure load the paper.
 Benchmarks hold it to known solutions:
 
@@ -49,7 +50,8 @@ Benchmarks hold it to known solutions:
 - A strip of kami that a fingertip folds in half and creases opens to 35.4° pressed with 1 N, and 35.3° with 4 N.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Phases 0 to 5 are done: hands hold, carry, grip and press paper, and thickening comes next.
+Phases 0 to 5 are done, and hands hold, carry, grip and press paper.
+Next, origamy's models fold physically, step by step, from the flat sheet.
 
 ## Install
 

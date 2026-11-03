@@ -42,4 +42,6 @@ The function `copy.replace` makes a validated copy with some fields changed.
 
 ::: origamy_sim.Body
 
+::: origamy_sim.Refinement
+
 ::: origamy_sim.Config
