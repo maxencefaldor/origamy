@@ -85,7 +85,9 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     assert validates(Material, data) == core
 
 
-@given(st.fixed_dictionaries(dict.fromkeys(("max_area", "min_angle"), NUMBERS)))
+@given(
+    st.fixed_dictionaries(dict.fromkeys(("max_area", "min_angle", "min_area"), NUMBERS))
+)
 def test_pydantic_accepts_a_refinement_exactly_when_the_core_does(
     refinement: dict[str, float],
 ) -> None:

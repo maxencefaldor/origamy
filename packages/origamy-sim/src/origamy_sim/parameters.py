@@ -344,6 +344,22 @@ class Refinement(_Parameters):
     min_angle: Annotated[float, Field(gt=0, le=math.radians(35))] = math.radians(20)
     """The least angle a triangle may have, in radians; 20° by default."""
 
+    min_area: NonNegative = 0.0
+    """The area under which the refinement leaves a triangle as it is, in square meters.
+
+    Points closer than such triangles' edges then keep no tiny triangles around them, at
+    the cost of angles under the bound there. The default, zero, refines every triangle.
+    """
+
+    @model_validator(mode="after")
+    def _check_areas(self) -> Self:
+        if not self.min_area < self.max_area:
+            message = (
+                f"min area is {self.min_area}, but it must be less than the max area"
+            )
+            raise ValueError(message)
+        return self
+
 
 class Body(_Parameters):
     """A rigid body that touches paper: a sphere or a capsule of a radius.

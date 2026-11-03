@@ -241,12 +241,14 @@ impl Parameters for Refinement {
         Ok(Self {
             max_area: field(model, "max_area")?,
             min_angle: field(model, "min_angle")?,
+            min_area: field(model, "min_area")?,
         })
     }
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("max_area", self.max_area)?;
-        fields.set_item("min_angle", self.min_angle)
+        fields.set_item("min_angle", self.min_angle)?;
+        fields.set_item("min_area", self.min_area)
     }
 }
 

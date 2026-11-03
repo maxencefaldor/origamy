@@ -1,4 +1,5 @@
 # Copyright 2026 Maxence Faldor
+import math
 import runpy
 from pathlib import Path
 
@@ -29,12 +30,13 @@ def example(name: str) -> Paper:
 def assert_folds_as_its_states(folding: Folding) -> None:
     """Every fold converges, puts each corner at its place and stacks every pair right.
 
-    No paper passes below the table on the way.
+    A corner may creep back where a crease wraps layers. No paper passes below the
+    table on the way.
     """
     for stage in folding.stages:
         assert stage.converged, stage.step
         assert stage.misordered == (), stage.step
-        assert stage.offset < 1e-4, stage.step
+        assert stage.offset < 1e-4 + folding.creep, stage.step
         lowest = min(frame[:, 2].min() for frame in stage.frames)
         assert lowest > LYING - 1e-6, stage.step
 
@@ -101,6 +103,25 @@ def test_a_fold_across_the_square_folds_physically(
     assert_folds_as_its_states(simulate(paper.steps))
 
 
+def test_a_crease_bends_round_the_layer_it_wraps() -> None:
+    # The bottom strip folds up, then the doubled strip folds up again. The second
+    # crease wraps the strip, whose raw edge lies along it.
+    paper = Paper.square()
+    paper.valley(Line.through((0, "1/8"), (1, "1/8")), flap=("1/2", "1/16"))
+    paper.valley(Line.through((0, "1/4"), (1, "1/4")), flap=("1/2", "3/16"))
+    physics = Physics(increments=60)
+    folding = simulate(paper.steps, physics)
+    assert_folds_as_its_states(folding)
+    # The crease bends over a band half a circle round the strip and itself.
+    width = math.pi * LAYER
+    assert folding.creep == pytest.approx(width)
+    crease = physics.size / 4
+    lines = physics.bands.lines
+    for rank in range(-lines, lines + 1):
+        offset = crease + rank * width / (2 * lines)
+        assert np.isclose(folding.mesh.rest[:, 1], offset, atol=1e-9).sum() >= 2
+
+
 def test_paper_turned_both_up_and_down_from_held_paper_is_refused() -> None:
     # The middle strip stays; the left strip folds up over it and the right one under.
     paper = Paper.square()
@@ -121,8 +142,16 @@ def test_paper_shaped_in_space_is_refused() -> None:
 
 @pytest.mark.parametrize(
     "change",
-    [{"size": 0.0}, {"increments": 0}, {"margin": 0.0}, {"margin": 4.0}],
+    [
+        {"size": 0.0},
+        {"increments": 0},
+        {"margin": 0.0},
+        {"margin": 4.0},
+        {"bands": {"lines": 0}},
+        {"bands": {"edge": 0.0}},
+        {"bands": {"growth": 1.0}},
+    ],
 )
-def test_physics_refuses_values_outside_its_range(change: dict[str, float]) -> None:
+def test_physics_refuses_values_outside_its_range(change: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Physics(**change)  # ty: ignore[invalid-argument-type]

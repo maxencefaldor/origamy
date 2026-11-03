@@ -1,5 +1,6 @@
 # Copyright 2026 Maxence Faldor
 import ast
+import itertools
 import re
 from pathlib import Path
 
@@ -75,7 +76,8 @@ def test_faces_mesh_into_small_triangles_whose_edges_follow_theirs() -> None:
     # A unit square folded along its diagonal: two faces, meshed finely.
     points = [[0.0, 0.0], [0.1, 0.0], [0.1, 0.1], [0.0, 0.1]]
     refinement = origamy_sim.Refinement(max_area=1e-4)
-    mesh, faces = Mesh.of_faces(points, [[0, 1, 2], [0, 2, 3]], refinement)
+    mesh, faces, lines = Mesh.of_faces(points, [[0, 1, 2], [0, 2, 3]], refinement)
+    assert lines == []
     assert mesh.rest[:4] == pytest.approx(np.array(points))
     corners = mesh.rest[mesh.triangles]
     sides = corners[:, [1, 2], :] - corners[:, [0, 0], :]
@@ -91,6 +93,41 @@ def test_faces_mesh_into_small_triangles_whose_edges_follow_theirs() -> None:
             assert mesh.rest[[u, v], 0] == pytest.approx(mesh.rest[[u, v], 1])
     with pytest.raises(ValueError, match="face 1 runs clockwise or overlaps another"):
         Mesh.of_faces(points, [[0, 1, 2], [0, 3, 2]], refinement)
+
+
+def test_lines_join_faces_meshed_as_chains_of_edges() -> None:
+    # A line a tenth of a millimeter inside the square's left side, between points on
+    # its bottom and top sides, joins the mesh after the refinement.
+    points = [[0.0, 0.0], [1e-4, 0.0], [0.1, 0.0], [0.1, 0.1], [1e-4, 0.1], [0.0, 0.1]]
+    refinement = origamy_sim.Refinement(max_area=1e-4)
+    mesh, _, (line,) = Mesh.of_faces(
+        points, [[0, 1, 2, 3, 4, 5]], refinement, lines=[(1, 4)]
+    )
+    assert (line[0], line[-1]) == (1, 4)
+    assert mesh.rest[line, 0] == pytest.approx(1e-4)
+    assert np.diff(mesh.rest[line, 1]) == pytest.approx(0.1 / (len(line) - 1))
+    edges = {tuple(e) for e in mesh.edges.tolist()}
+    assert all(tuple(sorted(pair)) in edges for pair in itertools.pairwise(line))
+    with pytest.raises(ValueError, match="line 0 needs two distinct points"):
+        Mesh.of_faces(points, [[0, 1, 2, 3, 4, 5]], refinement, lines=[(1, 1)])
+
+
+def test_points_only_lines_name_join_with_their_lines() -> None:
+    # A line between two points inside the square, which no face names.
+    points = [
+        [0.0, 0.0],
+        [0.1, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [0.02, 0.05],
+        [0.08, 0.05],
+    ]
+    refinement = origamy_sim.Refinement(max_area=1e-4)
+    mesh, _, (line,) = Mesh.of_faces(points, [[0, 1, 2, 3]], refinement, lines=[(4, 5)])
+    # The points keep their order, before every vertex the refinement adds.
+    assert mesh.rest[:6] == pytest.approx(np.array(points))
+    assert (line[0], line[-1]) == (4, 5)
+    assert mesh.rest[line, 1] == pytest.approx(0.05)
 
 
 def test_a_grid_is_a_rectangle_of_cells() -> None:

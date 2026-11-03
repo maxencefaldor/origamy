@@ -13,4 +13,4 @@ stacked = all(not stage.misordered for stage in folding.stages)
 
 ::: origamy.physics
     options:
-      members: [simulate, Physics, Folding, Stage, PhysicsError]
+      members: [simulate, Physics, Bands, Folding, Stage, PhysicsError]

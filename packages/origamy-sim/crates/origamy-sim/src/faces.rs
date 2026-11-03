@@ -4,10 +4,19 @@
 //! Every edge of every face becomes a chain of mesh edges, so a sheet can bend sharply along
 //! it. Ruppert's refinement inserts points until no angle falls under a bound and no triangle
 //! exceeds an area. The refinement splits the faces' edges where it must, without gaps.
+//!
+//! Lines inside the faces join the mesh after the refinement, as chains of mesh edges at most
+//! the refinement's edge length, with the points that only lines name. Two lines a fraction of
+//! a millimeter apart then bound a strip of long thin triangles, where refining would fill the
+//! strip with tiny ones.
 
+use spade::handles::FixedVertexHandle;
 use spade::{
     AngleLimit, ConstrainedDelaunayTriangulation, Point2, RefinementParameters, Triangulation,
 };
+
+/// The triangulation the faces' edges constrain.
+type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
 
 use crate::mesh::{Mesh, MeshError, Vertex};
 use crate::parameter::{ParameterError, positive, require};
@@ -21,6 +30,11 @@ pub struct Refinement {
     ///
     /// Ruppert's refinement ends for bounds up to about 30°, and 20° is the usual choice.
     pub min_angle: f64,
+    /// The area under which the refinement leaves a triangle as it is, in square meters.
+    ///
+    /// Points closer than the edges such triangles span then keep no tiny triangles around
+    /// them, at the cost of angles under the bound there. Zero refines every triangle.
+    pub min_area: f64,
 }
 
 impl Refinement {
@@ -30,6 +44,7 @@ impl Refinement {
         Self {
             max_area,
             min_angle: 20f64.to_radians(),
+            min_area: 0.0,
         }
     }
 
@@ -45,6 +60,12 @@ impl Refinement {
             self.min_angle,
             self.min_angle > 0.0 && self.min_angle <= 35f64.to_radians(),
             "positive, and at most 35°",
+        )?;
+        require(
+            "min area",
+            self.min_area,
+            (0.0..self.max_area).contains(&self.min_area),
+            "at least zero, and less than the max area",
         )
     }
 }
@@ -87,6 +108,14 @@ pub enum FacesError {
         /// The face.
         face: usize,
     },
+    /// A line names a point that does not exist, or runs from a point to itself.
+    #[error("line {line} needs two distinct points among the {count} points")]
+    Line {
+        /// The line.
+        line: usize,
+        /// How many points there are.
+        count: usize,
+    },
     /// The refinement could not reach its least angle within its budget of points.
     #[error("the refinement stopped short of its least angle")]
     Unrefined,
@@ -98,10 +127,12 @@ pub enum FacesError {
 /// A mesh of faces, with the face each triangle lies in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Faces {
-    /// The mesh, whose first vertices are the faces' points, in their order.
+    /// The mesh, whose first vertices are the points, in their order.
     pub mesh: Mesh,
     /// The face each triangle of the mesh lies in.
     pub faces: Vec<u32>,
+    /// The vertices along each line, from its first point to its second.
+    pub lines: Vec<Vec<Vertex>>,
 }
 
 impl Faces {
@@ -109,56 +140,34 @@ impl Faces {
     /// `points`, in meters, refined as `refinement` asks.
     ///
     /// The mesh keeps every point as a vertex, in order, and every face's edge as a chain of
-    /// mesh edges. Its triangles cover exactly the faces.
+    /// mesh edges. Its triangles cover exactly the faces. Each of `lines`, between two points,
+    /// then joins the mesh as a chain of mesh edges no longer than the refinement's edge
+    /// length, the side of an equilateral triangle of the largest area. The points that no face
+    /// names join with the lines, after the refinement. Lines that cross split at the crossing.
     ///
     /// # Errors
     ///
     /// Returns a [`FacesError`] when a refinement parameter lies outside its values, or a
     /// point is not finite. Coincident points and faces with too few corners are refused, as
-    /// are faces whose edges cross, or that run clockwise or overlap. A refinement that cannot
-    /// reach its least angle is refused too.
+    /// are faces whose edges cross, or that run clockwise or overlap. A line must join two
+    /// distinct points. A refinement that cannot reach its least angle is refused too.
     pub fn new(
         points: &[[f64; 2]],
         faces: &[Vec<Vertex>],
+        lines: &[[Vertex; 2]],
         refinement: Refinement,
     ) -> Result<Self, FacesError> {
         refinement.check()?;
-        let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
-        let mut handles = Vec::with_capacity(points.len());
-        for (point, &[x, y]) in points.iter().enumerate() {
-            if !(x.is_finite() && y.is_finite()) {
-                return Err(FacesError::NotFinite { point });
-            }
-            let before = cdt.num_vertices();
-            let handle = cdt
-                .insert(Point2::new(x, y))
-                .map_err(|_| FacesError::NotFinite { point })?;
-            if cdt.num_vertices() == before {
-                return Err(FacesError::Coincident {
-                    points: [handle.index(), point],
-                });
-            }
-            handles.push(handle);
+        if let Some(line) = lines
+            .iter()
+            .position(|&[a, b]| a == b || a.max(b) as usize >= points.len())
+        {
+            return Err(FacesError::Line {
+                line,
+                count: points.len(),
+            });
         }
-        for (face, corners) in faces.iter().enumerate() {
-            if corners.len() < 3 || corners.iter().any(|&c| c as usize >= points.len()) {
-                return Err(FacesError::Corners {
-                    face,
-                    count: points.len(),
-                });
-            }
-            if polygon_area(points, corners) <= 0.0 {
-                return Err(FacesError::Overlapping { face });
-            }
-            for (k, &a) in corners.iter().enumerate() {
-                let b = corners[(k + 1) % corners.len()];
-                let (from, to) = (handles[a as usize], handles[b as usize]);
-                if !cdt.can_add_constraint(from, to) {
-                    return Err(FacesError::Crossing { face });
-                }
-                cdt.add_constraint(from, to);
-            }
-        }
+        let (mut cdt, handles) = triangulate(points, faces)?;
         // The budget lets the refinement fill the faces at the area bound several times over.
         let area: f64 = faces.iter().map(|f| polygon_area(points, f).abs()).sum();
         #[expect(
@@ -171,15 +180,23 @@ impl Faces {
             RefinementParameters::new()
                 .with_angle_limit(AngleLimit::from_rad(refinement.min_angle))
                 .with_max_allowed_area(refinement.max_area)
+                .with_min_required_area(refinement.min_area)
                 .with_max_additional_vertices(budget),
         );
         if !result.refinement_complete {
             return Err(FacesError::Unrefined);
         }
+        // The points no face names join now, so the refinement leaves them be.
+        let (handles, points_of) = insert_rest(&mut cdt, points, &handles)?;
+        let length = (4.0 * refinement.max_area / 3f64.sqrt()).sqrt();
+        let chains: Vec<Vec<usize>> = lines
+            .iter()
+            .map(|&[a, b]| join(&mut cdt, handles[a as usize], handles[b as usize], length))
+            .collect();
         // Each triangle lies in the face that holds its center, and the rest of the hull
         // drops out.
         let labels = label(&cdt, points, faces)?;
-        // The vertices keep spade's order, which starts with the points, less any unused.
+        // The points come first, in their order, then the refinement's points, less any unused.
         let mut used = vec![false; cdt.num_vertices()];
         let mut triangles = Vec::new();
         let mut owners = Vec::new();
@@ -195,13 +212,15 @@ impl Faces {
         }
         let mut renumber = vec![0; used.len()];
         let mut rest = Vec::new();
-        for (v, vertex) in cdt.vertices().enumerate() {
+        let first = handles.iter().map(FixedVertexHandle::index);
+        let others = (0..used.len()).filter(|&v| points_of.get(v).is_none_or(Option::is_none));
+        for v in first.chain(others) {
             if used[v] {
                 renumber[v] =
                     Vertex::try_from(rest.len()).map_err(|_| MeshError::TooManyVertices {
                         count: cdt.num_vertices(),
                     })?;
-                let p = vertex.position();
+                let p = cdt.vertex(FixedVertexHandle::from_index(v)).position();
                 rest.push([p.x, p.y]);
             }
         }
@@ -212,14 +231,144 @@ impl Faces {
         Ok(Self {
             mesh: Mesh::new(rest, triangles)?,
             faces: owners,
+            lines: chains
+                .into_iter()
+                .map(|chain| chain.into_iter().map(|v| renumber[v]).collect())
+                .collect(),
         })
     }
+}
+
+/// The constrained Delaunay triangulation of the faces' edges, and the handle of each point a
+/// face names.
+fn triangulate(
+    points: &[[f64; 2]],
+    faces: &[Vec<Vertex>],
+) -> Result<(Cdt, Vec<Option<FixedVertexHandle>>), FacesError> {
+    if let Some(point) = points.iter().position(|p| !p.iter().all(|x| x.is_finite())) {
+        return Err(FacesError::NotFinite { point });
+    }
+    let mut named = vec![false; points.len()];
+    for (face, corners) in faces.iter().enumerate() {
+        if corners.len() < 3 || corners.iter().any(|&c| c as usize >= points.len()) {
+            return Err(FacesError::Corners {
+                face,
+                count: points.len(),
+            });
+        }
+        for &c in corners {
+            named[c as usize] = true;
+        }
+    }
+    let mut cdt = Cdt::new();
+    let mut handles = vec![None; points.len()];
+    let mut inserted = Vec::new();
+    for (point, &[x, y]) in points.iter().enumerate() {
+        if !named[point] {
+            continue;
+        }
+        let handle = cdt
+            .insert(Point2::new(x, y))
+            .map_err(|_| FacesError::NotFinite { point })?;
+        if handle.index() < inserted.len() {
+            return Err(FacesError::Coincident {
+                points: [inserted[handle.index()], point],
+            });
+        }
+        inserted.push(point);
+        handles[point] = Some(handle);
+    }
+    for (face, corners) in faces.iter().enumerate() {
+        if polygon_area(points, corners) <= 0.0 {
+            return Err(FacesError::Overlapping { face });
+        }
+        for (k, &a) in corners.iter().enumerate() {
+            let b = corners[(k + 1) % corners.len()];
+            let (Some(from), Some(to)) = (handles[a as usize], handles[b as usize]) else {
+                unreachable!("every corner of a face is a named point");
+            };
+            if !cdt.can_add_constraint(from, to) {
+                return Err(FacesError::Crossing { face });
+            }
+            cdt.add_constraint(from, to);
+        }
+    }
+    Ok((cdt, handles))
+}
+
+/// Inserts the points no face names, whose handles are `None`, after the refinement.
+///
+/// Returns every point's handle, and the point each vertex of the triangulation is, if any.
+fn insert_rest(
+    cdt: &mut Cdt,
+    points: &[[f64; 2]],
+    handles: &[Option<FixedVertexHandle>],
+) -> Result<(Vec<FixedVertexHandle>, Vec<Option<usize>>), FacesError> {
+    let mut points_of: Vec<Option<usize>> = vec![None; cdt.num_vertices()];
+    for (point, handle) in handles.iter().enumerate() {
+        if let Some(handle) = handle {
+            points_of[handle.index()] = Some(point);
+        }
+    }
+    let mut all = Vec::with_capacity(points.len());
+    for (point, handle) in handles.iter().enumerate() {
+        if let Some(handle) = handle {
+            all.push(*handle);
+            continue;
+        }
+        let [x, y] = points[point];
+        let handle = cdt
+            .insert(Point2::new(x, y))
+            .map_err(|_| FacesError::NotFinite { point })?;
+        points_of.resize(cdt.num_vertices(), None);
+        if let Some(other) = points_of[handle.index()] {
+            return Err(FacesError::Coincident {
+                points: [other, point],
+            });
+        }
+        points_of[handle.index()] = Some(point);
+        all.push(handle);
+    }
+    Ok((all, points_of))
+}
+
+/// Joins a line from `from` to `to` to the triangulation, as a chain of constraint edges no
+/// longer than `length`, and returns the vertices along it.
+///
+/// The chain's points are spread evenly along the line, and a chain that crosses another
+/// splits both at the crossing.
+fn join(cdt: &mut Cdt, from: FixedVertexHandle, to: FixedVertexHandle, length: f64) -> Vec<usize> {
+    let [a, b] = [from, to].map(|v| cdt.vertex(v).position());
+    let span = (b.x - a.x).hypot(b.y - a.y);
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a positive count of pieces, from a finite ratio, capped"
+    )]
+    let pieces = (span / length).ceil().clamp(1.0, 1e6) as u32;
+    let mut stops = vec![from];
+    for k in 1..pieces {
+        let share = f64::from(k) / f64::from(pieces);
+        let point = Point2::new(a.x + share * (b.x - a.x), a.y + share * (b.y - a.y));
+        stops.push(
+            cdt.insert(point)
+                .expect("a point between finite points is finite"),
+        );
+    }
+    stops.push(to);
+    let mut chain = vec![from.index()];
+    for pair in stops.windows(2) {
+        for edge in cdt.add_constraint_and_split(pair[0], pair[1], |p| p) {
+            chain.push(cdt.directed_edge(edge).to().fix().index());
+        }
+    }
+    chain
 }
 
 /// The face each inner face of the triangulation lies in, or `None` outside every face: the face
 /// that holds its center.
 fn label(
-    cdt: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    cdt: &Cdt,
     points: &[[f64; 2]],
     faces: &[Vec<Vertex>],
 ) -> Result<Vec<Option<u32>>, FacesError> {
@@ -314,7 +463,7 @@ mod tests {
     fn faces_mesh_into_small_well_shaped_triangles_that_follow_their_edges() {
         let (points, faces) = square();
         let refinement = Refinement::of_area(0.01);
-        let meshed = Faces::new(&points, &faces, refinement).unwrap();
+        let meshed = Faces::new(&points, &faces, &[], refinement).unwrap();
         let mesh = &meshed.mesh;
         // The points come first, in order.
         assert_eq!(mesh.rest()[..points.len()], points[..]);
@@ -359,31 +508,123 @@ mod tests {
     }
 
     #[test]
+    fn lines_join_the_mesh_as_chains_without_refinement_around_them() {
+        // The right face of the square has a strip a millimeter wide along its left edge, and
+        // two lines crossing at its middle.
+        let (mut points, mut faces) = square();
+        points.extend([
+            [1.001, 0.0],
+            [1.002, 0.0],
+            [1.25, 0.0],
+            [1.75, 0.0],
+            [1.001, 1.0],
+            [1.002, 1.0],
+            [1.25, 1.0],
+            [1.75, 1.0],
+        ]);
+        faces[2] = vec![1, 6, 7, 8, 9, 4, 5, 13, 12, 11, 10, 2];
+        let lines = [[6, 10], [7, 11], [8, 13], [9, 12]];
+        let refinement = Refinement::of_area(0.01);
+        let meshed = Faces::new(&points, &faces, &lines, refinement).unwrap();
+        let rest = meshed.mesh.rest();
+        let edges = meshed.mesh.edges();
+        let length = (4.0 * refinement.max_area / 3f64.sqrt()).sqrt();
+        for (chain, [a, b]) in meshed.lines.iter().zip(lines) {
+            assert_eq!((chain[0], chain[chain.len() - 1]), (a, b));
+            let [p, q] = [a, b].map(|v| rest[v as usize]);
+            for pair in chain.windows(2) {
+                let edge = [pair[0].min(pair[1]), pair[0].max(pair[1])];
+                assert!(edges.binary_search(&edge).is_ok(), "{edge:?} is no edge");
+                let [u, v] = [pair[0], pair[1]].map(|w| rest[w as usize]);
+                assert!((v[0] - u[0]).hypot(v[1] - u[1]) <= length * (1.0 + 1e-9));
+                let off = (q[0] - p[0]) * (v[1] - p[1]) - (q[1] - p[1]) * (v[0] - p[0]);
+                assert!(off.abs() < 1e-12, "vertex {v:?} lies off line {a}-{b}");
+            }
+        }
+        // The refinement adds points to the strip only near its ends, where its points lie
+        // close together. The crossing lines share their crossing.
+        let inside = |&[x, y]: &[f64; 2]| {
+            (1.001 + 1e-9..1.002 - 1e-9).contains(&x) && (0.05..0.95).contains(&y)
+        };
+        assert!(!rest.iter().any(inside));
+        let crossing = |chain: &[Vertex]| {
+            chain
+                .iter()
+                .copied()
+                .find(|&v| (rest[v as usize][1] - 0.5).abs() < 1e-12)
+        };
+        assert_eq!(crossing(&meshed.lines[2]), crossing(&meshed.lines[3]));
+        assert!(crossing(&meshed.lines[2]).is_some());
+        let mut area = 0.0;
+        for (t, &face) in meshed.mesh.triangles().iter().zip(&meshed.faces) {
+            let [a, b, c] = t.map(|v| rest[v as usize]);
+            if face == 2 {
+                area += 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]));
+            }
+        }
+        assert!((area - 1.0).abs() < 1e-12, "the right face covers {area}");
+        assert_eq!(
+            Faces::new(&points, &faces, &[[3, 3]], refinement).unwrap_err(),
+            FacesError::Line { line: 0, count: 14 }
+        );
+    }
+
+    #[test]
+    fn points_only_lines_name_join_with_their_lines_after_the_refinement() {
+        // A strip a tenth of a millimeter wide, inside the left face, along its diagonal:
+        // two lines between points no face names.
+        let (mut points, faces) = square();
+        points.extend([[0.2, 0.1], [0.9, 0.8], [0.2, 0.1001], [0.9, 0.8001]]);
+        let lines = [[6, 7], [8, 9]];
+        let refinement = Refinement::of_area(0.01);
+        let meshed = Faces::new(&points, &faces, &lines, refinement).unwrap();
+        let alone = Faces::new(&points[..6], &faces, &[], refinement).unwrap();
+        let rest = meshed.mesh.rest();
+        // The points keep their order, first, and the lines run between them.
+        assert_eq!(rest[..points.len()], points[..]);
+        for (chain, [a, b]) in meshed.lines.iter().zip(lines) {
+            assert_eq!((chain[0], chain[chain.len() - 1]), (a, b));
+        }
+        // The refinement ran as it would without them, so the strip holds no tiny triangles.
+        let added = rest.len() - points.len();
+        let chained: usize = meshed.lines.iter().map(|chain| chain.len() - 2).sum();
+        assert_eq!(added, alone.mesh.rest().len() - 6 + chained);
+    }
+
+    #[test]
     fn faces_must_be_counterclockwise_apart_and_well_made() {
         let (mut points, mut faces) = square();
         let refinement = Refinement::of_area(0.1);
         faces[2].reverse();
         assert_eq!(
-            Faces::new(&points, &faces, refinement).unwrap_err(),
+            Faces::new(&points, &faces, &[], refinement).unwrap_err(),
             FacesError::Overlapping { face: 2 }
         );
         faces[2] = vec![1, 4, 5, 3];
         assert_eq!(
-            Faces::new(&points, &faces, refinement).unwrap_err(),
+            Faces::new(&points, &faces, &[], refinement).unwrap_err(),
             FacesError::Crossing { face: 2 }
         );
         faces[2] = vec![1, 4];
         assert_eq!(
-            Faces::new(&points, &faces, refinement).unwrap_err(),
+            Faces::new(&points, &faces, &[], refinement).unwrap_err(),
             FacesError::Corners { face: 2, count: 6 }
         );
+        faces[2] = vec![1, 4, 5, 2];
         points[5] = points[2];
         assert_eq!(
-            Faces::new(&points, &faces, refinement).unwrap_err(),
+            Faces::new(&points, &faces, &[], refinement).unwrap_err(),
             FacesError::Coincident { points: [2, 5] }
         );
+        // A point that only a line names may not coincide with another either.
+        points[5] = [2.0, 1.0];
+        points.push(points[0]);
+        assert_eq!(
+            Faces::new(&points, &faces, &[[6, 2]], refinement).unwrap_err(),
+            FacesError::Coincident { points: [0, 6] }
+        );
         assert!(
-            Faces::new(&points, &faces, Refinement::of_area(0.0))
+            Faces::new(&points, &faces, &[], Refinement::of_area(0.0))
                 .unwrap_err()
                 .to_string()
                 .contains("max area")

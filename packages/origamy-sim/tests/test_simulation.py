@@ -114,6 +114,28 @@ def test_positions_must_fit_the_sheet() -> None:
         simulation.hold(0, 4)
 
 
+def test_a_span_turns_the_paper_beyond_a_band() -> None:
+    # A strip of four cells has a band of one cell, between two creases of kami. A span
+    # from the first cell turns the last two a quarter turn, about the band.
+    mesh = Mesh.grid(4, 1, 0.04, 0.01)
+    sheet = Sheet(mesh)
+    for edge in ((1, 6), (2, 7)):
+        sheet.set_crease(edge, Crease())
+    span = sheet.add_span((1, 6, 0, 2, 3))
+    assert (sheet.span_crease(span), sheet.span_rest_angle(span)) == (None, 0.0)
+    with pytest.raises(ValueError, match="needs a triangle of the sheet"):
+        sheet.add_span((1, 6, 0, 3, 2))
+    with pytest.raises(ValueError, match="no span 1"):
+        sheet.span_rest_angle(1)
+    simulation = Simulation([sheet], STILL)
+    drive = Crease(stiffness=1.0, yield_moment=math.inf)
+    simulation.set_span_crease(0, span, drive)
+    simulation.hold(0, [0, 5])
+    simulation.set_span_rest_angle(0, span, math.pi / 2)
+    assert simulation.step().converged
+    assert simulation.span_angles(0) == pytest.approx([math.pi / 2], abs=0.02)
+
+
 def test_holds_take_one_vertex_or_an_array_of_them() -> None:
     simulation = Simulation([Sheet(SQUARE)])
     simulation.hold(0, 3)

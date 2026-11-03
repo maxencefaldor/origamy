@@ -123,6 +123,21 @@ pub enum SheetError {
         /// The edge.
         edge: [Vertex; 2],
     },
+    /// A span's stencil is not a triangle of the sheet with a direction beyond its edge.
+    #[error(
+        "span {stencil:?} needs a triangle of the sheet, its third vertex on the edge's left, \
+         and a direction to the edge's right"
+    )]
+    Span {
+        /// The span's stencil.
+        stencil: [Vertex; 5],
+    },
+    /// The sheet has no span of this index.
+    #[error("the sheet has no span {span}")]
+    NoSpan {
+        /// The span.
+        span: usize,
+    },
     /// A parameter lies outside its values.
     #[error(transparent)]
     Parameter(#[from] ParameterError),
@@ -134,12 +149,33 @@ pub enum SheetError {
 /// stencil of up to six vertices.
 pub(crate) type EdgeStencils = [Option<(u32, [usize; 4])>; 3];
 
+/// A crease across a band of the sheet: the turn of the paper beyond the band about an edge
+/// on the band's near side.
+///
+/// The span's angle is the dihedral angle between the triangle at the edge and the plane
+/// through the edge parallel to the far side, which a vector from `foot` to `far` spans. The
+/// band's own paper then bends however its contacts let it, while the span turns the paper
+/// beyond the band as a crease turns its two sides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Span {
+    /// The edge from `start` to `end` with `near` opposite it in a triangle on its left, then
+    /// `foot` and `far` beyond the band, on the edge's right.
+    pub stencil: [Vertex; 5],
+    /// The crease the span turns as, if any; a span without one turns freely.
+    pub crease: Option<Crease>,
+    /// The rest length of the edge, in meters.
+    pub length: f64,
+    /// Where the span rests, and how far it has yielded.
+    pub plastic: Plastic,
+}
+
 /// A sheet of paper: its rest mesh, its material and its creases.
 #[derive(Clone, Debug)]
 pub struct Sheet {
     mesh: Mesh,
     material: Material,
     creases: Vec<Option<Crease>>,
+    spans: Vec<Span>,
     rest_angles: Vec<f64>,
     /// The rotation each crease has yielded and crept through, in radians.
     rotations: Vec<f64>,
@@ -190,6 +226,7 @@ impl Sheet {
             .collect();
         Ok(Self {
             creases: vec![None; mesh.dihedrals().len()],
+            spans: Vec::new(),
             rest_angles: vec![0.0; mesh.dihedrals().len()],
             rotations: vec![0.0; mesh.dihedrals().len()],
             mesh,
@@ -293,6 +330,116 @@ impl Sheet {
         check_rest_angle(angle)?;
         self.rest_angles[index] = angle;
         Ok(())
+    }
+
+    /// Adds a span across a band: from the triangle `[start, end, near]` to the paper beyond,
+    /// as yet with no crease, so it turns freely. Returns its index.
+    ///
+    /// The vector from `foot` to `far` gives the far paper's direction away from the band.
+    /// The span's angle is the dihedral angle of the stencil `[start, end, near, r]`, where
+    /// `r` lies at `start` plus that vector. The angle is zero where the sheet lies flat, and
+    /// positive toward the sheet's front.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::Span`] unless `[start, end, near]` is a triangle of the sheet with
+    /// `near` on the left of the edge from `start` to `end`, and the vector from `foot` to
+    /// `far` points to its right in the flat sheet.
+    pub fn add_span(&mut self, stencil: [Vertex; 5]) -> Result<usize, SheetError> {
+        let [start, end, near, foot, far] = stencil;
+        let rest = self.mesh.rest();
+        let triangle =
+            self.mesh.triangles().iter().any(|t| {
+                (0..3).any(|k| [t[k], t[(k + 1) % 3], t[(k + 2) % 3]] == [start, end, near])
+            });
+        let inside = [foot, far].iter().all(|&v| (v as usize) < rest.len());
+        if !triangle || !inside {
+            return Err(SheetError::Span { stencil });
+        }
+        let [a, b, f, r] = [start, end, foot, far].map(|v| rest[v as usize]);
+        let right = (b[0] - a[0]) * (r[1] - f[1]) - (b[1] - a[1]) * (r[0] - f[0]);
+        if right >= 0.0 {
+            return Err(SheetError::Span { stencil });
+        }
+        self.spans.push(Span {
+            stencil,
+            crease: None,
+            length: (b[0] - a[0]).hypot(b[1] - a[1]),
+            plastic: Plastic {
+                rest: 0.0,
+                rotation: 0.0,
+            },
+        });
+        Ok(self.spans.len() - 1)
+    }
+
+    /// The crease a span turns as, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoSpan`] when the sheet has no such span.
+    pub fn span_crease(&self, span: usize) -> Result<Option<Crease>, SheetError> {
+        Ok(self.span(span)?.crease)
+    }
+
+    /// Gives a span a crease to turn as, changes it, or with `None` lets the span turn freely.
+    ///
+    /// A span without a crease has flowed through no rotation, so a crease given it starts
+    /// unhardened.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoSpan`] when the sheet has no such span, and
+    /// [`SheetError::Parameter`] when a parameter of the crease lies outside its values.
+    pub fn set_span_crease(
+        &mut self,
+        span: usize,
+        crease: Option<Crease>,
+    ) -> Result<(), SheetError> {
+        self.span(span)?;
+        if let Some(crease) = &crease {
+            crease.check()?;
+        } else {
+            self.spans[span].plastic.rotation = 0.0;
+        }
+        self.spans[span].crease = crease;
+        Ok(())
+    }
+
+    /// The angle a span rests at, in radians.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoSpan`] when the sheet has no such span.
+    pub fn span_rest_angle(&self, span: usize) -> Result<f64, SheetError> {
+        Ok(self.span(span)?.plastic.rest)
+    }
+
+    /// Sets the angle a span rests at.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoSpan`] when the sheet has no such span, and
+    /// [`SheetError::Parameter`] when the angle is not finite or reaches a half turn.
+    pub fn set_span_rest_angle(&mut self, span: usize, angle: f64) -> Result<(), SheetError> {
+        self.span(span)?;
+        check_rest_angle(angle)?;
+        self.spans[span].plastic.rest = angle;
+        Ok(())
+    }
+
+    /// The span of an index.
+    fn span(&self, span: usize) -> Result<&Span, SheetError> {
+        self.spans.get(span).ok_or(SheetError::NoSpan { span })
+    }
+
+    pub(crate) fn spans(&self) -> &[Span] {
+        &self.spans
+    }
+
+    /// Sets where a span rests, and how far it has yielded, after a time step.
+    pub(crate) fn set_span_plastic(&mut self, span: usize, state: Plastic) {
+        self.spans[span].plastic = state;
     }
 
     /// The index of the dihedral along an edge, given in either order.

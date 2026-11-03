@@ -48,6 +48,13 @@ create_exception!(
 #[derive(Clone, PartialEq)]
 struct PyMesh(Mesh);
 
+/// A mesh of faces, the face of each triangle, and the vertices along each line.
+type Meshed<'py> = (
+    PyMesh,
+    Bound<'py, PyArray1<i64>>,
+    Vec<Bound<'py, PyArray1<i64>>>,
+);
+
 #[pymethods]
 impl PyMesh {
     #[new]
@@ -94,27 +101,34 @@ impl PyMesh {
     ///
     /// Every edge of every face becomes a chain of mesh edges, so a sheet can bend sharply
     /// along it, as a crease pattern's creases need. The mesh keeps each point as a vertex, in
-    /// order, before the vertices the refinement adds.
+    /// order, before the vertices the refinement adds. Each line then joins the mesh as a
+    /// chain of mesh edges no longer than the refinement's edge length, with the points that
+    /// no face names. No refinement runs around them, so two close lines bound a strip of long
+    /// thin triangles.
     ///
     /// Args:
-    ///     points: The faces' corners, in meters, of shape (n, 2).
+    ///     points: The faces' corners and the lines' ends, in meters, of shape (n, 2).
     ///     faces: Each face's corners, as indices of points, counterclockwise.
     ///     refinement: The largest area and the least angle of the triangles.
+    ///     lines: Lines inside the faces, each between two points.
     ///
     /// Returns:
-    ///     The mesh, and the face of each triangle, of shape (m,).
+    ///     The mesh, the face of each triangle, of shape (m,), and the vertices along each
+    ///     line, from its first point to its second.
     ///
     /// Raises:
     ///     ValueError: When a point is not finite, or two points coincide. The error also
-    ///         names a face with too few corners, faces that cross or overlap, and a
-    ///         refinement that cannot reach its angle.
+    ///         names a face with too few corners, faces that cross or overlap, a line
+    ///         without two distinct points, and a refinement that cannot reach its angle.
     #[staticmethod]
+    #[pyo3(signature = (points, faces, refinement, lines = Vec::new()))]
     fn of_faces<'py>(
         py: Python<'py>,
         points: &Bound<'_, PyAny>,
         faces: Vec<Vec<i64>>,
         refinement: Model<Refinement>,
-    ) -> PyResult<(Self, Bound<'py, PyArray1<i64>>)> {
+        lines: Vec<[i64; 2]>,
+    ) -> PyResult<Meshed<'py>> {
         let points = rows::<f64, 2>("points", points)?;
         let faces = faces
             .into_iter()
@@ -130,9 +144,34 @@ impl PyMesh {
                     .collect::<PyResult<Vec<Vertex>>>()
             })
             .collect::<PyResult<Vec<_>>>()?;
-        let meshed = Faces::new(&points, &faces, refinement.0).map_err(value_error)?;
+        let lines = lines
+            .into_iter()
+            .enumerate()
+            .map(|(line, ends)| {
+                ends.into_iter()
+                    .map(|v| {
+                        Vertex::try_from(v).map_err(|_| {
+                            PyValueError::new_err(format!("line {line} names point {v}"))
+                        })
+                    })
+                    .collect::<PyResult<Vec<Vertex>>>()
+                    .map(|ends| [ends[0], ends[1]])
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let meshed = Faces::new(&points, &faces, &lines, refinement.0).map_err(value_error)?;
         let labels: Vec<i64> = meshed.faces.iter().map(|&f| i64::from(f)).collect();
-        Ok((Self(meshed.mesh), labels.into_pyarray(py)))
+        let chains = meshed
+            .lines
+            .iter()
+            .map(|chain| {
+                chain
+                    .iter()
+                    .map(|&v| i64::from(v))
+                    .collect::<Vec<i64>>()
+                    .into_pyarray(py)
+            })
+            .collect();
+        Ok((Self(meshed.mesh), labels.into_pyarray(py), chains))
     }
 
     /// Each vertex's place in the flat sheet, in meters, of shape (n, 2).
@@ -346,6 +385,60 @@ impl PySheet {
     ///         finite or reaches a half turn.
     fn set_rest_angle(&mut self, edge: [Vertex; 2], angle: f64) -> PyResult<()> {
         self.0.set_rest_angle(edge, angle).map_err(value_error)
+    }
+
+    /// Adds a span across a band: from the triangle `(start, end, near)` to the paper beyond,
+    /// as yet with no crease, so it turns freely.
+    ///
+    /// The stencil is `(start, end, near, foot, far)`. The vector from `foot` to `far` gives the
+    /// far paper's direction away from the band. The span's angle is the dihedral angle
+    /// between the triangle and the plane through its edge along that vector. The angle is
+    /// zero where the sheet lies flat, and positive toward the sheet's front.
+    ///
+    /// Returns:
+    ///     The span's index.
+    ///
+    /// Raises:
+    ///     ValueError: When `(start, end, near)` is not a triangle of the sheet with `near` on
+    ///         the left of the edge, or the far direction does not point to the edge's right.
+    fn add_span(&mut self, stencil: [Vertex; 5]) -> PyResult<usize> {
+        self.0.add_span(stencil).map_err(value_error)
+    }
+
+    /// The crease a span turns as, or None for a span that turns freely.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such span.
+    fn span_crease(&self, span: usize) -> PyResult<Option<Model<Crease>>> {
+        Ok(self.0.span_crease(span).map_err(value_error)?.map(Model))
+    }
+
+    /// Gives a span a crease to turn as, or with None lets it turn freely.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such span, or the crease's parameters lie
+    ///         outside their values.
+    fn set_span_crease(&mut self, span: usize, crease: Option<Model<Crease>>) -> PyResult<()> {
+        self.0
+            .set_span_crease(span, crease.map(|c| c.0))
+            .map_err(value_error)
+    }
+
+    /// The angle a span rests at, in radians.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such span.
+    fn span_rest_angle(&self, span: usize) -> PyResult<f64> {
+        self.0.span_rest_angle(span).map_err(value_error)
+    }
+
+    /// Sets the angle a span rests at.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such span, or the angle is not finite or reaches
+    ///         a half turn.
+    fn set_span_rest_angle(&mut self, span: usize, angle: f64) -> PyResult<()> {
+        self.0.set_span_rest_angle(span, angle).map_err(value_error)
     }
 
     fn __repr__(&self) -> String {
@@ -605,6 +698,40 @@ impl PySimulation {
         self.0
             .sheet_mut(sheet)
             .set_rest_angle(edge, angle)
+            .map_err(value_error)
+    }
+
+    /// Gives a span of a sheet a crease, or with None lets it turn freely, as
+    /// `Sheet.set_span_crease` does.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    ///     ValueError: When the sheet has no such span, or the crease's parameters lie
+    ///         outside their values.
+    fn set_span_crease(
+        &mut self,
+        sheet: usize,
+        span: usize,
+        crease: Option<Model<Crease>>,
+    ) -> PyResult<()> {
+        self.check(sheet)?;
+        self.0
+            .sheet_mut(sheet)
+            .set_span_crease(span, crease.map(|c| c.0))
+            .map_err(value_error)
+    }
+
+    /// Sets the angle a span of a sheet rests at, as `Sheet.set_span_rest_angle` does.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    ///     ValueError: When the sheet has no such span, or the angle is not finite or reaches
+    ///         a half turn.
+    fn set_span_rest_angle(&mut self, sheet: usize, span: usize, angle: f64) -> PyResult<()> {
+        self.check(sheet)?;
+        self.0
+            .sheet_mut(sheet)
+            .set_span_rest_angle(span, angle)
             .map_err(value_error)
     }
 
@@ -908,6 +1035,19 @@ impl PySimulation {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         self.check(sheet)?;
         Ok(PyArray1::from_vec(py, self.0.fold_angles(sheet)))
+    }
+
+    /// The angle of each span of a sheet, in radians, in the order the spans were added.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn span_angles<'py>(
+        &self,
+        py: Python<'py>,
+        sheet: usize,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.check(sheet)?;
+        Ok(PyArray1::from_vec(py, self.0.span_angles(sheet)))
     }
 
     /// The simulation's energy now, term by term.

@@ -199,6 +199,12 @@ Within the step, a crease's energy is the least, over how far it yields, of its 
 That energy is convex and continuously differentiable in the fold angle, with the moment as its slope.
 Newton's method therefore yields creases inside each time step, with exact derivatives, and the step takes the new rest angles.
 
+A span drives a crease band from outside it.
+The span's angle is the turn of the paper beyond the band's far side about an edge beyond its near side.
+A span takes a crease as a dihedral does, with a rest angle, yield and aging.
+A fold can then turn the band's two sides while the band bends as contact lets it.
+The span's derivatives are the dihedral angle's, through the linear map from its five vertices to a dihedral's four points.
+
 ### 3.5 Contact with thickness
 
 Contact is the hardest part of simulating origami, and the part where the simulator innovates most.
@@ -347,6 +353,10 @@ A second solver, vertex block descent with offset contact, joins in phase 7 for 
   A constrained Delaunay triangulation of the crease pattern makes every crease line a chain of mesh edges.
   Ruppert's refinement then leaves no angle under 20° and no triangle over an area bound, splitting creases where it must.
   The spade crate builds both, and each triangle carries the face of the crease pattern it lies in.
+- **Lines after refinement.**
+  A crease band's lines join the mesh after the refinement, with the points only they name.
+  Lines a fraction of a millimeter apart then bound strips of long thin triangles, where refining would fill them with tiny ones.
+  Below an area bound, the refinement leaves triangles as they are, so close points keep no tiny triangles around them.
 - **Grading.**
   Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
 - **Two levels of detail.**
@@ -642,6 +652,28 @@ Phase 6 adds these findings so far:
 - **Drives that press too hard.**
   Drives a thousand times as stiff as kami's crease pressed closing layers so hard that Newton stalled.
   A hundred times keeps creases within 0.2° of their path, and every increment converges.
+- **A sharp crease cannot wrap layers.**
+  The crease's two sides meet at one line, so layers inside it, or a layer whose edge lies along it, stop it closing.
+  A crease that wraps k layers now bends over a crease band π(k + 1)/2 thicknesses wide, half a circle round them.
+  Spans turn the paper beyond the band's sides, and the band bends as the layers inside let it.
+  A strip folded up twice lands within 0.17 mm of its state, inside its band's width of 0.23 mm.
+- **Offset creases stretch joined layers.**
+  Offset creases bend each layer a fold wraps at its own spot beside the crease.
+  Where pleats join those layers, the edge joining them would stretch by 0.7%, past the strain cap.
+  A band bends each layer about its own crease line instead.
+- **Hands keep off bands.**
+  A hand that held the near half of a band left two lines to turn a fold, which closed only to 150°.
+  Hands now hold the paper beside a band, never the band itself.
+- **Sharp creases need coarse cells.**
+  Cells a band's width across beside a sharp crease meet a thickness apart, so the crease stops short of flat.
+  A band's lines therefore meet at its crease's end where it ends on another crease.
+  The band's mesh edges are 3 mm long at its ends, growing toward its middle.
+- **Tied layers must crush.**
+  The pleated fan's last fold wraps 14 layers that its pleats tie together along lines across the fold.
+  Each wrapped layer then needs its thickness times the turn in extra length.
+  Elastic kami reaches the 0.5% strain cap by 60°, and a 2% cap lets the fold reach 145°.
+  The arrowhead's kite folds jam the same way.
+  Real kami crushes in its plane where creases cross, which the simulator does not model yet.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
@@ -667,6 +699,7 @@ A research track runs alongside, with ambitious targets:
 | Fold paths | Creases driven along origamy's rigid folding path, where one exists | Creases turning at even rates, which bend faces off any rigid motion |
 | Weight while folding | Hands carry the weight of the paper a fold moves | Paper lifted only by its creases, which sags kami into other folds |
 | Mountain folds | Folding up from the turned-over sheet, then turning it back | Folding down into the table, which the table forbids |
+| Wrapping creases | Crease bands half a circle round the layers inside, turned by spans across them | Sharp creases, which cannot wrap layers; offset creases, which stretch layers that pleats join |
 | Meshes | A constrained Delaunay triangulation of the crease pattern, refined by Ruppert's algorithm | Regular grids, whose edges cross creases at arbitrary angles |
 | Core language | Rust | C++, NumPy, JAX |
 | Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |

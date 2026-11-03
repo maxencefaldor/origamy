@@ -474,6 +474,28 @@ impl Simulation {
             .collect()
     }
 
+    /// The angle of each span of a sheet, in radians, in the order the spans were added.
+    ///
+    /// An angle is zero where the sheet lies flat, and positive where it folds toward its
+    /// front.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn span_angles(&self, sheet: usize) -> Vec<f64> {
+        let x = self.positions(sheet);
+        self.sheets[sheet]
+            .spans()
+            .iter()
+            .map(|span| {
+                bending::angle_value(&span_points(
+                    span.stencil.map(|v| Point::from(x[v as usize])),
+                ))
+            })
+            .collect()
+    }
+
     /// Holds a vertex where it lies, or lets it go.
     ///
     /// A hold takes the vertex from any body that grips it.
@@ -1226,6 +1248,22 @@ impl Simulation {
             for (d, state) in yielded {
                 sheet.set_plastic(d, state);
             }
+            let spans: Vec<(usize, crease::Plastic)> = sheet
+                .spans()
+                .iter()
+                .enumerate()
+                .filter_map(|(k, span)| {
+                    let crease = span.crease.as_ref()?;
+                    let points = span.stencil.map(|v| solve.x[offset + v as usize]);
+                    let angle = bending::angle_value(&span_points(points));
+                    let turned =
+                        crease::turn(crease, span.length, span.plastic, angle, elapsed(dt));
+                    Some((k, turned.state))
+                })
+                .collect();
+            for (span, state) in spans {
+                sheet.set_span_plastic(span, state);
+            }
         }
         let energy = Energy {
             kinetic: self.kinetic(),
@@ -1427,6 +1465,21 @@ impl Simulation {
                     energy.creases += turned.elastic;
                     energy.yielding += turned.yielding;
                 }
+            }
+            for span in sheet.spans() {
+                let Some(crease) = &span.crease else {
+                    continue;
+                };
+                let angle = bending::angle_value(&span_points(span.stencil.map(|v| x[v as usize])));
+                let turned = crease::turn(
+                    crease,
+                    span.length,
+                    span.plastic,
+                    angle,
+                    incremental.elapsed,
+                );
+                energy.creases += turned.elastic;
+                energy.yielding += turned.yielding;
             }
         }
         // The bodies' points carry no energy of their own, but a moving body pulls them.
@@ -1653,6 +1706,16 @@ fn bend(
                     (stencil, gradient, hessian)
                 }),
         );
+    derivatives
+        .spans
+        .par_extend(sheet.spans().par_iter().filter_map(|span| {
+            let crease = span.crease.as_ref()?;
+            let (angle, slope, curvature) = span_angle(span.stencil.map(|v| x[v as usize]));
+            let turned = crease::turn(crease, span.length, span.plastic, angle, elapsed);
+            let gradient = slope * turned.moment;
+            let hessian = slope * slope.transpose() * turned.stiffness + curvature * turned.moment;
+            Some((span.stencil.map(|v| Some(global(v))), gradient, hessian))
+        }));
 }
 
 impl Simulation {
@@ -1947,6 +2010,8 @@ struct Derivatives {
     plates: Vec<Element<6, 18>>,
     /// Each dihedral's bending moment on its angle's curvature, and its sharp crease.
     dihedrals: Vec<Element<4, 12>>,
+    /// Each span's crease.
+    spans: Vec<Element<5, 15>>,
 }
 
 impl Derivatives {
@@ -1965,6 +2030,7 @@ impl Derivatives {
         scatter_elements(&self.triangles, assembly, projected);
         scatter_elements(&self.plates, assembly, false);
         scatter_elements(&self.dihedrals, assembly, projected);
+        scatter_elements(&self.spans, assembly, projected);
     }
 
     /// The gradient at each of `count` vertices, every vertex free.
@@ -1982,6 +2048,7 @@ impl Derivatives {
         gather(&self.triangles, &mut gradient);
         gather(&self.plates, &mut gradient);
         gather(&self.dihedrals, &mut gradient);
+        gather(&self.spans, &mut gradient);
         gradient
     }
 }
@@ -2164,6 +2231,35 @@ fn moved(x: &[Point], displacement: &[f64], fraction: f64) -> Vec<Point> {
 }
 
 /// The stencil `[u, v, a, b]` of a dihedral.
+/// The points whose dihedral angle is a span's: its edge and near vertex, then its start moved
+/// by the vector from its foot to its far vertex.
+fn span_points([start, end, near, foot, far]: [Point; 5]) -> [Point; 4] {
+    [start, end, near, start + far - foot]
+}
+
+/// A span's angle, with its gradient and Hessian in the span's five vertices.
+fn span_angle(points: [Point; 5]) -> (f64, SMatrix<f64, 15, 1>, SMatrix<f64, 15, 15>) {
+    let angle = bending::angle(&span_points(points));
+    // The fourth point is the first plus the fifth less the fourth vertex.
+    let mut map = SMatrix::<f64, 12, 15>::zeros();
+    for (row, column, sign) in [
+        (0, 0, 1.0),
+        (1, 1, 1.0),
+        (2, 2, 1.0),
+        (3, 0, 1.0),
+        (3, 3, -1.0),
+        (3, 4, 1.0),
+    ] {
+        map.fixed_view_mut::<3, 3>(3 * row, 3 * column)
+            .copy_from(&(SMatrix::<f64, 3, 3>::identity() * sign));
+    }
+    (
+        angle.value,
+        map.transpose() * angle.gradient,
+        map.transpose() * angle.hessian * map,
+    )
+}
+
 fn stencil(dihedral: &crate::mesh::Dihedral) -> [u32; 4] {
     let ([u, v], [a, b]) = (dihedral.edge, dihedral.opposite);
     [u, v, a, b]
@@ -2230,6 +2326,14 @@ fn pairs(sheets: &[Sheet], offsets: &[usize]) -> Vec<(u32, u32)> {
                 }
             }
         }
+        for span in sheet.spans() {
+            let stencil = span.stencil.map(|v| v + offset);
+            for (i, &a) in stencil.iter().enumerate() {
+                for &b in &stencil[..i] {
+                    pairs.push((a, b));
+                }
+            }
+        }
     }
     pairs
 }
@@ -2239,8 +2343,10 @@ mod tests {
     use super::*;
     use crate::material::Material;
     use crate::mesh::Mesh;
+    use std::f64::consts::FRAC_PI_2;
+
     use crate::settings::{Solver, Table};
-    use crate::sheet::Crease;
+    use crate::sheet::{Crease, SheetError};
 
     /// A small deterministic wobble, to keep every quantity away from symmetric values.
     fn wobble(v: usize, amplitude: f64) -> Point {
@@ -2358,6 +2464,21 @@ mod tests {
                 .set_rest_angle([at(2, j), at(2, j + 1)], -0.2)
                 .unwrap();
         }
+        // A span turns the far side about an edge of the near column, and yields too.
+        let span = sheet
+            .add_span([at(1, 0), at(1, 1), at(0, 0), at(2, 1), at(3, 3)])
+            .unwrap();
+        sheet
+            .set_span_crease(
+                span,
+                Some(Crease {
+                    yield_moment: 1e-3,
+                    hardening: 2e-3,
+                    ..Crease::kami()
+                }),
+            )
+            .unwrap();
+        sheet.set_span_rest_angle(span, 0.4).unwrap();
         let mut simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
         // A hand pushes one vertex, and air presses on the sheet's front.
         simulation
@@ -2392,6 +2513,87 @@ mod tests {
             .map(|(v, p)| p - wobble(v + 3, 1e-4))
             .collect();
         check(&simulation, &x, &start, 1e-9);
+    }
+
+    #[test]
+    fn a_span_turns_the_paper_beyond_a_band_that_bends_as_it_may() {
+        // A strip 6 cm long has a band 2.5 mm wide across its middle, bounded by two creases
+        // of kami. Spans from the near side's triangles turn the far side a quarter turn.
+        let (columns, rows, length, width) = (24, 2, 0.06, 0.005);
+        let mesh = Mesh::grid(columns, rows, length, width).unwrap();
+        let (triangles, rest) = (mesh.triangles().to_vec(), mesh.rest().to_vec());
+        let mut sheet = Sheet::new(mesh, Material::kami()).unwrap();
+        let at = |i: u32, j: u32| j * (columns + 1) + i;
+        for (i, j) in [11, 12]
+            .into_iter()
+            .flat_map(|i| (0..rows).map(move |j| (i, j)))
+        {
+            sheet
+                .set_crease([at(i, j), at(i, j + 1)], Some(Crease::kami()))
+                .unwrap();
+        }
+        let [near, far] = [11.0, 12.0].map(|i| i * length / f64::from(columns));
+        let drive = Crease {
+            stiffness: 1.0,
+            yield_moment: f64::INFINITY,
+            ..Crease::kami()
+        };
+        for t in triangles {
+            for k in 0..3 {
+                let [a, b, c] = [t[k], t[(k + 1) % 3], t[(k + 2) % 3]];
+                let on_near = [a, b].map(|v| (rest[v as usize][0] - near).abs() < 1e-12);
+                if on_near == [true, true] && rest[c as usize][0] < near {
+                    let row = a / (columns + 1);
+                    let span = sheet.add_span([a, b, c, at(12, row), at(13, row)]).unwrap();
+                    sheet.set_span_crease(span, Some(drive)).unwrap();
+                    sheet.set_span_rest_angle(span, FRAC_PI_2).unwrap();
+                }
+            }
+        }
+        assert_eq!(sheet.spans().len(), rows as usize);
+        // The far direction must point away from the near triangle.
+        let backward = [at(1, 0), at(1, 1), at(0, 0), at(13, 0), at(12, 0)];
+        assert_eq!(
+            sheet.add_span(backward),
+            Err(SheetError::Span { stencil: backward })
+        );
+        assert_eq!(
+            sheet.set_span_crease(9, Some(drive)),
+            Err(SheetError::NoSpan { span: 9 })
+        );
+        let settings = Settings {
+            gravity: [0.0; 3],
+            time_step: f64::INFINITY,
+            ..Settings::default()
+        };
+        let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+        for j in 0..=rows {
+            for i in 0..3 {
+                simulation.hold(0, at(i, j) as usize, true);
+            }
+        }
+        let report = simulation.step().unwrap();
+        assert!(report.converged, "{report:?}");
+        // Each span stops short by the band's moment over its stiffness.
+        for angle in simulation.span_angles(0) {
+            assert!((angle - FRAC_PI_2).abs() < 1e-2, "a span turned {angle}");
+        }
+        // The band bends round the quarter turn. The paper on either side bends only where
+        // the spans pull on it, by a few hundredths of a radian.
+        let mesh = simulation.sheets[0].mesh();
+        let inside = |d: &crate::mesh::Dihedral| {
+            d.edge
+                .iter()
+                .all(|&v| (near - 1e-9..=far + 1e-9).contains(&rest[v as usize][0]))
+        };
+        let (band, beside): (Vec<_>, Vec<_>) = mesh
+            .dihedrals()
+            .iter()
+            .zip(simulation.fold_angles(0))
+            .partition(|(d, _)| inside(d));
+        let bent: f64 = band.iter().map(|(_, angle)| angle).sum::<f64>() / f64::from(rows);
+        assert!((bent - FRAC_PI_2).abs() < 0.05, "the band bends {bent}");
+        assert!(beside.iter().all(|(_, angle)| angle.abs() < 0.06));
     }
 
     #[test]

@@ -151,6 +151,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | body | A rigid sphere or capsule on a path that touches paper, as a fingertip or a tool does |
 | grip | Paper vertices tied to a body, which carries them as it moves, as a pinch does |
 | drive | The crease a simulated fold makes, turning toward the angle each step gives it |
+| span | A drive across a crease band: it turns the paper beyond one side of the band against the paper beyond the other |
 | stage | One fold of a simulated build: to a step's state, or to the paper a precrease passes through |
 | lag | One solve of a time step with friction fixed at a state: the step's start, then each solution it reaches |
 | stick distance | The slip within one time step under which friction holds a contact |
