@@ -210,7 +210,8 @@ Mid-surfaces therefore never come closer than h, as in codimensional incremental
 
 **Finding pairs.**
 A bounding volume hierarchy over the triangles, and another over the edges, find the pairs whose boxes overlap.
-Each is built at the start of a time step and refit to every later arrangement, since paper keeps its neighbors as it moves.
+Each primitive's box grows by its half thickness and half the gap, so boxes overlap wherever the barrier may act.
+Each hierarchy is built at the start of a time step and refit to every later arrangement, since paper keeps its neighbors as it moves.
 A query costs about the logarithm of the count plus what it finds, however far the primitives sweep.
 
 **Parallel edges.**
@@ -287,6 +288,13 @@ A stiff spring pulls the vertex, and each round of minimization raises a force o
 The step converges only once every hold lies within the tolerance of its target.
 A hold that contact blocks, such as a hand pushing paper into the table, never converges, so the step halves and then reports the failure.
 Each hold reports the force it exerts: the force that balances every other force on its vertex.
+
+**Rigid bodies.**
+A body is a sphere round one point, or a capsule round the segment between two, of a given radius.
+Its points join the solve as moving holds, so a hand carries a body exactly as it carries paper.
+Paper keeps its half thickness plus the body's radius from the body, through the same barrier, friction and collision detection as paper on paper.
+The pairs are the body's points against the paper's triangles, and a capsule's axis against the paper's edges and points.
+Each body has its own coefficient of friction, and reports the force it exerts on the paper.
 
 ### 3.8 Solver
 
@@ -445,7 +453,7 @@ docs/simulator.py                       the recorder of the runs the docs show
 | `system` | The sparse Newton system in 3 by 3 blocks, and its Cholesky factorization |
 | `simulation` | Sheets, settings and held vertices; time steps by projected Newton, and their reports |
 | `contact` | Bounding volume hierarchies, distances, the barrier and its fade for parallel edges, friction, exclusions, continuous collision detection |
-| `body` | Rigid bodies on paths, grips, force fields |
+| `body` | Spheres and capsules on paths, and their parameters |
 
 ### 5.5 Engineering standards
 
@@ -490,6 +498,7 @@ The simulator is excellent when it passes all of these, in CI:
 | A sheet hanging from a hand, then lifted | Statics: the hand carries the weight | The hand reaches its target within 10⁻¹² m, and carries the weight within 10⁻⁶ |
 | A sheet pulled across the table by a hand | Coulomb's law: the friction coefficient times the weight the table bears | Pull within 1% |
 | A hand pushing paper into the table | No crossing | The step reports that it did not converge, with paper above the table |
+| A fingertip pressing paper on the table, then sliding | Coulomb's law: the paper follows a fingertip that grips harder than the table | The paper moves within 1% of the fingertip, or stays within 1% |
 | Pressure pulling a sheet with its weight per area, and twice that | Newton's laws | The sheet stays still, or rises at g, within 10⁻⁷ m/s |
 | A sheet folded over n layers | n thicknesses | Stack height within 1%, distances never under h |
 | Every time step of every benchmark | The five guarantees | Always |
@@ -519,7 +528,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. origamy on the simulator | Meshes from crease patterns, a choreography of hands for each action, the viewer on simulated frames | The gallery folds physically end to end, and the old rigid 3D code is deleted from origamy |
 | 8. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
-Phases 0 to 4 are done, and phase 5 has moving holds and loads.
+Phases 0 to 4 are done, and phase 5 has moving holds, loads and rigid bodies.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -603,6 +612,7 @@ A research track runs alongside, with ambitious targets:
 | Crease plasticity | The variational update, inside each time step | A return mapping after each step, which lags yielding by a step |
 | Crease aging | Thermally activated creep, Eyring's law, in the same update | A spectrum of relaxation times, which ages a briefly pressed fold only over the press's own time |
 | Moving holds | The augmented Lagrangian inside each time step, as in incremental potential contact | Moving held vertices between steps, which collision detection cannot follow |
+| Rigid bodies | Spheres and capsules whose points are moving holds | Signed distance fields, general but without exact derivatives at sharp features |
 
 ## 9. References
 

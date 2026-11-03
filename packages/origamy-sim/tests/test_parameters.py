@@ -14,6 +14,7 @@ from pydantic_settings import CliApp, SettingsConfigDict
 
 from origamy_sim import (
     Air,
+    Body,
     Config,
     Contact,
     Crease,
@@ -81,6 +82,20 @@ def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     else:
         core = True
     assert validates(Material, data) == core
+
+
+@given(st.fixed_dictionaries(dict.fromkeys(("radius", "friction"), NUMBERS)))
+def test_pydantic_accepts_a_body_exactly_when_the_core_does(
+    body: dict[str, float],
+) -> None:
+    simulation = Simulation([])
+    try:
+        simulation.add_body(Body.model_construct(None, **body), [[0.0, 0.0, 1.0]])
+    except ValueError:
+        core = False
+    else:
+        core = True
+    assert validates(Body, body) == core
 
 
 @given(

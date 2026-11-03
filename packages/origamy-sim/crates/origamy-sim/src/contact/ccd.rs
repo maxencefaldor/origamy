@@ -34,6 +34,7 @@ pub(crate) fn pair(pair: &Pair, x: &[Point], displacement: &[Point], thickness: 
         distance::Kind::EdgeEdge => {
             length(&moves[0]).max(length(&moves[1])) + length(&moves[2]).max(length(&moves[3]))
         }
+        distance::Kind::PointEdge => length(&moves[0]) + length(&moves[1]).max(length(&moves[2])),
     };
     let gap = |points: &[Point; 4]| distance::squared(pair.kind, points).sqrt() - thickness;
     let first = gap(&points);
@@ -90,9 +91,8 @@ mod tests {
         fn no_pair_passes_its_thickness_before_the_safe_fraction(
             start in proptest::array::uniform4(point()),
             moves in proptest::array::uniform4(point()),
-            edges in proptest::bool::ANY,
+            kind in proptest::sample::select(vec![Kind::PointTriangle, Kind::EdgeEdge, Kind::PointEdge]),
         ) {
-            let kind = if edges { Kind::EdgeEdge } else { Kind::PointTriangle };
             let thickness = 0.05;
             let x: Vec<Point> = start.to_vec();
             let displacement: Vec<Point> = moves.iter().map(|m| m * 3.0).collect();

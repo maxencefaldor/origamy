@@ -23,15 +23,45 @@ use crate::settings::Contact;
 pub(crate) use distance::Kind;
 use friction::{Slip, tangent_plane};
 
-/// Every primitive of a scene's sheets, in the scene's vertex numbering.
+/// Every primitive of a scene's sheets and bodies, in the scene's vertex numbering.
+///
+/// The paper's vertices come first, then the points of the bodies.
 #[derive(Clone, Debug)]
 pub(crate) struct Primitives {
+    /// The paper's triangles.
     pub triangles: Vec<[u32; 3]>,
+    /// The paper's edges.
     pub edges: Vec<[u32; 2]>,
-    /// The sheet of each vertex.
+    /// The axes of capsules, each from one end to the other.
+    pub axes: Vec<[u32; 2]>,
+    /// The sheet of each vertex of paper.
     pub sheet: Vec<u32>,
-    /// Each vertex's place in its flat sheet, at height zero.
+    /// Each vertex's place in its flat sheet, at height zero, and each body point's place when
+    /// its body joined the scene.
     pub rest: Vec<Point>,
+    /// Each vertex's half thickness, in meters: half its sheet's thickness, or its body's
+    /// radius.
+    pub half: Vec<f64>,
+}
+
+impl Primitives {
+    /// Whether a vertex is a body's point rather than paper.
+    pub fn is_body(&self, vertex: u32) -> bool {
+        vertex as usize >= self.sheet.len()
+    }
+
+    /// The thickness a pair keeps between its primitives: the sum of their half thicknesses.
+    ///
+    /// Two pieces of paper keep the mean of their thicknesses, and paper keeps its half
+    /// thickness plus a body's radius from the body.
+    pub fn thickness(&self, pair: &Pair) -> f64 {
+        let [a, b, c, _] = pair.vertices;
+        let other = match pair.kind {
+            Kind::PointTriangle | Kind::PointEdge => b,
+            Kind::EdgeEdge => c,
+        };
+        self.half[a as usize] + self.half[other as usize]
+    }
 }
 
 /// Hierarchies over a scene's triangles and edges, built for one arrangement of the vertices
@@ -76,7 +106,11 @@ impl Pair {
 
     /// The pair's stencil for an assembly.
     pub fn stencil(&self) -> [Option<u32>; 4] {
-        self.vertices.map(Some)
+        let [a, b, c, d] = self.vertices.map(Some);
+        match self.kind {
+            Kind::PointTriangle | Kind::EdgeEdge => [a, b, c, d],
+            Kind::PointEdge => [a, b, c, None],
+        }
     }
 }
 
@@ -112,7 +146,7 @@ impl Contact {
     /// the edges' rest lengths; `None` for a point and a triangle.
     pub(crate) fn fade(&self, primitives: &Primitives, pair: &Pair) -> Option<f64> {
         match pair.kind {
-            Kind::PointTriangle => None,
+            Kind::PointTriangle | Kind::PointEdge => None,
             Kind::EdgeEdge => {
                 let [a, b, c, d] = pair.at(&primitives.rest);
                 Some(self.parallel * (b - a).norm_squared() * (d - c).norm_squared())
@@ -183,19 +217,20 @@ impl Contact {
         ))
     }
 
-    /// A pair's friction at positions `x`, fixed for a time step: `None` where its barrier does
-    /// not push, or paper has no friction.
+    /// A pair's friction at positions `x` with coefficient `friction`, fixed for a time step.
+    /// The friction is `None` where the barrier does not push, or the coefficient is zero.
     pub(crate) fn pair_slip(
         &self,
         pair: &Pair,
         x: &[Point],
         thickness: f64,
         fade: Option<f64>,
+        friction: f64,
     ) -> Option<Slip> {
         let points = pair.at(x);
         let squared = distance::squared(pair.kind, &points);
         let [_, slope, _] = self.pair(squared, thickness)?;
-        if slope == 0.0 || self.friction == 0.0 {
+        if slope == 0.0 || friction == 0.0 {
             return None;
         }
         let weight = fade.map_or(1.0, |fade| {
@@ -213,7 +248,7 @@ impl Contact {
             stencil: pair.stencil(),
             weights,
             tangent: tangent_plane(&(between / distance)),
-            force: self.friction * normal,
+            force: friction * normal,
         })
     }
 
@@ -250,33 +285,36 @@ fn mollifier(cross: f64, fade: f64) -> [f64; 3] {
     }
 }
 
-/// The pairs whose primitives may come within `margin` of each other while the vertices move
+/// The pairs whose primitives may come within `gap` of their thickness while the vertices move
 /// from `start` to `end`.
 ///
-/// A pair is a candidate where its boxes over the motion, grown by `margin`, overlap. Pairs
-/// that share a vertex, or lie within `margin` of each other in one flat sheet, are left out.
+/// Each primitive's box over the motion grows by its vertices' half thickness and half the gap.
+/// A pair is a candidate where the grown boxes overlap. Pairs that share a vertex, or lie
+/// that close in one flat sheet, are left out. A body meets paper alone.
 pub(crate) fn candidates(
     primitives: &Primitives,
     trees: &Trees,
     start: &[Point],
     end: &[Point],
-    margin: f64,
+    gap: f64,
 ) -> Vec<Pair> {
     let boxes: Vec<Bounds> = start
         .iter()
         .zip(end)
-        .map(|(a, b)| (a.inf(b), a.sup(b)))
+        .enumerate()
+        .map(|(v, (a, b))| {
+            let grow = Vector3::repeat(primitives.half[v] + 0.5 * gap);
+            (a.inf(b) - grow, a.sup(b) + grow)
+        })
         .collect();
     let bound = |vertices: &[u32]| {
-        let (low, high) = vertices
+        vertices
             .iter()
             .map(|&v| boxes[v as usize])
             .reduce(|(low, high), (l, h)| (low.inf(&l), high.sup(&h)))
-            .expect("a primitive has vertices");
-        let grow = Vector3::repeat(margin);
-        (low - grow, high + grow)
+            .expect("a primitive has vertices")
     };
-    // Points against triangles.
+    // Points, of paper and of bodies, against the paper's triangles.
     let triangle_boxes: Vec<Bounds> = primitives.triangles.iter().map(|t| bound(t)).collect();
     let triangles = trees.triangles.fit(&triangle_boxes);
     let point_pairs: Vec<Vec<Pair>> = boxes
@@ -296,7 +334,7 @@ pub(crate) fn candidates(
                 .collect()
         })
         .collect();
-    // Edges against edges, each pair once: an edge's own box meets the others' grown boxes.
+    // The paper's edges against each other, each pair once.
     let edge_boxes: Vec<Bounds> = primitives.edges.iter().map(|e| bound(e)).collect();
     let edges = trees.edges.fit(&edge_boxes);
     let edge_pairs: Vec<Vec<Pair>> = primitives
@@ -304,13 +342,8 @@ pub(crate) fn candidates(
         .par_iter()
         .enumerate()
         .map(|(e, a)| {
-            let own = bound(a);
-            let own = (
-                own.0 + Vector3::repeat(margin),
-                own.1 - Vector3::repeat(margin),
-            );
             edges
-                .overlapping(&own)
+                .overlapping(&edge_boxes[e])
                 .into_iter()
                 .filter(|&f| f > e)
                 .map(|f| primitives.edges[f])
@@ -322,25 +355,53 @@ pub(crate) fn candidates(
                 .collect()
         })
         .collect();
+    // The capsules' axes against the paper's edges and points. Bodies are few, so each axis
+    // meets every edge and point whose box its box overlaps.
+    let paper =
+        u32::try_from(primitives.sheet.len()).expect("a scene counts its vertices in 32 bits");
+    let mut axis_pairs = Vec::new();
+    for &[a, b] in &primitives.axes {
+        let axis = bound(&[a, b]);
+        axis_pairs.extend(edges.overlapping(&axis).into_iter().map(|e| {
+            let [c, d] = primitives.edges[e];
+            Pair {
+                kind: Kind::EdgeEdge,
+                vertices: [c, d, a, b],
+            }
+        }));
+        axis_pairs.extend(
+            (0..paper)
+                .filter(|&v| bvh::overlap(&boxes[v as usize], &axis))
+                .map(|v| Pair {
+                    kind: Kind::PointEdge,
+                    vertices: [v, a, b, b],
+                }),
+        );
+    }
     let mut pairs: Vec<Pair> = point_pairs
         .into_iter()
-        .chain(edge_pairs)
         .flatten()
+        .chain(edge_pairs.into_iter().flatten())
+        .chain(axis_pairs)
         .collect();
     pairs.sort_unstable();
     pairs.dedup();
-    pairs.retain(|pair| !resting(primitives, pair, margin));
+    pairs.retain(|pair| !resting(primitives, pair, gap));
     pairs
 }
 
-/// Whether a pair lies within `margin` in its flat sheet, so that its closeness is the sheet's
-/// own shape rather than contact.
-fn resting(primitives: &Primitives, pair: &Pair, margin: f64) -> bool {
+/// Whether a pair lies within `gap` of its thickness in its flat sheet, so that its closeness is
+/// the sheet's own shape rather than contact.
+fn resting(primitives: &Primitives, pair: &Pair, gap: f64) -> bool {
+    if pair.vertices.iter().any(|&v| primitives.is_body(v)) {
+        return false;
+    }
     let sheet = primitives.sheet[pair.vertices[0] as usize];
+    let reach = primitives.thickness(pair) + gap;
     pair.vertices
         .iter()
         .all(|&v| primitives.sheet[v as usize] == sheet)
-        && distance::squared(pair.kind, &pair.at(&primitives.rest)) < margin * margin
+        && distance::squared(pair.kind, &pair.at(&primitives.rest)) < reach * reach
 }
 
 #[cfg(test)]
@@ -378,8 +439,10 @@ mod tests {
             Primitives {
                 triangles,
                 edges,
+                axes: Vec::new(),
                 sheet,
                 rest,
+                half: vec![0.0; 8],
             },
             x,
         )
@@ -390,7 +453,7 @@ mod tests {
         let (primitives, x) = stack(0.05);
         let trees = Trees::new(&primitives, &x);
         let pairs = candidates(&primitives, &trees, &x, &x, 0.1);
-        // No pair of one sheet lies within the margin in the flat sheet.
+        // No pair of one sheet lies within the gap in the flat sheet.
         assert!(pairs.iter().all(|p| !resting(&primitives, p, 0.1)));
         // Each corner over each triangle below, and the reverse, is a candidate.
         assert!(pairs.contains(&Pair {

@@ -4,7 +4,7 @@
 //! without validation still meets the core's checks.
 
 use origamy_sim::{
-    Air, Contact, Crease, Material, Settings, Solver, Stiffness, StrainLimit, Table,
+    Air, Body, Contact, Crease, Material, Settings, Solver, Stiffness, StrainLimit, Table,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -211,6 +211,22 @@ impl Parameters for Table {
 
     fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
         fields.set_item("height", self.height)?;
+        fields.set_item("friction", self.friction)
+    }
+}
+
+impl Parameters for Body {
+    const MODEL: &'static str = "Body";
+
+    fn read(model: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            radius: field(model, "radius")?,
+            friction: field(model, "friction")?,
+        })
+    }
+
+    fn write(&self, fields: &Bound<'_, PyDict>) -> PyResult<()> {
+        fields.set_item("radius", self.radius)?;
         fields.set_item("friction", self.friction)
     }
 }

@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod body;
 mod contact;
 mod energy;
 mod generated;
@@ -20,6 +21,7 @@ pub mod sheet;
 pub mod simulation;
 mod system;
 
+pub use body::{Body, BodyError};
 pub use material::{Material, Stiffness, StrainLimit};
 pub use mesh::{Dihedral, Mesh, MeshError, Vertex};
 pub use parameter::ParameterError;

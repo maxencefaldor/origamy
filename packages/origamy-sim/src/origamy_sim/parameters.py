@@ -331,6 +331,23 @@ class Table(_Parameters):
     """
 
 
+class Body(_Parameters):
+    """A rigid body that touches paper: a sphere or a capsule of a radius.
+
+    The body is a sphere round one point, or a capsule round the segment between two.
+    Paper keeps its half thickness plus the body's radius away from the body.
+    """
+
+    radius: Positive
+    """The radius of the sphere, or of the capsule round its axis, in meters."""
+
+    friction: NonNegative = 0.4
+    """Coulomb's coefficient of friction between the body and paper.
+
+    The default takes the body as rough as paper.
+    """
+
+
 class Air(_Parameters):
     """The air paper moves through, which resists paper moving across its surface.
 

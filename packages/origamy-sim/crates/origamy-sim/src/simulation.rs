@@ -13,8 +13,9 @@ use std::cell::OnceCell;
 use nalgebra::{SMatrix, Vector3};
 use rayon::prelude::*;
 
+use crate::body::{Body, BodyError};
 use crate::contact::friction::Slip;
-use crate::contact::{self, Kind, Pair, Primitives, Trees, ccd, distance};
+use crate::contact::{self, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
@@ -209,6 +210,9 @@ pub struct Simulation {
     hold_forces: Vec<[f64; 3]>,
     /// The pressure on each sheet's front, in pascals.
     pressures: Vec<f64>,
+    bodies: Vec<Body>,
+    /// The first point of each body, after the paper's vertices.
+    body_starts: Vec<usize>,
     time: f64,
     pattern: Pattern,
     pairs: Vec<(u32, u32)>,
@@ -262,6 +266,8 @@ impl Simulation {
             forces: vec![[0.0; 3]; positions.len()],
             hold_forces: vec![[0.0; 3]; positions.len()],
             pressures: vec![0.0; sheets.len()],
+            bodies: Vec::new(),
+            body_starts: Vec::new(),
             sheets,
             offsets,
             settings,
@@ -394,7 +400,9 @@ impl Simulation {
         let contact = self.settings.contact;
         let overlapping = pairs.iter().any(|pair| {
             let squared = distance::squared(pair.kind, &pair.at(&x));
-            contact.pair(squared, self.pair_thickness(pair)).is_none()
+            contact
+                .pair(squared, self.primitives.thickness(pair))
+                .is_none()
         }) || range
             .clone()
             .any(|v| self.clearance(v, &x[v]).is_some_and(|c| c <= 0.0));
@@ -583,6 +591,132 @@ impl Simulation {
         finite("pressure", pressure)?;
         self.pressures[sheet] = pressure;
         Ok(())
+    }
+
+    /// Adds a rigid body, and gives its index.
+    ///
+    /// The body is a sphere round one point, or a capsule round the segment between two. Its
+    /// points stay where they are until `move_body` carries them.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`BodyError`] when a parameter lies outside its values, or the points are
+    /// neither one nor two. The error also names a coordinate that is not finite, or a capsule
+    /// whose ends coincide. A body may not lie closer to paper than its radius and half the
+    /// paper's thickness.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the scene would count more vertices than 32 bits can name.
+    pub fn add_body(&mut self, body: Body, points: &[[f64; 3]]) -> Result<usize, BodyError> {
+        body.check()?;
+        if !matches!(points.len(), 1 | 2) {
+            return Err(BodyError::Points {
+                given: points.len(),
+            });
+        }
+        check_points(points)?;
+        let start = self.positions.len();
+        let first = u32::try_from(start).expect("a scene counts its vertices in 32 bits");
+        let mut primitives = self.primitives.clone();
+        primitives
+            .rest
+            .extend(points.iter().map(|&p| Point::from(p)));
+        primitives
+            .half
+            .extend(std::iter::repeat_n(body.radius, points.len()));
+        if points.len() == 2 {
+            primitives.axes.push([first, first + 1]);
+        }
+        let x: Vec<Point> = self
+            .positions
+            .iter()
+            .chain(points)
+            .map(|&p| Point::from(p))
+            .collect();
+        let trees = Trees::new(&primitives, &x);
+        let gap = self.settings.contact.gap;
+        let overlapping = contact::candidates(&primitives, &trees, &x, &x, gap)
+            .iter()
+            .filter(|pair| pair.vertices.iter().any(|&v| v >= first))
+            .any(|pair| {
+                let squared = distance::squared(pair.kind, &pair.at(&x));
+                squared <= primitives.thickness(pair).powi(2)
+            });
+        if overlapping {
+            return Err(BodyError::Overlapping);
+        }
+        let count = points.len();
+        self.positions.extend_from_slice(points);
+        self.velocities.extend(std::iter::repeat_n([0.0; 3], count));
+        self.held.extend(std::iter::repeat_n(true, count));
+        self.targets.extend(std::iter::repeat_n(None, count));
+        self.fixed.extend(std::iter::repeat_n(true, count));
+        self.forces.extend(std::iter::repeat_n([0.0; 3], count));
+        self.hold_forces
+            .extend(std::iter::repeat_n([0.0; 3], count));
+        self.pattern = Pattern::new(self.positions.len(), self.pairs.iter().copied());
+        self.primitives = primitives;
+        self.trees = trees;
+        self.bodies.push(body);
+        self.body_starts.push(start);
+        Ok(self.bodies.len() - 1)
+    }
+
+    /// The simulation's bodies, in the order they joined it.
+    #[must_use]
+    pub fn bodies(&self) -> &[Body] {
+        &self.bodies
+    }
+
+    /// Where a body's points lie: a sphere's center, or a capsule's two ends.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such body.
+    #[must_use]
+    pub fn body_points(&self, body: usize) -> &[[f64; 3]] {
+        &self.positions[self.body_range(body)]
+    }
+
+    /// Moves a body's points to `points` over the next time step, as a hand carries it.
+    ///
+    /// The body moves within the step, so collision detection covers its path, and paper in
+    /// its way moves aside. The step converges only once the body reaches its points.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`BodyError`] when the points are not as many as the body's, a coordinate is
+    /// not finite, or a capsule's ends coincide.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such body.
+    pub fn move_body(&mut self, body: usize, points: &[[f64; 3]]) -> Result<(), BodyError> {
+        let range = self.body_range(body);
+        if points.len() != range.len() {
+            return Err(BodyError::Count {
+                expected: range.len(),
+                given: points.len(),
+            });
+        }
+        check_points(points)?;
+        for (target, &point) in self.targets[range].iter_mut().zip(points) {
+            *target = Some(Point::from(point));
+        }
+        Ok(())
+    }
+
+    /// The force a body exerted on the paper at the end of the last time step, in newtons.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such body.
+    #[must_use]
+    pub fn body_force(&self, body: usize) -> [f64; 3] {
+        self.hold_forces[self.body_range(body)]
+            .iter()
+            .fold([0.0; 3], |[a, b, c], [x, y, z]| [a + x, b + y, c + z])
     }
 
     /// The simulation's energy now.
@@ -908,9 +1042,7 @@ impl Simulation {
         let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
         let missing: Vec<(u32, u32)> = contacts
             .iter()
-            .flat_map(|(stencil, _, _)| {
-                vertex_pairs(stencil.map(|v| v.expect("a pair names four vertices")))
-            })
+            .flat_map(|(stencil, _, _)| vertex_pairs(*stencil))
             .filter(|&(a, b)| !pattern.contains(a, b))
             .collect();
         if !missing.is_empty() {
@@ -1103,30 +1235,13 @@ impl Simulation {
     /// The strain barrier is infinite past the strain cap, and contact is infinite where paper
     /// reaches its thickness.
     fn potential(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> Potential {
-        let mut energy = Energy::default();
         let (mut inertia_term, mut holding) = (0.0, 0.0);
-        let contact = self.settings.contact;
-        let frictions: Vec<f64> = incremental
-            .slips
-            .par_iter()
-            .map(|slip| slip.energy(x, incremental.start, contact.stick))
-            .collect();
-        energy.friction = frictions.iter().sum();
-        let barriers: Vec<f64> = pairs
-            .par_iter()
-            .map(|pair| {
-                let fade = contact.fade(&self.primitives, pair);
-                contact.pair_energy(pair, x, self.pair_thickness(pair), fade)
-            })
-            .collect();
-        energy.contact = barriers.iter().sum();
-        for (v, p) in x.iter().enumerate() {
-            if let Some(clearance) = self.clearance(v, p) {
-                energy.contact += contact
-                    .table(clearance)
-                    .map_or(f64::INFINITY, |[value, _, _]| value);
-            }
-        }
+        let (friction, contact) = self.touching(x, incremental, pairs);
+        let mut energy = Energy {
+            contact,
+            friction,
+            ..Energy::default()
+        };
         for (s, sheet) in self.sheets.iter().enumerate() {
             let offset = self.offsets[s];
             let constants = Constants::of(sheet);
@@ -1194,11 +1309,47 @@ impl Simulation {
                 }
             }
         }
+        // The bodies' points carry no energy of their own, but a moving body pulls them.
+        for (v, p) in x.iter().enumerate().skip(self.primitives.sheet.len()) {
+            if let Some(hold) = incremental.hold(v) {
+                holding += hold.terms(p, incremental.stiffness).0;
+            }
+        }
         Potential {
             energy,
             inertia: inertia_term,
             holding,
         }
+    }
+
+    /// The friction and contact energies at positions `x`, with contact between `pairs`.
+    ///
+    /// Contact is infinite where paper reaches its thickness, from paper, a body or the table.
+    fn touching(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> (f64, f64) {
+        let contact = self.settings.contact;
+        let frictions: Vec<f64> = incremental
+            .slips
+            .par_iter()
+            .map(|slip| slip.energy(x, incremental.start, contact.stick))
+            .collect();
+        let barriers: Vec<f64> = pairs
+            .par_iter()
+            .map(|pair| {
+                let fade = contact.fade(&self.primitives, pair);
+                contact.pair_energy(pair, x, self.primitives.thickness(pair), fade)
+            })
+            .collect();
+        let table: f64 = x
+            .iter()
+            .enumerate()
+            .filter_map(|(v, p)| self.clearance(v, p))
+            .map(|clearance| {
+                contact
+                    .table(clearance)
+                    .map_or(f64::INFINITY, |[value, _, _]| value)
+            })
+            .sum();
+        (frictions.iter().sum(), barriers.iter().sum::<f64>() + table)
     }
 
     /// Every element's gradient and Hessian at positions `x`, with contact between `pairs`.
@@ -1210,7 +1361,7 @@ impl Simulation {
                 .filter_map(|pair| {
                     let fade = contact.fade(&self.primitives, pair);
                     let (gradient, hessian) =
-                        contact.pair_derivatives(pair, x, self.pair_thickness(pair), fade)?;
+                        contact.pair_derivatives(pair, x, self.primitives.thickness(pair), fade)?;
                     Some((pair.stencil(), gradient, hessian))
                 })
                 .collect(),
@@ -1280,8 +1431,30 @@ impl Simulation {
                 &mut derivatives,
             );
         }
+        for (v, p) in x.iter().enumerate().skip(self.primitives.sheet.len()) {
+            if let Some(hold) = incremental.hold(v) {
+                let (_, gradient, diagonal) = hold.terms(p, incremental.stiffness);
+                let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
+                derivatives
+                    .vertices
+                    .push((vertex, gradient.into(), diagonal));
+            }
+        }
         derivatives
     }
+}
+
+/// Checks that every coordinate of a body's points is finite, and that a capsule's ends differ.
+fn check_points(points: &[[f64; 3]]) -> Result<(), BodyError> {
+    if let Some(point) = points.iter().position(|p| !p.iter().all(|c| c.is_finite())) {
+        return Err(BodyError::NotFinite { point });
+    }
+    if let [a, b] = points {
+        if (Point::from(*b) - Point::from(*a)).norm_squared() == 0.0 {
+            return Err(BodyError::Degenerate);
+        }
+    }
+    Ok(())
 }
 
 /// Adds a sheet's bending derivatives at its positions `x`, its vertices numbered by `global`,
@@ -1453,56 +1626,59 @@ impl Simulation {
             .par_iter()
             .filter_map(|pair| {
                 let fade = contact.fade(&self.primitives, pair);
-                contact.pair_slip(pair, x, self.pair_thickness(pair), fade)
+                let thickness = self.primitives.thickness(pair);
+                contact.pair_slip(pair, x, thickness, fade, self.friction(pair))
             })
             .collect();
         if let Some(table) = self.settings.table {
             for (v, p) in x.iter().enumerate() {
                 let vertex = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
-                let clearance = self.clearance(v, p).expect("the scene has a table");
-                slips.extend(contact.table_slip(vertex, clearance, table.friction));
+                if let Some(clearance) = self.clearance(v, p) {
+                    slips.extend(contact.table_slip(vertex, clearance, table.friction));
+                }
             }
         }
         slips
     }
 
+    /// The coefficient of friction of a pair: its body's, or paper's on paper.
+    fn friction(&self, pair: &Pair) -> f64 {
+        pair.vertices
+            .iter()
+            .find(|&&v| self.primitives.is_body(v))
+            .map_or(self.settings.contact.friction, |&v| {
+                self.bodies[self.body_of(v as usize)].friction
+            })
+    }
+
+    /// The body a point belongs to.
+    fn body_of(&self, vertex: usize) -> usize {
+        self.body_starts.partition_point(|&start| start <= vertex) - 1
+    }
+
+    /// The global indices of a body's points.
+    fn body_range(&self, body: usize) -> std::ops::Range<usize> {
+        let start = self.body_starts[body];
+        let end = self
+            .body_starts
+            .get(body + 1)
+            .copied()
+            .unwrap_or(self.positions.len());
+        start..end
+    }
+
     /// A vertex's clearance at position `p`: its height over the table less its half
     /// thickness, or `None` without a table.
     fn clearance(&self, vertex: usize, p: &Point) -> Option<f64> {
-        let vertex = u32::try_from(vertex).expect("a scene counts its vertices in 32 bits");
         let table = self.settings.table?;
-        Some(p[2] - table.height - 0.5 * self.thickness(vertex))
-    }
-
-    /// The thickness of a vertex's sheet, in meters.
-    fn thickness(&self, vertex: u32) -> f64 {
-        self.sheets[self.primitives.sheet[vertex as usize] as usize]
-            .material()
-            .thickness
-    }
-
-    /// The thickness a pair keeps between mid-surfaces: the mean of its two sheets'.
-    fn pair_thickness(&self, pair: &Pair) -> f64 {
-        let [a, b, c, _] = pair.vertices;
-        match pair.kind {
-            Kind::PointTriangle => 0.5 * (self.thickness(a) + self.thickness(b)),
-            Kind::EdgeEdge => 0.5 * (self.thickness(a) + self.thickness(c)),
-        }
-    }
-
-    /// How far contact reaches: the greatest thickness and the gap beyond it.
-    fn reach(&self) -> f64 {
-        let thickest = self
-            .sheets
-            .iter()
-            .map(|s| s.material().thickness)
-            .fold(0.0, f64::max);
-        thickest + self.settings.contact.gap
+        (vertex < self.primitives.sheet.len())
+            .then(|| p[2] - table.height - self.primitives.half[vertex])
     }
 
     /// The pairs that may touch while the vertices move from `start` to `end`.
     fn candidates(&self, start: &[Point], end: &[Point]) -> Vec<Pair> {
-        contact::candidates(&self.primitives, &self.trees, start, end, self.reach())
+        let gap = self.settings.contact.gap;
+        contact::candidates(&self.primitives, &self.trees, start, end, gap)
     }
 
     /// The largest safe fraction of a motion from `x`, at most 1, and the pairs that may touch.
@@ -1514,7 +1690,7 @@ impl Simulation {
         let pairs = self.candidates(x, &end);
         let mut fraction: f64 = pairs
             .par_iter()
-            .map(|pair| ccd::pair(pair, x, displacement, self.pair_thickness(pair)))
+            .map(|pair| ccd::pair(pair, x, displacement, self.primitives.thickness(pair)))
             .collect::<Vec<f64>>()
             .into_iter()
             .fold(1.0, f64::min);
@@ -1533,7 +1709,7 @@ impl Simulation {
         let mut count = 0;
         let mut least = f64::INFINITY;
         for pair in self.candidates(x, x) {
-            let h = self.pair_thickness(&pair);
+            let h = self.primitives.thickness(&pair);
             let gap = distance::squared(pair.kind, &pair.at(x)).sqrt() - h;
             if gap < contact.gap {
                 count += 1;
@@ -1802,8 +1978,12 @@ fn elapsed(dt: f64) -> f64 {
 }
 
 /// Every pair of a contact's four vertices, the greater first.
-fn vertex_pairs(v: [u32; 4]) -> impl Iterator<Item = (u32, u32)> {
-    (0..4).flat_map(move |i| (0..i).map(move |j| (v[i].max(v[j]), v[i].min(v[j]))))
+fn vertex_pairs(stencil: [Option<u32>; 4]) -> Vec<(u32, u32)> {
+    let v: Vec<u32> = stencil.into_iter().flatten().collect();
+    (0..v.len())
+        .flat_map(|i| (0..i).map(move |j| (i, j)))
+        .map(|(i, j)| (v[i].max(v[j]), v[i].min(v[j])))
+        .collect()
 }
 
 /// Points moved by a fraction of a displacement given in flat coordinates.
@@ -1834,8 +2014,10 @@ fn primitives(sheets: &[Sheet], offsets: &[usize]) -> Primitives {
     let mut primitives = Primitives {
         triangles: Vec::new(),
         edges: Vec::new(),
+        axes: Vec::new(),
         sheet: Vec::new(),
         rest: Vec::new(),
+        half: Vec::new(),
     };
     for (s, (sheet, &offset)) in sheets.iter().zip(offsets).enumerate() {
         let offset = u32::try_from(offset).expect("a scene counts its vertices in 32 bits");
@@ -1853,6 +2035,10 @@ fn primitives(sheets: &[Sheet], offsets: &[usize]) -> Primitives {
         primitives
             .rest
             .extend(mesh.rest().iter().map(|&[x, y]| Point::new(x, y, 0.0)));
+        primitives.half.extend(std::iter::repeat_n(
+            0.5 * sheet.material().thickness,
+            mesh.vertex_count(),
+        ));
     }
     primitives
 }
@@ -1934,10 +2120,12 @@ mod tests {
                 .pairs
                 .iter()
                 .copied()
-                .chain(pairs.iter().flat_map(|p| vertex_pairs(p.vertices))),
+                .chain(pairs.iter().flat_map(|p| vertex_pairs(p.stencil()))),
         );
+        // Every vertex is free here, the bodies' points too, so every derivative is checked.
+        let free = vec![false; x.len()];
         let assemble = |y: &[Point]| {
-            let mut assembly = Assembly::new(&pattern, &simulation.held);
+            let mut assembly = Assembly::new(&pattern, &free);
             simulation
                 .derivatives(y, &incremental, &pairs)
                 .scatter(&mut assembly, false);
@@ -2089,6 +2277,119 @@ mod tests {
             // The differences step well under the stick distance and the barrier's gap.
             check(&simulation, &x, &start, 1e-10);
         }
+    }
+
+    #[test]
+    fn the_assembly_differentiates_contact_with_bodies() {
+        // A capsule lies across a sheet's front and a sphere touches its back, each within the
+        // reach of contact, with frictions of their own.
+        let (h, gap) = (70e-6, 2e-6);
+        let sheet = Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+        let mut simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        let (finger, ball) = (0.002, 0.001);
+        let above = 0.5 * h + finger + 0.6 * gap;
+        simulation
+            .add_body(
+                Body {
+                    radius: finger,
+                    friction: 0.7,
+                },
+                &[[0.002, 0.004, above], [0.008, 0.006, above]],
+            )
+            .unwrap();
+        let below = -(0.5 * h + ball + 0.5 * gap);
+        simulation
+            .add_body(
+                Body {
+                    radius: ball,
+                    friction: 0.2,
+                },
+                &[[0.0045, 0.0052, below]],
+            )
+            .unwrap();
+        // The whole scene turns, so no coordinate lies across the sheet alone, where only its
+        // soft bending would scale the differences.
+        let turn = nalgebra::Rotation3::from_scaled_axis(Vector3::new(0.4, -0.3, 0.2));
+        let x: Vec<Point> = simulation
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(v, &p)| turn * (Point::from(p) + wobble(v, 0.05 * gap)))
+            .collect();
+        let pairs = simulation.candidates(&x, &x);
+        let energy = simulation
+            .potential(&x, &Incremental::still(&x), &pairs)
+            .energy;
+        assert!(energy.contact > 0.0, "{} pairs", pairs.len());
+        assert!(pairs.iter().any(|p| p.kind == contact::Kind::PointEdge));
+        let start: Vec<Point> = x
+            .iter()
+            .enumerate()
+            .map(|(v, p)| {
+                let shift = wobble(v + 7, 3e-7);
+                p - turn * Point::new(shift[0], shift[1], 0.0)
+            })
+            .collect();
+        assert!(!simulation.slips(&start).is_empty());
+        check(&simulation, &x, &start, 1e-10);
+    }
+
+    #[test]
+    fn a_body_joins_and_moves_only_with_sound_points() {
+        let sheet = Sheet::new(Mesh::grid(3, 3, 0.01, 0.01).unwrap(), Material::kami()).unwrap();
+        let mut simulation = Simulation::new(vec![sheet], Settings::default()).unwrap();
+        let finger = Body {
+            radius: 0.002,
+            friction: 0.5,
+        };
+        let refusals = [
+            (finger, vec![[0.0; 3]; 3], BodyError::Points { given: 3 }),
+            (
+                finger,
+                vec![[0.0, 0.0, 0.01], [0.0, f64::NAN, 0.01]],
+                BodyError::NotFinite { point: 1 },
+            ),
+            (finger, vec![[0.0, 0.0, 0.01]; 2], BodyError::Degenerate),
+            // The sphere's surface lies 1 µm from the paper's surface.
+            (
+                finger,
+                vec![[0.005, 0.005, 0.002 + 35e-6 - 1e-6]],
+                BodyError::Overlapping,
+            ),
+            (
+                Body {
+                    radius: -1.0,
+                    ..finger
+                },
+                vec![[0.0, 0.0, 0.01]],
+                BodyError::Parameter(ParameterError {
+                    name: "body radius",
+                    value: -1.0,
+                    requirement: "positive and finite",
+                }),
+            ),
+        ];
+        for (body, points, error) in refusals {
+            assert_eq!(simulation.add_body(body, &points), Err(error));
+        }
+        // A refused body leaves the scene as it was.
+        assert_eq!(simulation.positions.len(), 16);
+        assert!(simulation.bodies().is_empty());
+        let ends = [[0.0, 0.0, 0.01], [0.01, 0.0, 0.01]];
+        let tip = simulation.add_body(finger, &ends).unwrap();
+        assert_eq!(simulation.body_points(tip), ends);
+        assert_eq!(
+            simulation
+                .move_body(tip, &ends[..1])
+                .unwrap_err()
+                .to_string(),
+            "the body has 2 points, so 1 point cannot move it"
+        );
+        assert_eq!(
+            simulation.move_body(tip, &[ends[0]; 2]),
+            Err(BodyError::Degenerate)
+        );
+        assert!(simulation.targets.iter().all(Option::is_none));
     }
 
     /// A square of kami gliding at 1 m/s in its plane through a vacuum.

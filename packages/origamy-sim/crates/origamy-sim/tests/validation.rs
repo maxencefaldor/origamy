@@ -3,7 +3,8 @@
 use std::num::NonZeroU32;
 
 use origamy_sim::{
-    Air, Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness, Table,
+    Air, Body, Contact, Crease, Material, Mesh, Settings, Sheet, Simulation, Solver, Stiffness,
+    Table,
 };
 
 /// A rectangle of `columns` by `rows` cells of `width` by `height` meters.
@@ -1015,4 +1016,79 @@ fn pressure_equal_to_its_weight_holds_a_sheet_up() {
             );
         }
     }
+}
+
+/// A fingertip of friction coefficient `friction` pressing a square of kami on the table, then
+/// sliding 5 mm along the table. Returns how far the square's middle moves, in meters.
+///
+/// The fingertip is a capsule of radius 8 mm, its axis 2 cm long across the square's middle.
+/// The fingertip comes down until it presses with ten times the square's weight.
+fn drag(friction: f64) -> f64 {
+    let kami = Material::kami();
+    let (h, gap) = (kami.thickness, Contact::default().gap);
+    let side = 0.05;
+    let sheet = Sheet::new(Mesh::grid(8, 8, side, side).unwrap(), kami).unwrap();
+    let dt = 1.0 / 240.0;
+    let settings = Settings {
+        time_step: dt,
+        table: Some(Table::default()),
+        ..Settings::default()
+    };
+    let mut simulation = Simulation::new(vec![sheet], settings).unwrap();
+    let rest = 0.5 * h + 0.5 * gap;
+    let lying: Vec<[f64; 3]> = simulation
+        .positions(0)
+        .iter()
+        .map(|&[x, y, _]| [x, y, rest])
+        .collect();
+    simulation.set_positions(0, &lying).unwrap();
+    for _ in 0..30 {
+        assert!(simulation.step().unwrap().converged);
+    }
+    let radius = 0.008;
+    let mut height = rest + 0.5 * h + radius + gap;
+    let ends = |x: f64, z: f64| [[x, 0.015, z], [x, 0.035, z]];
+    let finger = simulation
+        .add_body(Body { radius, friction }, &ends(0.025, height))
+        .unwrap();
+    let weight = kami.mass_per_area * side * side * 9.81;
+    // The fingertip pushes the paper down, against z.
+    while -simulation.body_force(finger)[2] < 10.0 * weight {
+        height -= 0.02 * gap;
+        simulation.move_body(finger, &ends(0.025, height)).unwrap();
+        let report = simulation.step().unwrap();
+        assert!(report.converged && report.least_gap > 0.0, "{report:?}");
+    }
+    let middle = |simulation: &Simulation| {
+        let x = simulation.positions(0);
+        x.iter().map(|p| p[0]).sum::<f64>() / f64::from(u32::try_from(x.len()).unwrap())
+    };
+    let before = middle(&simulation);
+    for step in 1..=60 {
+        let x = 0.025 + 0.005 * f64::from(step) / 60.0;
+        simulation.move_body(finger, &ends(x, height)).unwrap();
+        let report = simulation.step().unwrap();
+        assert!(
+            report.converged && report.least_gap > 0.0,
+            "step {step}: {report:?}"
+        );
+    }
+    middle(&simulation) - before
+}
+
+#[test]
+fn a_fingertip_drags_paper_whose_table_slips_first() {
+    // A fingertip presses with ten times the square's weight. With friction 0.9 it grips the
+    // paper harder than the table's 0.4 holds it, so the paper moves with it. A fingertip
+    // of friction 0.1 grips it less, so it slides over the paper, which stays.
+    let carried = drag(0.9);
+    assert!(
+        (carried / 0.005 - 1.0).abs() < 0.01,
+        "the gripping fingertip moves the paper {carried} m of 5 mm"
+    );
+    let left = drag(0.1);
+    assert!(
+        left.abs() < 0.01 * 0.005,
+        "the slipping fingertip moves the paper {left} m"
+    );
 }

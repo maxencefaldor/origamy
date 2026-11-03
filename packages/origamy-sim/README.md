@@ -27,6 +27,7 @@ A time step that does not converge retries as two half steps.
 Creases yield past their yield moment and spring back when released, as paper's creases do.
 Held folds age: they lose moment logarithmically in time, and set deeper the longer they are held.
 Hands carry held vertices within each time step, so paper never crosses paper on the way, and each hand reports the force it exerts.
+Rigid spheres and capsules, such as fingertips and tools, touch paper with friction of their own.
 Point forces and pressure load the paper.
 Benchmarks hold it to known solutions:
 
@@ -43,9 +44,10 @@ Benchmarks hold it to known solutions:
 - A fold held ten times longer sets about 5.7° deeper, as paper measures.
 - A crease band pressed fully flat springs back to 36°, exactly as its sharp crease would.
 - A hand lifting a sheet by its edge carries its weight within 10⁻⁶, and one pulling it across the table feels Coulomb's friction within 1%.
+- A fingertip pressing paper on the table drags it within 1% when it grips harder than the table, and slides over it otherwise.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
 
-Phase 5 is under way: hands carry held vertices, and rigid bodies and grips come next.
+Phase 5 is under way: hands carry held vertices and rigid bodies, and grips and a fingertip fold come next.
 
 ## Install
 

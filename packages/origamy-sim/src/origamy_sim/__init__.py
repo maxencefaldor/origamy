@@ -18,6 +18,7 @@ from origamy_sim._core import (
 )
 from origamy_sim.parameters import (
     Air,
+    Body,
     Config,
     Contact,
     Crease,
@@ -31,6 +32,7 @@ from origamy_sim.parameters import (
 
 __all__ = [
     "Air",
+    "Body",
     "Config",
     "Contact",
     "Crease",

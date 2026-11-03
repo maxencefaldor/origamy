@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from origamy_sim import (
+    Body,
     Contact,
     Crease,
     Material,
@@ -201,6 +202,29 @@ def test_forces_on_every_vertex_equal_to_its_weight_hold_a_sheet_up() -> None:
     assert simulation.pressure(0) == 0.0
     with pytest.raises(ValueError, match="pressure is inf, but it must be finite"):
         simulation.set_pressure(0, math.inf)
+
+
+def test_a_body_moves_along_its_path_and_feels_the_paper() -> None:
+    simulation = Simulation([Sheet(SQUARE)], Settings(time_step=0.01))
+    finger = simulation.add_body(Body(radius=0.01, friction=0.6), [[0.05, 0.02, 0.05]])
+    assert finger == 0
+    assert simulation.bodies == [Body(radius=0.01, friction=0.6)]
+    simulation.move_body(finger, [[0.05, 0.02, 0.04]])
+    assert simulation.step().converged
+    assert simulation.body_points(finger) == pytest.approx(
+        np.array([[0.05, 0.02, 0.04]])
+    )
+    assert simulation.body_force(finger) == pytest.approx([0.0, 0.0, 0.0])
+    with pytest.raises(
+        ValueError, match="the body lies closer to paper than its radius"
+    ):
+        simulation.add_body(Body(radius=0.01), [[0.05, 0.05, 0.0]])
+    with pytest.raises(ValueError, match="a body has 1 point, for a sphere, or 2"):
+        simulation.add_body(Body(radius=0.01), np.zeros((3, 3)))
+    with pytest.raises(ValueError, match="the body has 1 point, so 2 points cannot move it"):
+        simulation.move_body(finger, np.zeros((2, 3)))
+    with pytest.raises(IndexError, match="the simulation has 1 bodies, so no body 1"):
+        simulation.body_points(1)
 
 
 def test_creases_and_rest_angles_lie_along_interior_edges() -> None:

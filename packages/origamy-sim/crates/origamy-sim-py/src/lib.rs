@@ -15,7 +15,7 @@ use numpy::{
     PyUntypedArrayMethods,
 };
 use origamy_sim::{
-    Crease, Energy, Material, Mesh, Report, Settings, Sheet, Simulation, StepError, Vertex,
+    Body, Crease, Energy, Material, Mesh, Report, Settings, Sheet, Simulation, StepError, Vertex,
 };
 use pyo3::create_exception;
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -732,6 +732,69 @@ impl PySimulation {
         self.0.set_pressure(sheet, pressure).map_err(value_error)
     }
 
+    /// Adds a rigid body, and returns its index.
+    ///
+    /// The body is a sphere round one point, or a capsule round the segment between two. Its
+    /// points stay where they are until `move_body` carries them.
+    ///
+    /// Args:
+    ///     body: The body's radius and friction.
+    ///     points: The sphere's center, or the capsule's two ends, in meters, of shape (1, 3)
+    ///         or (2, 3).
+    ///
+    /// Raises:
+    ///     ValueError: When the points are neither one nor two, or not finite. The error also
+    ///         names a capsule whose ends coincide. A body may not lie closer to paper than its
+    ///         radius and half the paper's thickness.
+    fn add_body(&mut self, body: Model<Body>, points: &Bound<'_, PyAny>) -> PyResult<usize> {
+        let points = rows::<f64, 3>("points", points)?;
+        self.0.add_body(body.0, &points).map_err(value_error)
+    }
+
+    /// Each body of the simulation, in the order they joined it.
+    #[getter]
+    fn bodies(&self) -> Vec<Model<Body>> {
+        self.0.bodies().iter().copied().map(Model).collect()
+    }
+
+    /// Where a body's points lie, in meters: a sphere's center, or a capsule's two ends.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such body.
+    fn body_points<'py>(
+        &self,
+        py: Python<'py>,
+        body: usize,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        self.check_body(body)?;
+        Ok(array(py, self.0.body_points(body).iter().copied()))
+    }
+
+    /// Moves a body's points over the next time step, as a hand carries it.
+    ///
+    /// The body moves within the step, so collision detection covers its path, and paper in
+    /// its way moves aside. The step converges only once the body reaches its points.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such body.
+    ///     ValueError: When the points are not as many as the body's, or not finite, or a
+    ///         capsule's ends coincide.
+    fn move_body(&mut self, body: usize, points: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.check_body(body)?;
+        let points = rows::<f64, 3>("points", points)?;
+        self.0.move_body(body, &points).map_err(value_error)
+    }
+
+    /// The force a body exerted on the paper at the end of the last time step, in newtons, of
+    /// shape (3,).
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such body.
+    fn body_force<'py>(&self, py: Python<'py>, body: usize) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.check_body(body)?;
+        Ok(PyArray1::from_slice(py, &self.0.body_force(body)))
+    }
+
     /// The dihedral angle along each interior edge of a sheet, in radians.
     ///
     /// The angles follow the order of the mesh's dihedrals. An angle is zero where the sheet
@@ -793,6 +856,17 @@ impl PySimulation {
         } else {
             Err(PyIndexError::new_err(format!(
                 "the simulation has {count} sheets, so no sheet {sheet}"
+            )))
+        }
+    }
+
+    fn check_body(&self, body: usize) -> PyResult<()> {
+        let count = self.0.bodies().len();
+        if body < count {
+            Ok(())
+        } else {
+            Err(PyIndexError::new_err(format!(
+                "the simulation has {count} bodies, so no body {body}"
             )))
         }
     }

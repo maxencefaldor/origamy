@@ -1,4 +1,5 @@
-//! Distances between a point and a triangle, and between two edges, with exact derivatives.
+//! Distances between a point and a triangle, between two edges, and between a point and an
+//! edge, with exact derivatives.
 //!
 //! Each distance first finds which features are closest. They are two points, a point and a
 //! segment's interior, a point and a triangle's interior, or two segments' interiors. The
@@ -21,11 +22,13 @@ use crate::generated::{
 /// A pair of primitives that may touch.
 ///
 /// A point and a triangle list the point, then the triangle's corners. Two edges list the
-/// first edge's ends, then the second edge's.
+/// first edge's ends, then the second edge's. A point and an edge list the point, then the
+/// edge's ends, and the fourth slot repeats the edge's second end without taking part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Kind {
     PointTriangle,
     EdgeEdge,
+    PointEdge,
 }
 
 /// The features that are closest, as the stencil slots each formula reads.
@@ -124,7 +127,22 @@ fn classify(kind: Kind, x: &[Point; 4]) -> Closest {
                 (false, false) => Closest::PointPoint([end(s, 0, 1), end(t, 2, 3)]),
             }
         }
+        Kind::PointEdge => {
+            let t = edge_parameter(&x[0], &x[1], &x[2]);
+            if t > 0.0 && t < 1.0 {
+                Closest::PointLine([0, 1, 2])
+            } else {
+                Closest::PointPoint([0, end(t, 1, 2)])
+            }
+        }
     }
+}
+
+/// The parameter, from 0 at `a` to 1 at `b`, of the point of the segment from `a` to `b`
+/// closest to `p`.
+fn edge_parameter(p: &Point, a: &Point, b: &Point) -> f64 {
+    let direction = b - a;
+    ((p - a).dot(&direction) / direction.norm_squared()).clamp(0.0, 1.0)
 }
 
 /// The slot of a segment's end that a clamped parameter names.
@@ -136,7 +154,7 @@ fn end(parameter: f64, start: usize, finish: usize) -> usize {
 fn closest_points(kind: Kind, x: &[Point; 4]) -> (Point, Point) {
     let weights = closest_weights(kind, x);
     let split = match kind {
-        Kind::PointTriangle => 1,
+        Kind::PointTriangle | Kind::PointEdge => 1,
         Kind::EdgeEdge => 2,
     };
     let first = (0..split).map(|i| x[i] * weights[i]).sum();
@@ -160,6 +178,10 @@ pub(crate) fn closest_weights(kind: Kind, x: &[Point; 4]) -> [f64; 4] {
         Kind::EdgeEdge => {
             let (s, t) = segment_parameters(&x[0], &x[1], &x[2], &x[3]);
             [1.0 - s, s, t - 1.0, -t]
+        }
+        Kind::PointEdge => {
+            let t = edge_parameter(&x[0], &x[1], &x[2]);
+            [1.0, t - 1.0, -t, 0.0]
         }
     }
 }
@@ -288,6 +310,7 @@ mod tests {
                     Kind::EdgeEdge => {
                         ((x[0] + (x[1] - x[0]) * s) - (x[2] + (x[3] - x[2]) * t)).norm_squared()
                     }
+                    Kind::PointEdge => (x[0] - (x[1] + (x[2] - x[1]) * s)).norm_squared(),
                 };
                 best = best.min(d);
             }
@@ -303,7 +326,7 @@ mod tests {
         #[test]
         fn the_distance_is_the_least_over_both_primitives(a in point(), b in point(), c in point(), d in point()) {
             let x = [a, b, c, d];
-            for kind in [Kind::PointTriangle, Kind::EdgeEdge] {
+            for kind in [Kind::PointTriangle, Kind::EdgeEdge, Kind::PointEdge] {
                 let exact = squared(kind, &x);
                 prop_assert!(exact <= sampled(kind, &x) + 1e-12);
                 prop_assert!(sampled(kind, &x) - exact < 2e-3);
@@ -315,8 +338,8 @@ mod tests {
 
     #[test]
     fn each_closest_feature_has_exact_derivatives() {
-        // The point over the face, beside a side, past a corner; edges crossing, and end on
-        // edge, and end to end.
+        // The cases are a point over the face, beside a side and past a corner. Then come edges
+        // crossing, end on edge and end to end. Last is a point beside an edge, and past its end.
         let cases = [
             (Kind::PointTriangle, [0.2, 0.2, 0.5], 0),
             (Kind::PointTriangle, [0.5, -0.4, 0.3], 1),
@@ -324,10 +347,13 @@ mod tests {
             (Kind::EdgeEdge, [0.3, -0.5, 0.4], 3),
             (Kind::EdgeEdge, [1.6, -0.5, 0.4], 4),
             (Kind::EdgeEdge, [1.6, 1.4, 0.4], 5),
+            (Kind::PointEdge, [0.4, 0.3, -0.2], 6),
+            (Kind::PointEdge, [1.3, 0.3, -0.2], 7),
         ];
         for (kind, [p, q, r], case) in cases {
             let x = match kind {
                 Kind::PointTriangle => [p, q, r, 0.0, 0.0, 0.0, 1.0, 0.1, 0.0, 0.1, 1.0, 0.05],
+                Kind::PointEdge => [p, q, r, 0.0, 0.0, 0.0, 1.0, 0.2, 0.1, 1.0, 0.2, 0.1],
                 Kind::EdgeEdge => [
                     0.0,
                     0.0,
@@ -353,7 +379,7 @@ mod tests {
                 1e-7,
                 1e-5,
             );
-            assert!(case < 6);
+            assert!(case < 8);
         }
     }
 }
