@@ -268,7 +268,7 @@ impl Simulation {
         }
         let pairs = pairs(&sheets, &offsets);
         let pattern = Pattern::new(positions.len(), pairs.iter().copied());
-        let primitives = primitives(&sheets, &offsets);
+        let primitives = primitives(&sheets, &offsets, settings.contact.thickness_share);
         let rest: Vec<Point> = positions.iter().map(|&p| Point::from(p)).collect();
         let trees = Trees::new(&primitives, &rest);
         Ok(Self {
@@ -308,6 +308,15 @@ impl Simulation {
     /// Returns the first setting outside its values.
     pub fn set_settings(&mut self, settings: Settings) -> Result<(), ParameterError> {
         settings.check()?;
+        // Paper keeps the new share of its thickness; bodies keep their radii.
+        let share = settings.contact.thickness_share;
+        let halves = self
+            .sheets
+            .iter()
+            .flat_map(|sheet| paper_halves(sheet, share));
+        for (half, value) in self.primitives.half.iter_mut().zip(halves) {
+            *half = value;
+        }
         self.settings = settings;
         Ok(())
     }
@@ -2274,8 +2283,18 @@ fn check_count(expected: usize, given: usize) -> Result<(), StateError> {
     }
 }
 
-/// Every triangle and edge of the sheets, in the scene's vertex numbering.
-fn primitives(sheets: &[Sheet], offsets: &[usize]) -> Primitives {
+/// The half thickness contact keeps round each vertex of a sheet: half the sheet's thickness,
+/// times the share of it contact keeps.
+fn paper_halves(sheet: &Sheet, share: f64) -> impl Iterator<Item = f64> {
+    std::iter::repeat_n(
+        0.5 * sheet.material().thickness * share,
+        sheet.mesh().vertex_count(),
+    )
+}
+
+/// Every triangle and edge of the sheets, in the scene's vertex numbering, with the half
+/// thickness contact keeps round each vertex at `share` of its sheet's.
+fn primitives(sheets: &[Sheet], offsets: &[usize], share: f64) -> Primitives {
     let mut primitives = Primitives {
         triangles: Vec::new(),
         edges: Vec::new(),
@@ -2300,10 +2319,7 @@ fn primitives(sheets: &[Sheet], offsets: &[usize]) -> Primitives {
         primitives
             .rest
             .extend(mesh.rest().iter().map(|&[x, y]| Point::new(x, y, 0.0)));
-        primitives.half.extend(std::iter::repeat_n(
-            0.5 * sheet.material().thickness,
-            mesh.vertex_count(),
-        ));
+        primitives.half.extend(paper_halves(sheet, share));
     }
     primitives
 }

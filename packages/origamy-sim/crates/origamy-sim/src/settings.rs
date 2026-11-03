@@ -76,6 +76,11 @@ pub struct Contact {
     /// Below it, the friction force grows smoothly with the slip, so a held contact creeps by
     /// less than this distance a step.
     pub stick: f64,
+    /// The share of each sheet's thickness that contact keeps between its layers; above 0, and
+    /// at most 1.
+    ///
+    /// Studies of folding as paper thins toward a mathematical sheet set it below 1.
+    pub thickness_share: f64,
 }
 
 /// The air paper moves through, which resists paper moving across its surface.
@@ -172,7 +177,8 @@ impl Default for Contact {
     /// A barrier that starts 2 µm beyond the thickness, with an energy scale of 10 nJ. The
     /// barrier between two edges fades within about 1.8° of parallel. Friction between paper
     /// has a coefficient of 0.4, inside the measured ranges: 0.17 to 0.44 sliding, and 0.33 to
-    /// 0.61 at rest. Friction holds contacts that slip less than 0.1 µm a step.
+    /// 0.61 at rest. Friction holds contacts that slip less than 0.1 µm a step. Contact keeps
+    /// each sheet's whole thickness.
     fn default() -> Self {
         Self {
             gap: 2e-6,
@@ -180,6 +186,7 @@ impl Default for Contact {
             parallel: 1e-3,
             friction: 0.4,
             stick: 1e-7,
+            thickness_share: 1.0,
         }
     }
 }
@@ -260,7 +267,13 @@ impl Contact {
         positive("contact stiffness", self.stiffness)?;
         fraction("parallel", self.parallel)?;
         non_negative("friction", self.friction)?;
-        positive("stick", self.stick)
+        positive("stick", self.stick)?;
+        require(
+            "thickness share",
+            self.thickness_share,
+            self.thickness_share > 0.0 && self.thickness_share <= 1.0,
+            "above 0, and at most 1",
+        )
     }
 }
 

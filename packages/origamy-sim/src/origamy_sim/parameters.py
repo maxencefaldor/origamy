@@ -317,6 +317,13 @@ class Contact(_Parameters):
     by less than this distance a step.
     """
 
+    thickness_share: Annotated[float, Field(gt=0, le=1)] = 1.0
+    """The share of each sheet's thickness that contact keeps between its layers.
+
+    The default keeps the whole thickness. Studies of folding as paper thins toward a
+    mathematical sheet set it below 1.
+    """
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""

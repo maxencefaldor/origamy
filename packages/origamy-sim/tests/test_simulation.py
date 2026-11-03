@@ -317,3 +317,23 @@ def test_stacked_sheets_land_on_the_table_a_thickness_apart() -> None:
     assert ((upper - lower > h) & (upper - lower < h + 2 * gap)).all()
     assert reports[-1].contacts > 0
     assert reports[-1].energy.contact > 0
+
+
+def test_contact_keeps_its_share_of_the_paper_thickness() -> None:
+    # Two sheets of kami, stacked 40 µm apart: closer than their 70 µm thickness.
+    lower, upper = Sheet(SQUARE), Sheet(SQUARE)
+    stacked = np.column_stack([SQUARE.rest, np.full(4, 40e-6)])
+    simulation = Simulation([lower, upper], STILL)
+    with pytest.raises(ValueError, match="closer than its thickness"):
+        simulation.set_positions(1, stacked)
+    # Contact that keeps half the thickness lets them lie there.
+    half = STILL.model_copy(update={"contact": Contact(thickness_share=0.5)})
+    simulation = Simulation([lower, upper], half)
+    simulation.set_positions(1, stacked)
+    simulation.hold(0, range(4))
+    simulation.hold(1, range(4))
+    assert simulation.step().converged
+    # Keeping the whole thickness again finds them too close.
+    simulation.settings = STILL
+    with pytest.raises(ValueError, match="closer than its thickness"):
+        simulation.step()

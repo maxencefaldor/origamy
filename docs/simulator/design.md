@@ -376,7 +376,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
-| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet |
+| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps |
 | Bodies and grips | Shapes, radii, friction, the stiffness of the hand, paths, and the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
 | Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
@@ -674,6 +674,14 @@ Phase 6 adds these findings so far:
   Elastic kami reaches the 0.5% strain cap by 60°, and a 2% cap lets the fold reach 145°.
   The arrowhead's kite folds jam the same way.
   Real kami crushes in its plane where creases cross, which the simulator does not model yet.
+- **Basic moves through layers.**
+  A suite of short fold scripts now measures which moves through layers fold, at kami's thickness and at a twentieth of it.
+  Folding a square in half twice jams at kami's thickness, before and after crease bands, with locked or soft creases, and when hands carry the flap.
+  At a twentieth of the thickness, with crease bands, it folds; with sharp creases it jams even there.
+  Each move the simulator cannot fold yet is a strict expected failure, so a fix shows as a pass.
+- **Which way a face turns.**
+  A face's first triangle could lie in a crease band, curled round, so it read the face's side wrongly.
+  Folding a square in half a third time then turned paper both up and down; each face's largest triangle reads its side instead.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

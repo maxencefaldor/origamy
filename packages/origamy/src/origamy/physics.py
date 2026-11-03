@@ -227,7 +227,8 @@ class _Folder:
         physics: Physics,
     ) -> None:
         self.last, self.scale, self.physics = last, scale, physics
-        layer = physics.material.thickness + physics.settings.contact.gap
+        contact = physics.settings.contact
+        layer = physics.material.thickness * contact.thickness_share + contact.gap
         # A crease that wraps k layers bends round them in half a circle (k + 1) layers
         # across.
         widths = {
@@ -255,13 +256,18 @@ class _Folder:
         self.edges = np.array(drives.edges, dtype=np.int64).reshape(-1, 2)
         self.spans = np.array(spans, dtype=np.int64)
         self.ends = np.array(drives.ends, dtype=np.int64).reshape(-1, 2)
-        self.sample = np.array(
-            [int(np.argmax(self.faces == f)) for f in range(len(last.faces))]
-        )
-        # Each vertex carries a third of the area of each triangle round it.
         corners = self.mesh.rest[self.mesh.triangles]
         (ax, ay), (bx, by) = ((corners[:, i] - corners[:, 0]).T for i in (1, 2))
         areas = 0.5 * np.abs(ax * by - ay * bx)
+        # Each face's largest triangle, which lies flat away from the bands, shows which
+        # way the face turns.
+        self.sample = np.array(
+            [
+                int(np.argmax(np.where(self.faces == f, areas, -1.0)))
+                for f in range(len(last.faces))
+            ]
+        )
+        # Each vertex carries a third of the area of each triangle round it.
         lumped = np.bincount(
             self.mesh.triangles.ravel(),
             weights=np.repeat(areas / 3, 3),
