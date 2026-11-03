@@ -40,16 +40,17 @@ def assert_folds_as_its_states(folding: Folding) -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "folds", "layers"), [("preliminary_base", 9, 4), ("waterbomb_base", 7, 4)]
+    ("name", "folds", "layers"),
+    [("preliminary_base", 9, 4), ("waterbomb_base", 7, 4), ("window", 12, 3)],
 )
-def test_a_base_folds_from_the_flat_sheet_in_its_stacking(
+def test_a_model_folds_from_the_flat_sheet_in_its_stacking(
     name: str, folds: int, layers: int
 ) -> None:
-    # Each precrease folds and unfolds, and the collapse folds once.
+    # Each precrease folds and unfolds, and each other step folds once.
     folding = simulate(example(name).steps)
     assert len(folding.stages) == folds
     assert_folds_as_its_states(folding)
-    # The base lies flat on the table, its layers stacked one thickness apart.
+    # The model lies flat on the table, its layers stacked one thickness apart.
     heights = folding.stages[-1].frames[-1][:, 2]
     assert heights.max() < LYING + layers * LAYER + 1e-3
 

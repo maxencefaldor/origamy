@@ -4,9 +4,10 @@
 The simulation meshes the last step's crease pattern once, and the sheet starts flat on
 a table, under gravity. Each step turns the creases it changes toward the angles its
 state gives them, in quasi-static increments. Where the faces can fold as rigid
-origami, the creases follow that motion; elsewhere they turn at even rates. The faces
-the step leaves in place stay held. Hands carry the weight of the paper that moves, as
-a folder's do, then let go, and the paper settles under its weight. A precrease folds
+origami, the creases follow that motion; elsewhere they turn at even rates. A hand
+holds down the paper the step leaves in place where it touches the table. Hands carry
+the weight of the paper that moves, as a folder's do, then let go, and the paper
+settles under its weight. A precrease folds
 to the paper it passes through, then unfolds. A step that moves all the paper rigidly,
 as turning it over does, moves the simulated paper the same way.
 
@@ -180,6 +181,12 @@ class _Folder:
             if table is None
             else table.height + 0.5 * (physics.material.thickness + gap)
         )
+        # Paper below half a layer over the lying sheet touches the table.
+        self.ground = (
+            -math.inf
+            if table is None
+            else lying + 0.5 * (physics.material.thickness + gap)
+        )
         rest = self.mesh.rest
         self.simulation.set_positions(
             0, np.column_stack([rest, np.full(len(rest), lying)])
@@ -273,17 +280,19 @@ class _Folder:
             self.made[i] = True
         made = np.flatnonzero(self.made)
         goals = np.array([self._angle(after, f, g) for f, g in pairs[made].tolist()])
-        held = np.zeros(len(self.mesh.rest), dtype=bool)
-        held[self.mesh.triangles[still]] = True
-        sheet.hold(0, np.flatnonzero(held))
+        staying = np.zeros(len(self.mesh.rest), dtype=bool)
+        staying[self.mesh.triangles[still]] = True
         # Hands carry the weight of the paper the fold moves, as a folder's do.
-        moving = np.flatnonzero(~held)
+        moving = np.flatnonzero(~staying)
         sheet.set_forces(0, moving, -self.weights[moving])
         frames: list[NDArray[np.float64]] = []
         mirror = None
         if self._turned_down(step, made, goals, still):
             mirror = self._turn_over()
             frames.append(sheet.positions(0))
+        # A hand holds down the paper that stays where it lies on the table.
+        held = staying & (sheet.positions(0)[:, 2] < self.ground)
+        sheet.hold(0, np.flatnonzero(held if held.any() else staying))
         edges = [(u, v) for u, v in self.edges[made].tolist()]
         converged, iterations = True, 0
         for angles in self._plan(before, after, pairs[made], goals):

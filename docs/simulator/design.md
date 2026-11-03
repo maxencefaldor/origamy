@@ -549,7 +549,7 @@ Each phase ends when its exit tests pass in CI.
 | 7. Speed and reach | Profiling, SIMD, offset contact filter, a GPU solver, adjoint sensitivities | Performance targets met; sensitivities pass finite-difference checks |
 
 Phases 0 to 5 are done.
-Phase 6 has begun: `origamy.physics` folds the preliminary and waterbomb bases from the flat sheet, each layer in origamy's order.
+Phase 6 has begun: `origamy.physics` folds the preliminary base, the waterbomb base and the window from the flat sheet, each layer in origamy's order.
 Two findings from phase 1 shape the next phases:
 
 - **Clamps.**
@@ -635,6 +635,10 @@ Phase 6 adds these findings so far:
   Every fold from flat paper starts where several ways to fold meet.
   With even rates, a first turn of 6° pressed a valley of the waterbomb base flat into the table.
   Turns now ease in and out as a cosine, so the first of 30 increments turns half a degree.
+- **Held paper lies on the table.**
+  Holding every face a step leaves in place froze the window's corner flaps.
+  Each flap's raw edge rested a thickness up on its neighbor's, so folding a tip back out lifted a held flap.
+  A hand now holds down only the paper that stays where it touches the table, and the window folds whole.
 - **Drives that press too hard.**
   Drives a thousand times as stiff as kami's crease pressed closing layers so hard that Newton stalled.
   A hundred times keeps creases within 0.2° of their path, and every increment converges.

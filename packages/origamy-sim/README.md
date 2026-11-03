@@ -49,7 +49,7 @@ Benchmarks hold it to known solutions:
 - A fingertip pressing paper on the table drags it within 1% when its friction beats the table's, and slides over it otherwise.
 - A strip of kami that a fingertip folds in half and creases opens to 35.4° pressed with 1 N, and 35.3° with 4 N.
 - Every gradient and Hessian matches finite differences, element by element and for the whole system.
-- The preliminary and waterbomb bases of origamy fold from the flat sheet, each corner within 0.1 mm of its place and each layer in order.
+- Three models of origamy fold from the flat sheet, each corner within 0.1 mm of its place and each layer in order.
 
 Phases 0 to 5 are done, and hands hold, carry, grip and press paper.
 Phase 6 has begun: `origamy.physics` folds origamy's builds step by step, from the flat sheet.
