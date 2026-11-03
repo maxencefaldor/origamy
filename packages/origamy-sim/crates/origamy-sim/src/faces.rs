@@ -8,11 +8,13 @@
 //! Lines inside the faces join the mesh after the refinement, as chains of mesh edges at most
 //! the refinement's edge length, with the points that only lines name. Two lines a fraction of
 //! a millimeter apart then bound a strip of long thin triangles, where refining would fill the
-//! strip with tiny ones.
+//! strip with tiny ones. A point that only lines name and that lies on a face's edge splits the
+//! edge, so the refinement never grades its triangles down to the gaps between such points.
 
-use spade::handles::FixedVertexHandle;
+use spade::handles::{FixedUndirectedEdgeHandle, FixedVertexHandle};
 use spade::{
-    AngleLimit, ConstrainedDelaunayTriangulation, Point2, RefinementParameters, Triangulation,
+    AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation,
+    RefinementParameters, Triangulation,
 };
 
 /// The triangulation the faces' edges constrain.
@@ -296,8 +298,12 @@ fn triangulate(
     Ok((cdt, handles))
 }
 
+/// The distance within which a point lies on a face's edge, in meters.
+const ON_EDGE: f64 = 1e-9;
+
 /// Inserts the points no face names, whose handles are `None`, after the refinement.
 ///
+/// A point within [`ON_EDGE`] of a face's edge splits the edge, which keeps its two halves.
 /// Returns every point's handle, and the point each vertex of the triangulation is, if any.
 fn insert_rest(
     cdt: &mut Cdt,
@@ -317,9 +323,20 @@ fn insert_rest(
             continue;
         }
         let [x, y] = points[point];
+        let position = Point2::new(x, y);
+        let edge = edge_beside(cdt, position);
+        if let Some(edge) = edge {
+            cdt.remove_constraint_edge(edge);
+        }
         let handle = cdt
-            .insert(Point2::new(x, y))
+            .insert(position)
             .map_err(|_| FacesError::NotFinite { point })?;
+        if let Some(edge) = edge {
+            // The halves lie within a nanometer of the edge, so they cross no other edge.
+            for end in cdt.undirected_edge(edge).vertices().map(|v| v.fix()) {
+                cdt.add_constraint(end, handle);
+            }
+        }
         points_of.resize(cdt.num_vertices(), None);
         if let Some(other) = points_of[handle.index()] {
             return Err(FacesError::Coincident {
@@ -330,6 +347,35 @@ fn insert_rest(
         all.push(handle);
     }
     Ok((all, points_of))
+}
+
+/// The face's edge a point lies on but off its exact line, within [`ON_EDGE`], if any.
+///
+/// A point exactly on an edge splits it as it joins, so it needs no edge.
+fn edge_beside(cdt: &Cdt, position: Point2<f64>) -> Option<FixedUndirectedEdgeHandle> {
+    let edges: Vec<_> = match cdt.locate(position) {
+        PositionInTriangulation::OnFace(face) => cdt
+            .face(face)
+            .adjacent_edges()
+            .into_iter()
+            .map(|e| e.as_undirected())
+            .collect(),
+        PositionInTriangulation::OutsideOfConvexHull(edge) => {
+            vec![cdt.directed_edge(edge).as_undirected()]
+        }
+        _ => Vec::new(),
+    };
+    edges
+        .into_iter()
+        .filter(|e| e.is_constraint_edge())
+        .find(|e| {
+            let [a, b] = e.positions();
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let share = (((position.x - a.x) * dx + (position.y - a.y) * dy) / (dx * dx + dy * dy))
+                .clamp(0.0, 1.0);
+            (position.x - a.x - share * dx).hypot(position.y - a.y - share * dy) < ON_EDGE
+        })
+        .map(|e| e.fix())
 }
 
 /// Joins a line from `from` to `to` to the triangulation, as a chain of constraint edges no
@@ -589,6 +635,53 @@ mod tests {
         let added = rest.len() - points.len();
         let chained: usize = meshed.lines.iter().map(|chain| chain.len() - 2).sum();
         assert_eq!(added, alone.mesh.rest().len() - 6 + chained);
+    }
+
+    #[test]
+    fn points_on_a_face_edge_split_it_after_the_refinement() {
+        // Points a micrometer apart on the diagonal both faces share and on the square's
+        // bottom edge, some within a nanometer off the edge, with lines between them.
+        let (mut points, faces) = square();
+        points.extend([
+            [0.45, 0.45],
+            [0.450_001, 0.450_001 + 3e-10],
+            [0.3, -2e-10],
+            [0.300_001, 0.0],
+        ]);
+        let lines = [[8, 6], [9, 7]];
+        let refinement = Refinement::of_area(0.01);
+        let meshed = Faces::new(&points, &faces, &lines, refinement).unwrap();
+        let alone = Faces::new(&points[..6], &faces, &[], refinement).unwrap();
+        // The refinement ran as it would without them.
+        let added = meshed.mesh.rest().len() - points.len();
+        let chained: usize = meshed.lines.iter().map(|chain| chain.len() - 2).sum();
+        assert_eq!(added, alone.mesh.rest().len() - 6 + chained);
+        // Each point on the diagonal is a corner of triangles in both faces beside it.
+        let triangles = meshed.mesh.triangles();
+        let faces_at = |v: Vertex| {
+            let mut found: Vec<u32> = triangles
+                .iter()
+                .zip(&meshed.faces)
+                .filter(|(t, _)| t.contains(&v))
+                .map(|(_, &f)| f)
+                .collect();
+            found.sort_unstable();
+            found.dedup();
+            found
+        };
+        assert_eq!(faces_at(6), [0, 1]);
+        assert_eq!(faces_at(7), [0, 1]);
+        assert_eq!(faces_at(8), [0]);
+        assert_eq!(faces_at(9), [0]);
+        // The triangles still cover the faces exactly.
+        let area: f64 = triangles
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|v| meshed.mesh.rest()[v as usize]);
+                0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+            })
+            .sum();
+        assert!((area - 2.0).abs() < 1e-9, "the triangles cover {area}");
     }
 
     #[test]

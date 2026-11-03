@@ -845,7 +845,8 @@ class _Layout:
             corner = _corner(
                 stop, edge, self.points.points, crease=side in self.last.creases
             )
-            return corner if corner is not None else self.points.add(point, stop)
+            # The line's end splits the side as it joins the mesh, after the refinement.
+            return corner if corner is not None else self.points.add(point)
         end = self.points.add(point)
         if stop is not None:
             o, o_along, _ = self.frames[stop]
