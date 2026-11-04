@@ -904,12 +904,12 @@ class _Layout:
         """Whether a band runs on straight through one of its crease's ends.
 
         The band runs on into the next crease along its line, where that crease has the
-        same band and only sharp creases cross there.
+        same band and one sharp crease alone crosses there, straight through.
         """
         vertices = self.last.vertices
         (a,) = set(edge) - {corner}
         out = vertices[a] - vertices[corner]
-        onward = False
+        onward, crossing = False, list[Point]()
         for crease in self.last.creases:
             if corner not in crease or crease == edge:
                 continue
@@ -919,7 +919,14 @@ class _Layout:
                 onward = self.widths.get(crease) == self.widths[edge]
             elif crease in self.widths:
                 return False
-        return onward
+            else:
+                crossing.append(back)
+        match crossing:
+            case [first, second] if onward:
+                straight = first.cross(second).sign() == 0
+                return straight and first.dot(second).sign() < 0
+            case _:
+                return False
 
     def _end(self, edge: Edge, point: NDArray[np.float64], stop: _Stop) -> int:
         """The point a band's line ends at, on a face's side.

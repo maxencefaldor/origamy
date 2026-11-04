@@ -189,6 +189,22 @@ def test_a_band_runs_on_through_a_sharp_crease_that_alone_crosses_it() -> None:
         assert np.isclose(mesh.rest, point, atol=1e-9).all(axis=1).any(), point
 
 
+def test_a_band_meets_at_its_end_where_two_sharp_creases_cross_it() -> None:
+    # Both diagonals cross the level band at the center, and stay sharp.
+    paper = Paper.square()
+    paper.precrease(Line.through((0, 0), (1, 1)), flap=("3/4", "1/4"))
+    paper.precrease(Line.through((1, 0), (0, 1)), flap=("1/4", "1/8"))
+    paper.precrease(LEVEL, flap=("1/8", "3/4"))
+    last = paper.steps[-1].state
+    level = {edge: math.pi * LAYER for edge in last.creases if _level(last, edge)}
+    mesh, _, lines = _mesh(last, PHYSICS.size, level, PHYSICS)
+    # Points the band put beside one diagonal would stop it folding flat, so every
+    # line meets the center.
+    middle = np.array([PHYSICS.size / 2] * 2)
+    distances = np.linalg.norm(mesh.rest - middle, axis=1)
+    assert all(distances[line.chain].min() < 1e-9 for line in lines)
+
+
 def _level(state: State, edge: Edge, near: str | None = None) -> bool:
     """Whether a crease of a state runs level, across ``x = near`` if given."""
     a, b = (state.vertices[v] for v in edge)
