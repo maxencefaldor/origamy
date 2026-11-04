@@ -290,13 +290,15 @@ fn mollifier(cross: f64, fade: f64) -> [f64; 3] {
 ///
 /// Each primitive's box over the motion grows by its vertices' half thickness and half the gap.
 /// A pair is a candidate where the grown boxes overlap. Pairs that share a vertex, or lie
-/// that close in one flat sheet, are left out. A body meets paper alone.
+/// that close in one flat sheet, are left out. A body meets paper alone. Without `layers`,
+/// paper meets only bodies, and the search skips pairs of paper altogether.
 pub(crate) fn candidates(
     primitives: &Primitives,
     trees: &Trees,
     start: &[Point],
     end: &[Point],
     gap: f64,
+    layers: bool,
 ) -> Vec<Pair> {
     let boxes: Vec<Bounds> = start
         .iter()
@@ -317,11 +319,14 @@ pub(crate) fn candidates(
     // Points, of paper and of bodies, against the paper's triangles.
     let triangle_boxes: Vec<Bounds> = primitives.triangles.iter().map(|t| bound(t)).collect();
     let triangles = trees.triangles.fit(&triangle_boxes);
-    let point_pairs: Vec<Vec<Pair>> = boxes
+    let paper =
+        u32::try_from(primitives.sheet.len()).expect("a scene counts its vertices in 32 bits");
+    let first = if layers { 0 } else { paper as usize };
+    let point_pairs: Vec<Vec<Pair>> = boxes[first..]
         .par_iter()
         .enumerate()
         .map(|(v, point)| {
-            let v = u32::try_from(v).expect("a scene counts its vertices in 32 bits");
+            let v = u32::try_from(v + first).expect("a scene counts its vertices in 32 bits");
             triangles
                 .overlapping(point)
                 .into_iter()
@@ -337,8 +342,8 @@ pub(crate) fn candidates(
     // The paper's edges against each other, each pair once.
     let edge_boxes: Vec<Bounds> = primitives.edges.iter().map(|e| bound(e)).collect();
     let edges = trees.edges.fit(&edge_boxes);
-    let edge_pairs: Vec<Vec<Pair>> = primitives
-        .edges
+    let paper_edges: &[[u32; 2]] = if layers { &primitives.edges } else { &[] };
+    let edge_pairs: Vec<Vec<Pair>> = paper_edges
         .par_iter()
         .enumerate()
         .map(|(e, a)| {
@@ -357,8 +362,6 @@ pub(crate) fn candidates(
         .collect();
     // The capsules' axes against the paper's edges and points. Bodies are few, so each axis
     // meets every edge and point whose box its box overlaps.
-    let paper =
-        u32::try_from(primitives.sheet.len()).expect("a scene counts its vertices in 32 bits");
     let mut axis_pairs = Vec::new();
     for &[a, b] in &primitives.axes {
         let axis = bound(&[a, b]);
@@ -452,7 +455,7 @@ mod tests {
     fn stacked_sheets_are_candidates_and_a_sheet_is_not_its_own() {
         let (primitives, x) = stack(0.05);
         let trees = Trees::new(&primitives, &x);
-        let pairs = candidates(&primitives, &trees, &x, &x, 0.1);
+        let pairs = candidates(&primitives, &trees, &x, &x, 0.1, true);
         // No pair of one sheet lies within the gap in the flat sheet.
         assert!(pairs.iter().all(|p| !resting(&primitives, p, 0.1)));
         // Each corner over each triangle below, and the reverse, is a candidate.
@@ -478,10 +481,12 @@ mod tests {
                 && across(p)
         };
         assert!(
-            !candidates(&primitives, &trees, &apart, &apart, 0.1)
+            !candidates(&primitives, &trees, &apart, &apart, 0.1, true)
                 .iter()
                 .any(both)
         );
+        // Without contact between layers, no pair of paper is a candidate.
+        assert!(candidates(&primitives, &trees, &x, &x, 0.1, false).is_empty());
     }
 
     #[test]

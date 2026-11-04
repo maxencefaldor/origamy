@@ -768,6 +768,7 @@ Phase 6 adds these findings so far:
   With contact between layers off, the bird base, crane, flapping bird and every other example fold end to end.
   Every step settles, each within 0.01 mm of its state, in seconds.
   Without layers to rest on, a hand holds all the paper a step keeps in place.
+  The contact search then skips pairs of paper altogether, which halves the crane's time to 75 s.
 - **Paths that jump.**
   The rigid path of the petal fold took, at each share, the closed loops nearest even turns of its creases.
   Partway, those nearest loops jumped to another path, and creases turned by up to 2.4 radians between increments.

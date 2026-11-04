@@ -750,7 +750,7 @@ impl Simulation {
             .collect();
         let trees = Trees::new(&primitives, &x);
         let gap = self.settings.contact.gap;
-        let overlapping = contact::candidates(&primitives, &trees, &x, &x, gap)
+        let overlapping = contact::candidates(&primitives, &trees, &x, &x, gap, false)
             .iter()
             .filter(|pair| pair.vertices.iter().any(|&v| v >= first))
             .any(|pair| {
@@ -1938,13 +1938,15 @@ impl Simulation {
     ///
     /// Without contact between layers, only pairs with a body's point may touch.
     fn candidates(&self, start: &[Point], end: &[Point]) -> Vec<Pair> {
-        let gap = self.settings.contact.gap;
-        let mut pairs = contact::candidates(&self.primitives, &self.trees, start, end, gap);
-        if !self.settings.contact.layers {
-            let paper = self.primitives.sheet.len();
-            pairs.retain(|pair| pair.vertices.iter().any(|&v| v as usize >= paper));
-        }
-        pairs
+        let contact = self.settings.contact;
+        contact::candidates(
+            &self.primitives,
+            &self.trees,
+            start,
+            end,
+            contact.gap,
+            contact.layers,
+        )
     }
 
     /// The largest safe fraction of a motion from `x`, at most 1, and the pairs that may touch.
