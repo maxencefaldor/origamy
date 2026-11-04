@@ -16,8 +16,8 @@ folds with the sheet turned over, as a folder makes a mountain fold, then turns 
 
 A crease that wraps other layers bends round them over a crease band, half a circle
 round the layers inside. Spans turn the paper beyond one side of the band against the
-paper beyond the other, and the band bends as the layers inside let it. Hands hold the
-paper beside a band, never the band itself.
+paper beyond the other, and the band bends as the layers inside let it. Bands cross
+where their creases cross. Hands hold the paper beside a band, never the band itself.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
 measure gives how far each face's corners lie from their places in that state, and
@@ -747,9 +747,8 @@ type _Frame = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64
 """A band's crease in one of its faces: the crease's first point, its direction, and
 the direction into the face."""
 
-type _Stop = frozenset[int] | tuple[Edge, int] | None
-"""What a band's line ends on: a face's side, by its corners, or another band's outer
-line, by that band's crease and face."""
+type _Stop = frozenset[int] | None
+"""What a band's line ends on: a face's side, by its corners."""
 
 
 class _Layout:
@@ -759,7 +758,7 @@ class _Layout:
     ``bands.growth`` times the one before, up to ``longest``. The crease then gets
     ``bands.lines`` lines in each of its faces, parallel to it and evenly spaced, the
     last half the band's width away. A line runs across its face up to the face's sides,
-    or up to the outer line of another band in the face, and splits at the stations.
+    and splits at the stations and wherever it crosses another band's line.
     """
 
     def __init__(
@@ -785,15 +784,11 @@ class _Layout:
                 middle = np.mean([points.points[c] for c in corners], axis=0)
                 inward = _left(along) * np.sign((middle - a) @ _left(along))
                 self.frames[edge, face] = (a, along, inward)
-        # The points where other bands' lines end on each band's outer line, by their
-        # distance along its crease.
-        self.ending: dict[tuple[Edge, int], list[tuple[float, int]]] = {}
 
     def lines(self) -> list[tuple[Edge, int, int, list[int]]]:
         """Each line, with its crease, its face, its rank and its points.
 
-        Each band's outer line passes through the points where other bands' lines end
-        on it.
+        Lines of two bands in one face share the point where they cross.
         """
         lines = [
             (edge, face, rank, stops)
@@ -801,10 +796,21 @@ class _Layout:
             for rank in range(1, self.bands.lines + 1)
             if (stops := self._line(edge, face, rank))
         ]
+        points = self.points.points
+        ends = [(points[stops[0][1]], points[stops[-1][1]]) for *_, stops in lines]
+        for i, (edge, face, _, stops) in enumerate(lines):
+            for j in range(i + 1, len(lines)):
+                other, elsewhere, _, crossed = lines[j]
+                if other == edge or elsewhere != face:
+                    continue
+                if (point := _meet(*ends[i], *ends[j])) is None:
+                    continue
+                vertex = self.points.add(point)
+                for crease, line in ((edge, stops), (other, crossed)):
+                    start, along, _ = self.frames[crease, face]
+                    line.append((float((point - start) @ along), vertex))
         found = []
         for edge, face, rank, stops in lines:
-            if rank == self.bands.lines:
-                stops.extend(self.ending.get((edge, face), []))
             ordered = [v for _, v in sorted(stops)]
             unique = [v for k, v in enumerate(ordered) if k == 0 or v != ordered[k - 1]]
             found.append((edge, face, rank, unique))
@@ -823,40 +829,38 @@ class _Layout:
             (points[c], _left(points[d] - points[c]), frozenset((c, d)))
             for c, d in itertools.pairwise((*corners, corners[0]))
         ]
-        bounds.extend(
-            (o + o_inward * self.widths[other] / 2, o_inward, (other, f))
-            for (other, f), (o, _, o_inward) in self.frames.items()
-            if f == face and other != edge
-        )
         (low, start), (high, stop) = _clip(origin, along, bounds)
         if high - low < _NEAR:
             return []
-        middle = [
-            (t, self.points.add(origin + along * t))
-            for t in self.stations[edge]
-            if low + _NEAR < t < high - _NEAR
-        ]
         return [
             (low, self._end(edge, origin + along * low, start)),
-            *middle,
+            *(
+                (t, self.points.add(origin + along * t))
+                for t in self.stations[edge]
+                if low + _NEAR < t < high - _NEAR
+            ),
             (high, self._end(edge, origin + along * high, stop)),
         ]
 
     def _end(self, edge: Edge, point: NDArray[np.float64], stop: _Stop) -> int:
-        """The point a band's line ends at, on a face's side or another band's line."""
-        if isinstance(stop, frozenset):
-            side = tuple(sorted(stop))
-            corner = _corner(
-                stop, edge, self.points.points, crease=side in self.last.creases
-            )
-            # The line's end splits the side as it joins the mesh, after the refinement.
-            return corner if corner is not None else self.points.add(point)
-        end = self.points.add(point)
+        """The point a band's line ends at, on a face's side.
+
+        A band's lines meet at its crease's end where they end on a sharp crease, whose
+        cells must stay coarse for it to fold sharply. A line ends on another band's
+        crease where it meets it, and crosses that band.
+        """
         if stop is not None:
-            o, o_along, _ = self.frames[stop]
-            distance = float((self.points.points[end] - o) @ o_along)
-            self.ending.setdefault(stop, []).append((distance, end))
-        return end
+            side = tuple(sorted(stop))
+            shared = stop & set(edge)
+            if (
+                side in self.last.creases
+                and side not in self.widths
+                and len(shared) == 1
+            ):
+                (corner,) = shared
+                return corner
+        # The line's end splits the side as it joins the mesh, after the refinement.
+        return self.points.add(point)
 
 
 def _clip(
@@ -887,6 +891,23 @@ def _clip(
     return low, high
 
 
+def _meet(
+    p: NDArray[np.float64],
+    q: NDArray[np.float64],
+    a: NDArray[np.float64],
+    b: NDArray[np.float64],
+) -> NDArray[np.float64] | None:
+    """Where segment ``pq`` crosses segment ``ab``, ends included, if it does."""
+    u, v = q - p, b - a
+    across = _cross(u, v)
+    if abs(across) < 1e-12 * float(np.linalg.norm(u) * np.linalg.norm(v)):
+        return None
+    share, along = _cross(a - p, v) / across, _cross(a - p, u) / across
+    if not (0 <= share <= 1 and 0 <= along <= 1):
+        return None
+    return p + u * share
+
+
 def _stations(
     length: float, first: float, growth: float, longest: float
 ) -> list[float]:
@@ -904,38 +925,6 @@ def _stations(
     pieces = max(1, math.ceil((length - 2 * end) / longest))
     middle = [end + (length - 2 * end) * k / pieces for k in range(1, pieces)]
     return [*near, *middle, *(length - d for d in reversed(near))]
-
-
-_ACUTE: Final = math.radians(60)
-"""The corner under which a band's lines meet at its crease's end, on the paper's edge.
-
-Ruppert's refinement splits a side endlessly where points crowd a sharper corner."""
-
-
-def _corner(
-    side: frozenset[int],
-    edge: Edge,
-    points: Sequence[NDArray[np.float64]],
-    *,
-    crease: bool,
-) -> int | None:
-    """The end of a band's crease at which its lines meet, rather than end on a side.
-
-    The lines meet where the side is a crease, whose cells must stay coarse for it to
-    fold sharply. They meet too where the side meets the band's crease at an acute
-    corner.
-    """
-    shared = side & set(edge)
-    if len(shared) != 1:
-        return None
-    (corner,) = shared
-    if crease:
-        return corner
-    (other,) = side - shared
-    (far,) = set(edge) - shared
-    u, v = points[far] - points[corner], points[other] - points[corner]
-    angle = math.atan2(abs(_cross(u, v)), float(u @ v))
-    return corner if angle < _ACUTE else None
 
 
 def _beside_edges(mesh: Mesh) -> dict[tuple[int, int], list[int]]:

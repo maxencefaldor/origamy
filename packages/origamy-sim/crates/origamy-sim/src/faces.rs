@@ -195,6 +195,8 @@ impl Faces {
             .iter()
             .map(|&[a, b]| join(&mut cdt, handles[a as usize], handles[b as usize], length))
             .collect();
+        // Lines that joined later split the earlier ones where they cross them.
+        let chains: Vec<Vec<usize>> = chains.iter().map(|chain| walk(&cdt, chain)).collect();
         // Each triangle lies in the face that holds its center, and the rest of the hull
         // drops out.
         let labels = label(&cdt, points, faces)?;
@@ -369,34 +371,31 @@ fn insert_rest(
 /// The face's edge a point lies on but off its exact line, within [`ON_EDGE`], if any, and the
 /// point moved onto the edge.
 ///
-/// A point exactly on an edge splits it as it joins, so it needs no edge.
+/// A point exactly on a face's edge splits it as it joins, so it needs no edge. The search
+/// spans every face's edge: the refinement can split an edge at points a rounding error off its
+/// line, and leave slivers under a nanometer high between the point and the edge it lies on.
 fn edge_beside(
     cdt: &Cdt,
     position: Point2<f64>,
 ) -> Option<(FixedUndirectedEdgeHandle, Point2<f64>)> {
-    let edges: Vec<_> = match cdt.locate(position) {
-        PositionInTriangulation::OnFace(face) => cdt
-            .face(face)
-            .adjacent_edges()
-            .into_iter()
-            .map(spade::handles::DirectedEdgeHandle::as_undirected)
-            .collect(),
-        PositionInTriangulation::OutsideOfConvexHull(edge) => {
-            vec![cdt.directed_edge(edge).as_undirected()]
-        }
-        _ => Vec::new(),
-    };
-    edges
-        .into_iter()
+    if let PositionInTriangulation::OnEdge(edge) = cdt.locate(position)
+        && cdt.directed_edge(edge).is_constraint_edge()
+    {
+        return None;
+    }
+    cdt.undirected_edges()
         .filter(|e| e.is_constraint_edge())
-        .find_map(|e| {
+        .filter_map(|e| {
             let [a, b] = e.positions();
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             let share = (((position.x - a.x) * dx + (position.y - a.y) * dy) / (dx * dx + dy * dy))
                 .clamp(0.0, 1.0);
             let onto = Point2::new(a.x + share * dx, a.y + share * dy);
-            ((position.x - onto.x).hypot(position.y - onto.y) < ON_EDGE).then_some((e.fix(), onto))
+            let distance = (position.x - onto.x).hypot(position.y - onto.y);
+            (distance < ON_EDGE).then_some((distance, e.fix(), onto))
         })
+        .min_by(|p, q| p.0.total_cmp(&q.0))
+        .map(|(_, edge, onto)| (edge, onto))
 }
 
 /// Joins a line from `from` to `to` to the triangulation, as a chain of constraint edges no
@@ -430,6 +429,39 @@ fn join(cdt: &mut Cdt, from: FixedVertexHandle, to: FixedVertexHandle, length: f
         }
     }
     chain
+}
+
+/// The vertices along a chain of constraint edges, with the points that split it since it
+/// joined.
+///
+/// Each step from a vertex follows the constraint edge that heads most nearly toward the
+/// chain's next vertex.
+fn walk(cdt: &Cdt, chain: &[usize]) -> Vec<usize> {
+    let mut walked = vec![chain[0]];
+    for pair in chain.windows(2) {
+        let target = cdt
+            .vertex(FixedVertexHandle::from_index(pair[1]))
+            .position();
+        let mut current = FixedVertexHandle::from_index(pair[0]);
+        while current.index() != pair[1] {
+            let here = cdt.vertex(current).position();
+            let (dx, dy) = (target.x - here.x, target.y - here.y);
+            let heading = |p: Point2<f64>| {
+                let (ex, ey) = (p.x - here.x, p.y - here.y);
+                (ex * dx + ey * dy) / (ex.hypot(ey) * dx.hypot(dy))
+            };
+            let next = cdt
+                .vertex(current)
+                .out_edges()
+                .filter(|edge| edge.as_undirected().is_constraint_edge())
+                .map(|edge| edge.to())
+                .max_by(|a, b| heading(a.position()).total_cmp(&heading(b.position())))
+                .expect("a vertex of a chain has constraint edges");
+            current = next.fix();
+            walked.push(current.index());
+        }
+    }
+    walked
 }
 
 /// The face each inner face of the triangulation lies in, or `None` outside every face: the face
@@ -637,6 +669,39 @@ mod tests {
     }
 
     #[test]
+    fn a_line_keeps_the_points_where_later_lines_cross_it() {
+        // Three lines across the right face: the later two cross the first off its points.
+        let (mut points, faces) = square();
+        points.extend([
+            [1.1, 0.3],
+            [1.9, 0.3],
+            [1.37, 0.1],
+            [1.37, 0.9],
+            [1.61, 0.05],
+            [1.63, 0.95],
+        ]);
+        let lines = [[6, 7], [8, 9], [10, 11]];
+        let meshed = Faces::new(&points, &faces, &lines, Refinement::of_area(0.5)).unwrap();
+        let rest = meshed.mesh.rest();
+        let edges = meshed.mesh.edges();
+        for chain in &meshed.lines {
+            for pair in chain.windows(2) {
+                let edge = [pair[0].min(pair[1]), pair[0].max(pair[1])];
+                assert!(edges.binary_search(&edge).is_ok(), "{edge:?} is no edge");
+            }
+        }
+        let first = &meshed.lines[0];
+        for later in &meshed.lines[1..] {
+            let shared = later.iter().filter(|v| first.contains(v)).count();
+            assert_eq!(shared, 1, "the lines share one crossing");
+        }
+        let crossed = first
+            .iter()
+            .filter(|&&v| (rest[v as usize][1] - 0.3).abs() < 1e-12);
+        assert_eq!(crossed.count(), first.len());
+    }
+
+    #[test]
     fn points_only_lines_name_join_with_their_lines_after_the_refinement() {
         // A strip a tenth of a millimeter wide, inside the left face, along its diagonal:
         // two lines between points no face names.
@@ -713,6 +778,33 @@ mod tests {
                 .fold(0.0, f64::max);
             assert!(doubled > ON_EDGE * longest, "triangle {t:?} is a sliver");
         }
+    }
+
+    #[test]
+    fn points_on_an_edge_the_refinement_split_off_its_line_keep_their_place() {
+        // The refinement splits the top edge at points a rounding error below it, and points
+        // on the edge then lie beside slivers under a nanometer high.
+        let side = 0.15;
+        let mut points = vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]];
+        let count: u32 = 400;
+        points.extend((1..count).map(|k| [side * f64::from(k) / f64::from(count), side]));
+        let faces = vec![vec![0, 1, 2, 3]];
+        let meshed = Faces::new(&points, &faces, &[], Refinement::of_area(4e-5)).unwrap();
+        let rest = meshed.mesh.rest();
+        for (point, place) in points.iter().zip(rest) {
+            let moved = (point[0] - place[0]).hypot(point[1] - place[1]);
+            assert!(moved < 1e-12, "{point:?} moved {moved} or dropped out");
+        }
+        let area: f64 = meshed
+            .mesh
+            .triangles()
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|v| rest[v as usize]);
+                0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]))
+            })
+            .sum();
+        assert!((area - side * side).abs() < 1e-15, "the mesh covers {area}");
     }
 
     #[test]

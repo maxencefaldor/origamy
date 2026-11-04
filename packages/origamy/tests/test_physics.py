@@ -1,4 +1,5 @@
 # Copyright 2026 Maxence Faldor
+import itertools
 import math
 import runpy
 from pathlib import Path
@@ -10,10 +11,11 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from origamy import Line, Paper
-from origamy.physics import Folding, Physics, PhysicsError, simulate
+from origamy.physics import Folding, Physics, PhysicsError, _mesh, simulate
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 UPRIGHT = Line.through(("1/2", 0), ("1/2", 1))
+LEVEL = Line.through((0, "1/2"), (1, "1/2"))
 PHYSICS = Physics()
 # The heights at which paper lies on the table: its half thickness, and a layer.
 LYING = PHYSICS.material.thickness / 2
@@ -120,6 +122,43 @@ def test_a_crease_bends_round_the_layer_it_wraps() -> None:
     for rank in range(-lines, lines + 1):
         offset = crease + rank * width / (2 * lines)
         assert np.isclose(folding.mesh.rest[:, 1], offset, atol=1e-9).sum() >= 2
+
+
+def test_bands_cross_where_their_creases_cross() -> None:
+    # Both middle lines of the square cross at its center, each with a band.
+    paper = Paper.square()
+    paper.precrease(UPRIGHT, flap=("3/4", "1/2"))
+    paper.precrease(LEVEL, flap=("1/4", "3/4"))
+    last = paper.steps[-1].state
+    width = math.pi * LAYER
+    mesh, _, lines = _mesh(
+        last, PHYSICS.size, dict.fromkeys(last.creases, width), PHYSICS
+    )
+    # Each band's lines run on to the other band's crease, and the two bands' lines
+    # meet wherever they cross.
+    middle = PHYSICS.size / 2
+    count = PHYSICS.bands.lines
+    offsets = [rank * width / (2 * count) for rank in range(-count, count + 1) if rank]
+    for across, up in itertools.product([0.0, *offsets], offsets):
+        for point in ((middle + across, middle + up), (middle + up, middle + across)):
+            assert np.isclose(mesh.rest, point, atol=1e-9).all(axis=1).any(), point
+    assert len(lines) == 4 * 2 * count
+
+
+def test_a_band_runs_to_the_paper_edge_however_sharp_the_corner() -> None:
+    # The diagonal meets the square's edges at 45 degrees, at two corners.
+    paper = Paper.square()
+    paper.precrease(Line.through((0, 0), (1, 1)), flap=("3/4", "1/4"))
+    last = paper.steps[-1].state
+    width = math.pi * LAYER
+    mesh, _, _ = _mesh(last, PHYSICS.size, dict.fromkeys(last.creases, width), PHYSICS)
+    # Each line ends on the edge it meets, its offset times root two from the corner.
+    count = PHYSICS.bands.lines
+    size = PHYSICS.size
+    for rank in range(1, count + 1):
+        away = math.sqrt(2) * rank * width / (2 * count)
+        for point in ((away, 0), (0, away), (size - away, size), (size, size - away)):
+            assert np.isclose(mesh.rest, point, atol=1e-9).all(axis=1).any(), point
 
 
 def test_paper_turned_both_up_and_down_from_held_paper_is_refused() -> None:

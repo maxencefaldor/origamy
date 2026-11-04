@@ -374,6 +374,12 @@ A second solver, vertex block descent with offset contact, joins in phase 7 for 
   A crease band's lines join the mesh after the refinement, with the points only they name.
   Lines a fraction of a millimeter apart then bound strips of long thin triangles, where refining would fill them with tiny ones.
   Below an area bound, the refinement leaves triangles as they are, so close points keep no tiny triangles around them.
+  Lines that cross split each other there, and each line's chain keeps every crossing.
+  A point a nanometer from a face's edge moves onto it, even past slivers the refinement leaves beside the edge.
+- **Bands that cross.**
+  A band's lines run across their face to its sides, and share a point with each line of another band they cross.
+  A line ends on another band's crease where it meets it, so the two bands overlap where their creases cross.
+  A band's lines meet at its crease's end where they reach a sharp crease, which keeps the cells beside the sharp crease coarse.
 - **Grading.**
   Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
 - **Two levels of detail.**
@@ -720,6 +726,17 @@ Phase 6 adds these findings so far:
   A shorter pinch helps most: band ends of 1.5 mm, growing by 1.2, stop 1.3 mm short instead of 15 mm.
   The result swings with the mesh, and those settings leave the top corner's fold unsettled.
   The joined layers likely need a shared bend at the joint, with the inner sharp layer banded there too.
+- **Bands that stopped at each other.**
+  The bird base's second diagonal stopped near 120° at kami's thickness, before its precrease could unfold.
+  Its band crossed another band, and each band's lines stopped at the other's outer line.
+  The diagonal then folded sharply across the other band, and the paper there reached the strain cap.
+  The band's lines also met in the paper's corners, so the band pinched there too.
+  Bands now cross, and a band's lines run to the paper's edge at any corner.
+  The diagonal then folds within 0.25 mm of its state.
+- **Chains that cross.**
+  A line that joined the mesh before a later line crossed it lost the crossing from its chain.
+  A point on the paper's edge could also land past slivers the refinement left there, and drop out of the mesh.
+  Each chain now follows its constraint edges once every line has joined, and each point moves onto the face edge it lies beside.
 - **Stalled updates.**
   Wrinkled paper keeps a thousandth of its stiffness, so a residual at rounding moves it tens of nanometers.
   Newton updates there hovered between 20 and 300 nm while each would lower the energy by under a billionth.
