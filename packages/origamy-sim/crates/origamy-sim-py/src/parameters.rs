@@ -165,6 +165,7 @@ impl Parameters for Solver {
             sufficient_decrease: field(model, "sufficient_decrease")?,
             backtracking: field(model, "backtracking")?,
             shortest_update: field(model, "shortest_update")?,
+            stall: field(model, "stall")?,
         })
     }
 
@@ -178,7 +179,8 @@ impl Parameters for Solver {
         fields.set_item("trust_radius", self.trust_radius)?;
         fields.set_item("sufficient_decrease", self.sufficient_decrease)?;
         fields.set_item("backtracking", self.backtracking)?;
-        fields.set_item("shortest_update", self.shortest_update)
+        fields.set_item("shortest_update", self.shortest_update)?;
+        fields.set_item("stall", self.stall)
     }
 }
 

@@ -151,6 +151,7 @@ Each triangle keeps a share of the full energy under compression, so no motion c
 The kami preset keeps all of it, as uncrumpled paper does, and origamy's folds keep a thousandth.
 A wrinkling strain shifts where wrinkles start, so paper resists small compression in full.
 The default is three millionths, which keeps paper at rest clear of where wrinkles start, so Newton's method converges there.
+Each square eases in over as much compression again, by a quintic, so the energy's second derivatives stay continuous.
 The barrier makes tension past the cap unreachable, whatever the forces.
 The barrier acts on the norm of the positive principal strains, which leaves compression to the wrinkles.
 
@@ -395,7 +396,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps |
 | Bodies and grips | Shapes, radii, friction, the stiffness of the hand, paths, and the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
-| Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
+| Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, the stall share of the energy, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
 
 Each crease takes its own values, so one model can hold sharp and soft creases, or two papers in one sheet.
 
@@ -710,6 +711,10 @@ Phase 6 adds these findings so far:
   Each crease now measures its turn from its rest angle onto the circle, so the turn stays continuous past a half turn.
 - **A trust radius on failure.**
   A Newton update that no fraction lowers now shrinks the trust radius and tries again, down to the tolerance.
+- **Stalled updates.**
+  Wrinkled paper keeps a thousandth of its stiffness, so a residual at rounding moves it tens of nanometers.
+  Newton updates there hovered between 20 and 300 nm while each would lower the energy by under a billionth.
+  An update that stops shrinking with so small a predicted decrease now ends the time step.
 - **Which way a face turns.**
   A face's first triangle could lie in a crease band, curled round, so it read the face's side wrongly.
   Folding a square in half a third time then turned paper both up and down; each face's largest triangle reads its side instead.

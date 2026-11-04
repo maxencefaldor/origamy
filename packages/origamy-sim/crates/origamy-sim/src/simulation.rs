@@ -119,6 +119,9 @@ impl Potential {
     }
 }
 
+/// The share of the energy's size under which a change of energy is rounding.
+const ROUNDING: f64 = 1e-12;
+
 /// What a time step did.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Report {
@@ -1097,6 +1100,7 @@ impl Simulation {
         // with the vertex pairs it grew by.
         let mut grown: Option<(Pattern, Vec<(u32, u32)>)> = None;
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
+        let mut previous = f64::INFINITY;
         let mut radius = self.settings.solver.trust_radius;
         while iterations < self.settings.solver.iteration_limit {
             iterations += 1;
@@ -1124,10 +1128,23 @@ impl Simulation {
                 .chunks_exact(3)
                 .map(|d| d[0].hypot(d[1]).hypot(d[2]))
                 .fold(0.0, f64::max);
-            if update <= self.settings.solver.tolerance {
+            // An update within the tolerance ends the time step. So does one that stops
+            // shrinking while its predicted decrease is a sliver of the energy: soft motion, as
+            // wrinkles allow, can keep updates long once the energy has settled, while a
+            // converging update shrinks every iteration.
+            let decrease: f64 = -assembly
+                .gradient
+                .iter()
+                .zip(&direction)
+                .map(|(g, d)| g * d)
+                .sum::<f64>();
+            let stalled = update > 0.5 * previous
+                && decrease <= self.settings.solver.stall * potential.size();
+            if update <= self.settings.solver.tolerance || stalled {
                 converged = true;
                 break;
             }
+            previous = update;
             // Where some motion costs nearly no energy, the update runs far past where its
             // quadratic model holds, so it shrinks to the trust radius.
             let clamped = update > radius;
@@ -1313,7 +1330,7 @@ impl Simulation {
         direction: &[f64],
         search: &Search<'a, '_>,
     ) -> Option<(Vec<Point>, Potential, f64)> {
-        let scale = 1e-12 * search.potential.size();
+        let scale = ROUNDING * search.potential.size();
         let accepts = |potential: &Potential, fraction: f64| {
             let change = potential.total() - search.potential.total();
             change <= self.settings.solver.sufficient_decrease * fraction * search.slope

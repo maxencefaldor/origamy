@@ -182,25 +182,44 @@ fn isotropic(stiffness: &crate::material::Stiffness) -> Option<(f64, f64)> {
 /// Pipkin: the full energy less the relaxed one, half Young's modulus times the greater principal
 /// strain squared where it pulls, plus the plane-stress modulus over two times the lesser
 /// principal stress's strain squared where that pulls.
-fn pipkin(strain: &Vector3<f64>, young: f64, poisson: f64) -> Response {
+///
+/// Each square eases in over `ease` of compression, so the energy's second derivatives stay
+/// continuous and Newton's method does not hop between wrinkled and taut.
+fn pipkin(strain: &Vector3<f64>, young: f64, poisson: f64, ease: f64) -> Response {
     let ([greater, lesser], derivatives) = principal(strain);
     let mean = Vector3::new(0.5, 0.5, 0.0);
     // The lesser principal stress over the plane-stress modulus, λ₂ + ν λ₁.
     let lesser_stress = lesser + poisson * greater;
-    let (a, b) = ((-greater).max(0.0), (-lesser_stress).max(0.0));
+    let [a, a1, a2] = ramp(-greater, ease);
+    let [b, b1, b2] = ramp(-lesser_stress, ease);
     let (bar, plate) = (0.5 * young, 0.5 * young / (1.0 - poisson * poisson));
-    let value = bar * a * a + plate * b * b;
     let (grad_greater, curve) = derivatives.unwrap_or((mean, Matrix3::zeros()));
     // λ₂ + ν λ₁ = (1 + ν) m − (1 − ν) r, with λ₁ = m + r.
     let grad_lesser = mean * (1.0 + poisson) - (grad_greater - mean) * (1.0 - poisson);
-    let step = |x: f64| if x > 0.0 { 1.0 } else { 0.0 };
     Response {
-        value,
-        gradient: grad_greater * (-2.0 * bar * a) + grad_lesser * (-2.0 * plate * b),
-        hessian: grad_greater * grad_greater.transpose() * (2.0 * bar * step(a))
-            + grad_lesser * grad_lesser.transpose() * (2.0 * plate * step(b))
-            + curve * (-2.0 * bar * a + 2.0 * plate * b * (1.0 - poisson)),
+        value: bar * a + plate * b,
+        gradient: grad_greater * (-bar * a1) + grad_lesser * (-plate * b1),
+        hessian: grad_greater * grad_greater.transpose() * (bar * a2)
+            + grad_lesser * grad_lesser.transpose() * (plate * b2)
+            + curve * (-bar * a1 + plate * b1 * (1.0 - poisson)),
     }
+}
+
+/// max(0, x)² with its first two derivatives, eased in over [0, `ease`] by a quintic so its
+/// second derivative is continuous.
+fn ramp(x: f64, ease: f64) -> [f64; 3] {
+    if x <= 0.0 {
+        return [0.0; 3];
+    }
+    if x >= ease {
+        return [x * x, 2.0 * x, 2.0];
+    }
+    let t = x / ease;
+    [
+        ease * ease * t * t * t * (3.0 - 3.0 * t + t * t),
+        ease * t * t * (9.0 - 12.0 * t + 5.0 * t * t),
+        t * (18.0 - 36.0 * t + 20.0 * t * t),
+    ]
 }
 
 /// The energy wrinkles release from a strain of any sheet: none where it is taut, the whole
@@ -355,7 +374,7 @@ fn response(strain: &Vector3<f64>, stretching: &Stretching, share: f64) -> Respo
     }
     let shifted = strain + Vector3::new(stretching.wrinkling, stretching.wrinkling, 0.0);
     let released = match stretching.isotropic {
-        Some((young, poisson)) => pipkin(&shifted, young, poisson),
+        Some((young, poisson)) => pipkin(&shifted, young, poisson, stretching.wrinkling),
         None => release_any(&shifted, stiffness),
     };
     full.blend(1.0, &released, share - 1.0)
@@ -587,6 +606,25 @@ mod tests {
             }
         }
         assert_eq!(checked, 11);
+    }
+
+    #[test]
+    fn wrinkles_ease_in_with_continuous_second_derivatives() {
+        let ease = 3e-6;
+        // The ramp meets zero and the square with its first two derivatives.
+        assert!(ramp(0.0, ease).iter().all(|v| v.abs() < f64::MIN_POSITIVE));
+        let [v, d1, d2] = ramp(ease * (1.0 - 1e-12), ease);
+        assert!((v - ease * ease).abs() < 1e-9 * ease * ease);
+        assert!((d1 - 2.0 * ease).abs() < 1e-9 * ease && (d2 - 2.0).abs() < 1e-9);
+        // Its derivatives match finite differences inside the ease.
+        for share in [0.1, 0.5, 0.9] {
+            let (x, h) = (share * ease, 1e-6 * ease);
+            let [_, d1, d2] = ramp(x, ease);
+            let slope = (ramp(x + h, ease)[0] - ramp(x - h, ease)[0]) / (2.0 * h);
+            let curvature = (ramp(x + h, ease)[1] - ramp(x - h, ease)[1]) / (2.0 * h);
+            assert!((slope - d1).abs() < 1e-6 * d1.abs().max(ease));
+            assert!((curvature - d2).abs() < 1e-6 * d2.abs().max(1.0));
+        }
     }
 
     #[test]

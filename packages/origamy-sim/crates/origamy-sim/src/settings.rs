@@ -54,6 +54,12 @@ pub struct Solver {
     pub backtracking: f64,
     /// The shortest fraction of a Newton update a line search tries, between 0 and 1.
     pub shortest_update: f64,
+    /// The predicted decrease of energy, as a share of the energy's size, under which an update
+    /// that stops shrinking ends a time step, between 0 and 1.
+    ///
+    /// Soft motion, as wrinkles allow, can keep Newton updates long once the energy has settled,
+    /// while a converging update shrinks every iteration.
+    pub stall: f64,
 }
 
 /// How contact pushes paper apart.
@@ -153,7 +159,8 @@ impl Default for Settings {
 }
 
 impl Default for Solver {
-    /// A tolerance of 10 nm within 200 iterations, and a line search that halves updates. The
+    /// A tolerance of 10 nm within 200 iterations, or an update that stops shrinking while it
+    /// would lower the energy by under a billionth, and a line search that halves updates. The
     /// trust radius is a quarter meter, about the size of a sheet of origami paper. Friction
     /// lags up to three times a step, and a step halves down to 10 µs. A moving hold pulls a
     /// hundred times harder than the paper stretches, for up to ten rounds.
@@ -169,6 +176,7 @@ impl Default for Solver {
             sufficient_decrease: 1e-4,
             backtracking: 0.5,
             shortest_update: 1e-12,
+            stall: 1e-9,
         }
     }
 }
@@ -252,7 +260,8 @@ impl Solver {
         positive("trust radius", self.trust_radius)?;
         fraction("sufficient decrease", self.sufficient_decrease)?;
         fraction("backtracking", self.backtracking)?;
-        fraction("shortest update", self.shortest_update)
+        fraction("shortest update", self.shortest_update)?;
+        fraction("stall", self.stall)
     }
 }
 

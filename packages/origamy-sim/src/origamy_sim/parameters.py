@@ -305,6 +305,14 @@ class Solver(_Parameters):
     shortest_update: Fraction = 1e-12
     """The shortest fraction of a Newton update a line search tries."""
 
+    stall: Fraction = 1e-9
+    """The predicted decrease of energy, as a share of the energy's size, under which an
+    update that stops shrinking ends a time step.
+
+    Soft motion, as wrinkles allow, can keep Newton updates long once the energy has
+    settled, while a converging update shrinks every iteration.
+    """
+
 
 class Contact(_Parameters):
     """How contact pushes paper apart.

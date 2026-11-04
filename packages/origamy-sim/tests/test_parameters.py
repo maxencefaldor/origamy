@@ -156,6 +156,7 @@ def settings_data() -> st.SearchStrategy[dict[str, Any]]:
                             "sufficient_decrease",
                             "backtracking",
                             "shortest_update",
+                            "stall",
                         ),
                         NUMBERS,
                     ),
