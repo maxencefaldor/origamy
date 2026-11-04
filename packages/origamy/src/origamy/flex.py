@@ -60,14 +60,54 @@ _SMALL: Final = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
-class _Loop:
-    """The creases around a vertex inside the paper, counterclockwise.
+class _Loops:
+    """The creases around each vertex inside the paper, counterclockwise, as arrays.
 
-    Each crease turns about its direction, which has the next face on its left.
+    Row i holds the loop round one vertex, padded after its end with creases of no
+    turn. Each crease turns about its direction, which has the next face on its left.
     """
 
-    creases: tuple[int, ...]
-    directions: tuple[Vector, ...]
+    creases: np.ndarray
+    """Each loop's creases, of shape (loops, longest), -1 past a loop's end."""
+    directions: np.ndarray
+    """Each crease's direction, of shape (loops, longest, 3)."""
+    cross: np.ndarray
+    """Each direction's cross product as a matrix, of shape (loops, longest, 3, 3)."""
+
+    @classmethod
+    def of(cls, loops: Sequence[tuple[list[int], list[Vector]]]) -> _Loops:
+        """Loops packed from each loop's creases and their directions."""
+        longest = max((len(creases) for creases, _ in loops), default=0)
+        creases = np.full((len(loops), longest), -1, dtype=np.int64)
+        directions = np.zeros((len(loops), longest, 3))
+        for row, (loop, ways) in enumerate(loops):
+            creases[row, : len(loop)] = loop
+            directions[row, : len(loop)] = ways
+        x, y, z = (directions[..., i] for i in range(3))
+        zero = np.zeros_like(x)
+        cross = np.stack(
+            [
+                np.stack([zero, -z, y], axis=-1),
+                np.stack([z, zero, -x], axis=-1),
+                np.stack([-y, x, zero], axis=-1),
+            ],
+            axis=-2,
+        )
+        return cls(creases, directions, cross)
+
+    @property
+    def used(self) -> set[int]:
+        """Every crease some loop holds."""
+        return set(self.creases[self.creases >= 0].tolist())
+
+    def turns(self, angles: np.ndarray) -> np.ndarray:
+        """Each crease's turn about its direction, as a matrix, by Rodrigues' formula.
+
+        The matrices have shape (loops, longest, 3, 3).
+        """
+        turned = np.where(self.creases >= 0, angles[self.creases], 0.0)
+        sine, cosine = np.sin(turned)[..., None, None], np.cos(turned)[..., None, None]
+        return np.eye(3) + sine * self.cross + (1 - cosine) * (self.cross @ self.cross)
 
 
 def flex(paper: Shaped, targets: Mapping[Edge, float], fixed: int) -> Outcome:
@@ -296,7 +336,7 @@ def path(
 
 
 def _walk(
-    loops: Sequence[_Loop],
+    loops: _Loops,
     first: list[float],
     nearest: Sequence[list[float] | None],
     held: set[int],
@@ -378,7 +418,7 @@ def _form(state: State, world: Sequence[Motion]) -> Form:
     )
 
 
-def _loops(state: State, index: Mapping[Edge, int]) -> list[_Loop]:
+def _loops(state: State, index: Mapping[Edge, int]) -> _Loops:
     """The loop of creases around each vertex inside the paper."""
     edge_border = {v for edge in state.border for v in edge}
     around: dict[int, list[int]] = {}
@@ -404,8 +444,8 @@ def _loops(state: State, index: Mapping[Edge, int]) -> list[_Loop]:
             direction, _ = hinge(state, edge, g)
             loop.append(index[edge])
             directions.append(direction)
-        loops.append(_Loop(tuple(loop), tuple(directions)))
-    return loops
+        loops.append((loop, directions))
+    return _Loops.of(loops)
 
 
 def _middle(state: State, face: int) -> tuple[float, float]:
@@ -416,66 +456,73 @@ def _middle(state: State, face: int) -> tuple[float, float]:
     )
 
 
-def _close(loops: Sequence[_Loop], angles: list[float], driven: set[int]) -> bool:
+def _close(loops: _Loops, angles: list[float], driven: set[int]) -> bool:
     """Turn the free creases as little as closes every loop; whether it does.
 
     Each correction is Newton's: the smallest turns of the free creases that close
     every loop to first order, as least squares find them.
     """
-    free = sorted({c for loop in loops for c in loop.creases} - driven)
-    column = {crease: i for i, crease in enumerate(free)}
+    free = np.array(sorted(loops.used - driven), dtype=np.int64)
+    column = np.full(len(angles), -1, dtype=np.int64)
+    column[free] = np.arange(len(free))
+    columns = np.where(loops.creases >= 0, column[loops.creases], -1)
+    turned = np.array(angles, dtype=float)
+    closed = False
     for _ in range(_TRIES):
-        residuals, jacobian = _linearize(loops, angles, column)
+        residuals, jacobian = _linearize(loops, turned, columns, len(free))
         if not residuals.size or float(np.max(np.abs(residuals))) < _CLOSED:
-            return True
-        if not free:
-            return False
-        change = np.linalg.lstsq(jacobian, residuals, rcond=_RANK)[0]
-        for crease, delta in zip(free, change.tolist(), strict=True):
-            angles[crease] -= delta
-    return False
+            closed = True
+            break
+        if not len(free):
+            break
+        turned[free] -= np.linalg.lstsq(jacobian, residuals, rcond=_RANK)[0]
+    angles[:] = turned.tolist()
+    return closed
 
 
 def _linearize(
-    loops: Sequence[_Loop], angles: Sequence[float], column: Mapping[int, int]
+    loops: _Loops, angles: np.ndarray, columns: np.ndarray, free: int
 ) -> tuple[np.ndarray, np.ndarray]:
     """How far each loop stays open, and how each free crease's turn moves it.
 
     Turning crease i of a loop by a little turns the loop's product by as much about
-    the crease's direction, carried by the turns before it.
+    the crease's direction, carried by the turns before it. ``columns`` gives each
+    crease of each loop its column, or -1 for a crease that stays.
     """
-    residuals = np.zeros(3 * len(loops))
-    jacobian = np.zeros((3 * len(loops), len(column)))
-    for row, loop in enumerate(loops):
-        product = np.eye(3)
-        for crease, direction in zip(loop.creases, loop.directions, strict=True):
-            axis = np.asarray(direction)
-            if crease in column:
-                jacobian[3 * row : 3 * row + 3, column[crease]] += product @ axis
-            product = product @ _matrix(axis, angles[crease])
-        residuals[3 * row : 3 * row + 3] = _log(product)
-    return residuals, jacobian
+    count, longest = loops.creases.shape
+    turns = loops.turns(angles)
+    product = np.broadcast_to(np.eye(3), (count, 3, 3))
+    jacobian = np.zeros((3 * count, free))
+    rows = 3 * np.arange(count)[:, None] + np.arange(3)
+    for k in range(longest):
+        moved = product @ loops.directions[:, k, :, None]
+        taken = columns[:, k] >= 0
+        np.add.at(
+            jacobian,
+            (rows[taken], columns[taken, k][:, None]),
+            moved[taken, :, 0],
+        )
+        product = product @ turns[:, k]
+    return _log(product).ravel(), jacobian
 
 
-def _matrix(axis: np.ndarray, angle: float) -> np.ndarray:
-    """The turn by ``angle`` about a unit axis, as a matrix."""
-    x, y, z = axis
-    cross = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
-    return np.eye(3) + sin(angle) * cross + (1 - cos(angle)) * (cross @ cross)
-
-
-def _log(rotation: np.ndarray) -> np.ndarray:
-    """A rotation as its axis times its angle."""
-    skew = np.array(
+def _log(rotations: np.ndarray) -> np.ndarray:
+    """Rotations, of shape (n, 3, 3), each as its axis times its angle."""
+    skew = np.stack(
         [
-            rotation[2, 1] - rotation[1, 2],
-            rotation[0, 2] - rotation[2, 0],
-            rotation[1, 0] - rotation[0, 1],
-        ]
+            rotations[:, 2, 1] - rotations[:, 1, 2],
+            rotations[:, 0, 2] - rotations[:, 2, 0],
+            rotations[:, 1, 0] - rotations[:, 0, 1],
+        ],
+        axis=-1,
     )
-    angle = atan2(float(np.linalg.norm(skew)), float(np.trace(rotation)) - 1)
-    scale = 0.5 if angle < _SMALL else angle / (2 * max(sin(angle), _SMALL))
-    return scale * skew
+    angle = np.arctan2(
+        np.linalg.norm(skew, axis=-1), np.trace(rotations, axis1=1, axis2=2) - 1
+    )
+    scale = np.where(
+        angle < _SMALL, 0.5, angle / (2 * np.maximum(np.sin(angle), _SMALL))
+    )
+    return scale[:, None] * skew
 
 
 def _place(
