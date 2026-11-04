@@ -377,9 +377,13 @@ A second solver, vertex block descent with offset contact, joins in phase 7 for 
   Lines that cross split each other there, and each line's chain keeps every crossing.
   A point a nanometer from a face's edge moves onto it, even past slivers the refinement leaves beside the edge.
 - **Bands that cross.**
+  Creases a fold turns together, end to end along a straight line, share the widest band among them.
+  They do so where they run on along the folded paper, and where they fold back over each other at a joint, both wrapping layers.
   A band's lines run across their face to its sides, and share a point with each line of another band they cross.
   A line ends on another band's crease where it meets it, so the two bands overlap where their creases cross.
-  A band's lines meet at its crease's end where they reach a sharp crease, which keeps the cells beside the sharp crease coarse.
+  A band's lines meet at its crease's end where a sharp crease meets that end too.
+  A sharp crease folds flat only with no points close beside it, so the cells round its ends stay coarse.
+  A band runs on through a sharp crease that alone crosses it, since its lines then put points only on that crease.
 - **Grading.**
   Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
 - **Two levels of detail.**

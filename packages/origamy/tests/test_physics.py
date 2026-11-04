@@ -2,6 +2,7 @@
 import itertools
 import math
 import runpy
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +12,16 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from origamy import Line, Paper
-from origamy.physics import Folding, Physics, PhysicsError, _mesh, simulate
+from origamy.geometry import HALF
+from origamy.physics import (
+    Folding,
+    Physics,
+    PhysicsError,
+    _mesh,
+    _widths,
+    simulate,
+)
+from origamy.state import Edge, State
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 UPRIGHT = Line.through(("1/2", 0), ("1/2", 1))
@@ -145,6 +155,48 @@ def test_bands_cross_where_their_creases_cross() -> None:
     assert len(lines) == 4 * 2 * count
 
 
+def test_a_band_meets_at_its_end_where_a_sharp_crease_meets_it() -> None:
+    # The middle lines cross at the square's center, and only the level one's left half
+    # has a band.
+    paper = Paper.square()
+    paper.precrease(UPRIGHT, flap=("3/4", "1/2"))
+    paper.precrease(LEVEL, flap=("1/4", "3/4"))
+    last = paper.steps[-1].state
+    left = {edge: math.pi * LAYER for edge in last.creases if _level(last, edge, "1/4")}
+    mesh, _, lines = _mesh(last, PHYSICS.size, left, PHYSICS)
+    # Every line reaches the center, and no other point lies near the sharp creases
+    # there.
+    middle = np.array([PHYSICS.size / 2] * 2)
+    distances = np.linalg.norm(mesh.rest - middle, axis=1)
+    assert all(distances[line.chain].min() < 1e-9 for line in lines)
+    assert np.count_nonzero(distances < PHYSICS.bands.edge / 2) == 1
+
+
+def test_a_band_runs_on_through_a_sharp_crease_that_alone_crosses_it() -> None:
+    # Both halves of the level line share a band, and only the sharp upright crosses it.
+    paper = Paper.square()
+    paper.precrease(UPRIGHT, flap=("3/4", "1/2"))
+    paper.precrease(LEVEL, flap=("1/4", "3/4"))
+    last = paper.steps[-1].state
+    width = math.pi * LAYER
+    level = {edge: width for edge in last.creases if _level(last, edge)}
+    mesh, _, _ = _mesh(last, PHYSICS.size, level, PHYSICS)
+    # The band's lines cross the upright crease, which they put points on.
+    middle = PHYSICS.size / 2
+    count = PHYSICS.bands.lines
+    for rank in (*range(-count, 0), *range(1, count + 1)):
+        point = (middle, middle + rank * width / (2 * count))
+        assert np.isclose(mesh.rest, point, atol=1e-9).all(axis=1).any(), point
+
+
+def _level(state: State, edge: Edge, near: str | None = None) -> bool:
+    """Whether a crease of a state runs level, across ``x = near`` if given."""
+    a, b = (state.vertices[v] for v in edge)
+    return a.y == b.y and (
+        near is None or min(a.x, b.x) < Fraction(near) < max(a.x, b.x)
+    )
+
+
 def test_a_band_runs_to_the_paper_edge_however_sharp_the_corner() -> None:
     # The diagonal meets the square's edges at 45 degrees, at two corners.
     paper = Paper.square()
@@ -159,6 +211,34 @@ def test_a_band_runs_to_the_paper_edge_however_sharp_the_corner() -> None:
         away = math.sqrt(2) * rank * width / (2 * count)
         for point in ((away, 0), (0, away), (size - away, size), (size, size - away)):
             assert np.isclose(mesh.rest, point, atol=1e-9).all(axis=1).any(), point
+
+
+def test_creases_a_fold_turns_in_one_line_share_one_band() -> None:
+    # A strip folds up over a precrease, then the paper folds in half across both.
+    paper = Paper.square()
+    paper.precrease(Line.through((0, "1/4"), (1, "1/4")), flap=("1/2", "1/8"))
+    paper.valley(Line.through((0, "1/8"), (1, "1/8")), flap=("1/2", "1/16"))
+    paper.valley(UPRIGHT, flap=("3/4", "1/2"))
+    folds = [
+        (before, after)
+        for before, step in itertools.pairwise(paper.steps)
+        for before, after in itertools.pairwise(
+            (before.state, *((step.through,) if step.through else ()), step.state)
+        )
+    ]
+    last = paper.steps[-1].state
+    widths = _widths(folds, last, LAYER)
+    on = {
+        tuple(sorted(float(last.vertices[v].y) for v in edge)): edge
+        for edge in last.creases
+        if all(last.vertices[v].x == HALF for v in edge)
+    }
+    # The sheet's crease wraps the strip where the strip lies over it, and turns on as
+    # one crease past the precrease. The strip's own crease lies inside, sharp.
+    wrapping = 1.5 * math.pi * LAYER
+    assert widths[on[0.125, 0.25]] == pytest.approx(wrapping)
+    assert widths[on[0.25, 1.0]] == pytest.approx(wrapping)
+    assert on[0.0, 0.125] not in widths
 
 
 def test_paper_turned_both_up_and_down_from_held_paper_is_refused() -> None:

@@ -16,8 +16,9 @@ folds with the sheet turned over, as a folder makes a mountain fold, then turns 
 
 A crease that wraps other layers bends round them over a crease band, half a circle
 round the layers inside. Spans turn the paper beyond one side of the band against the
-paper beyond the other, and the band bends as the layers inside let it. Bands cross
-where their creases cross. Hands hold the paper beside a band, never the band itself.
+paper beyond the other, and the band bends as the layers inside let it. Creases a fold
+turns together along one straight line share one band, and bands cross where their
+creases cross. Hands hold the paper beside a band, never the band itself.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
 measure gives how far each face's corners lie from their places in that state, and
@@ -233,12 +234,7 @@ class _Folder:
         self.last, self.scale, self.physics = last, scale, physics
         contact = physics.settings.contact
         layer = physics.material.thickness * contact.thickness_share + contact.gap
-        # A crease that wraps k layers bends round them in half a circle (k + 1) layers
-        # across.
-        widths = {
-            edge: 0.5 * math.pi * (layers + 1) * layer
-            for edge, layers in _wraps(folds, last).items()
-        }
+        widths = _widths(folds, last, layer)
         self.creep = max(widths.values(), default=0.0)
         self.mesh, self.faces, lines = _mesh(last, scale, widths, physics)
         sheet = Sheet(self.mesh, physics.material)
@@ -553,6 +549,66 @@ class _Folder:
         return float(weights[best] @ positions[corners[best], 2])
 
 
+def _widths(
+    folds: Sequence[tuple[State, State]], last: State, layer: float
+) -> dict[Edge, float]:
+    """The width of each crease band of the last pattern, in meters.
+
+    A crease that wraps k layers bends round them in half a circle (k + 1) layers
+    across. Creases a fold turns together, end to end along a straight line, share the
+    widest band among them. They do so where they run on along the folded paper, and
+    where they fold back over each other both wrapping layers, joined at their end.
+    """
+    wraps = _wraps(folds, last)
+    joined = {edge: edge for edge in last.creases}
+
+    def root(edge: Edge) -> Edge:
+        while joined[edge] != edge:
+            edge = joined[edge]
+        return edge
+
+    for before, after in folds:
+        for first, second, onward in _lined(before, after, last):
+            if onward or (first in wraps and second in wraps):
+                joined[root(max(first, second))] = root(min(first, second))
+    widest: dict[Edge, float] = {}
+    for edge, layers in sorted(wraps.items()):
+        width = 0.5 * math.pi * (layers + 1) * layer
+        widest[root(edge)] = max(widest.get(root(edge), 0.0), width)
+    return {edge: widest[root(edge)] for edge in last.creases if root(edge) in widest}
+
+
+def _lined(before: State, after: State, last: State) -> list[tuple[Edge, Edge, bool]]:
+    """The creases a fold turns that meet end to end along a straight line.
+
+    Each pair comes with whether it runs on along the folded paper; a pair that does not
+    folds back over itself.
+    """
+    parents, earlier = after.parents(last), before.parents(last)
+    turned: dict[int, list[Edge]] = {}
+    for edge, (f, g) in sorted(last.creases.items()):
+        sense = "F" if parents[f] == parents[g] else after.sense(parents[f], parents[g])
+        was = "F" if earlier[f] == earlier[g] else before.sense(earlier[f], earlier[g])
+        if sense not in ("F", was):
+            for vertex in edge:
+                turned.setdefault(vertex, []).append(edge)
+    pairs = []
+    vertices = last.vertices
+    for vertex, edges in sorted(turned.items()):
+        for first, second in itertools.combinations(edges, 2):
+            (a,) = set(first) - {vertex}
+            (b,) = set(second) - {vertex}
+            out, back = vertices[a] - vertices[vertex], vertices[b] - vertices[vertex]
+            if out.cross(back).sign() != 0 or out.dot(back).sign() >= 0:
+                continue
+            face = after.faces[parents[last.creases[first][0]]].place
+            other = after.faces[parents[last.creases[second][0]]].place
+            middle = face(vertices[vertex])
+            onward = (face(vertices[a]) - middle).dot(other(vertices[b]) - middle)
+            pairs.append((first, second, onward.sign() < 0))
+    return pairs
+
+
 def _wraps(folds: Sequence[tuple[State, State]], last: State) -> dict[Edge, int]:
     """The creases of the last pattern that fold round other layers.
 
@@ -770,6 +826,8 @@ class _Layout:
         longest: float,
     ) -> None:
         self.points, self.last, self.widths, self.bands = points, last, widths, bands
+        # The corners of the sharp creases, which keep the cells round them coarse.
+        self.sharp = {v for edge in last.creases if edge not in widths for v in edge}
         self.frames: dict[tuple[Edge, int], _Frame] = {}
         self.stations: dict[Edge, list[float]] = {}
         for edge in widths:
@@ -842,22 +900,39 @@ class _Layout:
             (high, self._end(edge, origin + along * high, stop)),
         ]
 
+    def _runs_on(self, edge: Edge, corner: int) -> bool:
+        """Whether a band runs on straight through one of its crease's ends.
+
+        The band runs on into the next crease along its line, where that crease has the
+        same band and only sharp creases cross there.
+        """
+        vertices = self.last.vertices
+        (a,) = set(edge) - {corner}
+        out = vertices[a] - vertices[corner]
+        onward = False
+        for crease in self.last.creases:
+            if corner not in crease or crease == edge:
+                continue
+            (b,) = set(crease) - {corner}
+            back = vertices[b] - vertices[corner]
+            if out.cross(back).sign() == 0 and out.dot(back).sign() < 0:
+                onward = self.widths.get(crease) == self.widths[edge]
+            elif crease in self.widths:
+                return False
+        return onward
+
     def _end(self, edge: Edge, point: NDArray[np.float64], stop: _Stop) -> int:
         """The point a band's line ends at, on a face's side.
 
-        A band's lines meet at its crease's end where they end on a sharp crease, whose
-        cells must stay coarse for it to fold sharply. A line ends on another band's
-        crease where it meets it, and crosses that band.
+        A band's lines meet at its crease's end where a sharp crease meets it too: a
+        sharp crease folds flat only with no points close beside it. The band runs on
+        through a sharp crease that alone crosses it, since its lines then put points
+        only on that crease. Elsewhere a line ends on the side it meets, and crosses the
+        band of a crease there.
         """
-        if stop is not None:
-            side = tuple(sorted(stop))
-            shared = stop & set(edge)
-            if (
-                side in self.last.creases
-                and side not in self.widths
-                and len(shared) == 1
-            ):
-                (corner,) = shared
+        if stop is not None and len(shared := stop & set(edge)) == 1:
+            (corner,) = shared
+            if corner in self.sharp and not self._runs_on(edge, corner):
                 return corner
         # The line's end splits the side as it joins the mesh, after the refinement.
         return self.points.add(point)
