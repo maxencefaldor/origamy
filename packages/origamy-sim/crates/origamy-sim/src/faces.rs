@@ -203,7 +203,9 @@ impl Faces {
         let mut triangles = Vec::new();
         let mut owners = Vec::new();
         for face in cdt.fixed_inner_faces() {
-            if let Some(owner) = labels[face.index()] {
+            // A point moved onto the paper's outline can leave a sliver beside the outline's
+            // edge, under a nanometer high, which holds no paper.
+            if let (Some(owner), false) = (labels[face.index()], sliver(&cdt, face)) {
                 let corners = cdt.face(face).vertices().map(|v| v.fix().index());
                 for &c in &corners {
                     used[c] = true;
@@ -239,6 +241,17 @@ impl Faces {
                 .collect(),
         })
     }
+}
+
+/// Whether a triangle of the triangulation is under [`ON_EDGE`] high.
+fn sliver(cdt: &Cdt, face: spade::handles::FixedFaceHandle<spade::handles::InnerTag>) -> bool {
+    let [a, b, c] = cdt.face(face).positions();
+    let area = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs();
+    let longest = [(a, b), (b, c), (c, a)]
+        .iter()
+        .map(|(p, q)| (q.x - p.x).hypot(q.y - p.y))
+        .fold(0.0, f64::max);
+    area < ON_EDGE * longest
 }
 
 /// The constrained Delaunay triangulation of the faces' edges, and the handle of each point a
@@ -323,17 +336,21 @@ fn insert_rest(
             continue;
         }
         let [x, y] = points[point];
-        let position = Point2::new(x, y);
-        let edge = edge_beside(cdt, position);
-        if let Some(edge) = edge {
+        let mut position = Point2::new(x, y);
+        // A point beside an edge moves onto it, and the edge's ends are kept: inserting the
+        // point may flip edges and change their handles.
+        let beside = edge_beside(cdt, position).map(|(edge, onto)| {
+            position = onto;
+            let ends = cdt.undirected_edge(edge).vertices().map(|v| v.fix());
             cdt.remove_constraint_edge(edge);
-        }
+            ends
+        });
         let handle = cdt
             .insert(position)
             .map_err(|_| FacesError::NotFinite { point })?;
-        if let Some(edge) = edge {
+        if let Some(ends) = beside {
             // The halves lie within a nanometer of the edge, so they cross no other edge.
-            for end in cdt.undirected_edge(edge).vertices().map(|v| v.fix()) {
+            for end in ends {
                 cdt.add_constraint(end, handle);
             }
         }
@@ -349,10 +366,14 @@ fn insert_rest(
     Ok((all, points_of))
 }
 
-/// The face's edge a point lies on but off its exact line, within [`ON_EDGE`], if any.
+/// The face's edge a point lies on but off its exact line, within [`ON_EDGE`], if any, and the
+/// point moved onto the edge.
 ///
 /// A point exactly on an edge splits it as it joins, so it needs no edge.
-fn edge_beside(cdt: &Cdt, position: Point2<f64>) -> Option<FixedUndirectedEdgeHandle> {
+fn edge_beside(
+    cdt: &Cdt,
+    position: Point2<f64>,
+) -> Option<(FixedUndirectedEdgeHandle, Point2<f64>)> {
     let edges: Vec<_> = match cdt.locate(position) {
         PositionInTriangulation::OnFace(face) => cdt
             .face(face)
@@ -368,14 +389,14 @@ fn edge_beside(cdt: &Cdt, position: Point2<f64>) -> Option<FixedUndirectedEdgeHa
     edges
         .into_iter()
         .filter(|e| e.is_constraint_edge())
-        .find(|e| {
+        .find_map(|e| {
             let [a, b] = e.positions();
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             let share = (((position.x - a.x) * dx + (position.y - a.y) * dy) / (dx * dx + dy * dy))
                 .clamp(0.0, 1.0);
-            (position.x - a.x - share * dx).hypot(position.y - a.y - share * dy) < ON_EDGE
+            let onto = Point2::new(a.x + share * dx, a.y + share * dy);
+            ((position.x - onto.x).hypot(position.y - onto.y) < ON_EDGE).then_some((e.fix(), onto))
         })
-        .map(|e| e.fix())
 }
 
 /// Joins a line from `from` to `to` to the triangulation, as a chain of constraint edges no
@@ -682,6 +703,16 @@ mod tests {
             })
             .sum();
         assert!((area - 2.0).abs() < 1e-9, "the triangles cover {area}");
+        // No sliver lies along the outline where a point moved onto it.
+        for t in triangles {
+            let [a, b, c] = t.map(|v| meshed.mesh.rest()[v as usize]);
+            let doubled = ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs();
+            let longest = [(a, b), (b, c), (c, a)]
+                .iter()
+                .map(|(p, q)| (q[0] - p[0]).hypot(q[1] - p[1]))
+                .fold(0.0, f64::max);
+            assert!(doubled > ON_EDGE * longest, "triangle {t:?} is a sliver");
+        }
     }
 
     #[test]
