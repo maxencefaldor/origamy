@@ -53,10 +53,11 @@ uv run origamy build models/triangle.py
 ```
 
 The build runs the script in a process of its own, folds the paper one action at a time, and draws every step.
-The report counts the steps the paper took and lists the files the build wrote:
+The report counts the steps the paper took, gives the most layers that lie at one point, and lists the files the build wrote:
 
 ```text
 triangle.py: 2 steps folded
+4 layers at most, at (1/6, 1/2)
 wrote models/triangle.fold, models/triangle.png, models/triangle.steps.png, models/triangle.html
 ```
 

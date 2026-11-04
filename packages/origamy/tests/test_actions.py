@@ -1,4 +1,5 @@
 # Copyright 2026 Maxence Faldor
+from fractions import Fraction
 from itertools import combinations
 
 import pytest
@@ -15,7 +16,8 @@ from origamy.actions import (
     turn_over,
     unfold,
 )
-from origamy.geometry import Line, Point, area, intersection, overlaps
+from origamy.field import Number
+from origamy.geometry import Line, Point, area, bounds, intersection, overlaps
 from origamy.layers import Problem
 from origamy.rules import RefusalError
 from origamy.state import State
@@ -179,6 +181,30 @@ def test_every_fold_leaves_a_valid_state(sequence: list[Fold]) -> None:
         assert all(area(c).sign() > 0 for c in common)
 
 
+@settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(st.lists(folds(), min_size=1, max_size=4))
+def test_the_thickest_stack_has_the_most_layers_at_any_point(
+    sequence: list[Fold],
+) -> None:
+    state = SHEET
+    for line, flap, layers, sense in sequence:
+        try:
+            state = fold(state, line, flap, layers, sense).state
+        except RefusalError:
+            continue
+    most, where = state.thickest
+    assert len(stack_at(state, where)) == most
+    # No point of a grid over the folded paper lies under more layers.
+    left, bottom, right, top = bounds(p for polygon in state.folded for p in polygon)
+    shares = [Number.of(Fraction(2 * k + 1, 40)) for k in range(20)]
+    grid = [
+        Point(left + (right - left) * a, bottom + (top - bottom) * b)
+        for a in shares
+        for b in shares
+    ]
+    assert max(len(stack_at(state, point)) for point in grid) <= most
+
+
 def precreased(*lines: Line) -> State:
     """The square, precreased along lines through its center."""
     state = SHEET
@@ -215,6 +241,7 @@ def test_a_collapse_folds_the_preliminary_base() -> None:
     assert len(faces_at(folded, "7/8", "5/8")) == 4
     assert {folded.assignment(edge) for edge in changes} == {"V", "M"}
     assert_valid(folded)
+    assert folded.thickest[0] == 4
 
 
 def test_a_collapse_unfolds_too() -> None:

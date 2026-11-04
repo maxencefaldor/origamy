@@ -49,6 +49,7 @@ Build it with `uv run origamy build square.py`:
 
 ```text
 square.py: 2 steps folded
+4 layers at most, at (1/4, 1/4)
 wrote square.fold, square.png, square.steps.png, square.html
 ```
 

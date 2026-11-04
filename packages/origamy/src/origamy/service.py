@@ -75,6 +75,13 @@ class BuildReport(_Model):
         default=None, description="The action the paper could not take, if any."
     )
     facts: tuple[Fact, ...] = ()
+    layers: int = Field(
+        default=0,
+        description="The most layers of paper at one point after the last step.",
+    )
+    thickest: str = Field(
+        default="", description="A point where that many layers lie, as (x, y)."
+    )
     failure: Failure | None = None
     files: tuple[str, ...] = ()
 
@@ -111,6 +118,9 @@ class BuildReport(_Model):
             lines.append(f"{head}: {where}{d.message}")
             if d.faces:
                 lines.append(f"  faces: {', '.join(map(str, d.faces))}")
+        if self.thickest:
+            layers = f"{self.layers} layer{'s' if self.layers > 1 else ''}"
+            lines.append(f"{layers} at most, at {self.thickest}")
         if self.files:
             lines.append(f"wrote {', '.join(self.files)}")
         return "\n".join(lines)
@@ -172,6 +182,8 @@ async def build(request: BuildRequest) -> BuildReport:
         if result.refused.refusal:
             refused = Fact.of(step, result.refused, result.refused.refusal)
     with tower(Number.from_data(radicand) for radicand in result.tower):
+        layers, point = result.steps[-1].state.state().thickest
+        thickest = str(point)
         stem = script.with_suffix("")
         fold_file = stem.with_suffix(".fold")
         fold_file.write_text(
@@ -192,6 +204,8 @@ async def build(request: BuildRequest) -> BuildReport:
         steps=len(result.steps) - 1,
         refused=refused,
         facts=facts,
+        layers=layers,
+        thickest=thickest,
         files=tuple(str(path) for path in files),
     )
 

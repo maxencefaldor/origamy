@@ -90,6 +90,7 @@ Queries read the paper and change nothing, so a script can find its next fold fr
 | Query | Returns |
 | --- | --- |
 | `layers(at)` | How many layers lie at a point |
+| `thickest()` | The most layers that lie at one point, and a point where they lie |
 | `where(point)` | Where a point of the unfolded paper lies now, such as a corner |
 | `origin(at, layer=1)` | Where a point of a layer lies on the unfolded paper, the top layer first |
 | `creases(along, at=None, layers=None)` | The creases lying along a line now, as segments of the crease pattern |
@@ -105,6 +106,9 @@ The session below folds a square in half twice:
 >>> paper.valley(Line.through((0, "1/2"), ("1/2", "1/2")), flap=("1/4", "3/4"))
 >>> paper.layers(("1/4", "1/4"))
 4
+>>> layers, point = paper.thickest()
+>>> print(layers, point)
+4 (1/4, 1/4)
 >>> print(paper.where((1, 1)))
 (0, 0)
 >>> print(paper.origin(("1/8", "1/8")))

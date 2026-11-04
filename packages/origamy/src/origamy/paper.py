@@ -376,6 +376,10 @@ class Paper:
         """How many layers of paper lie at a point."""
         return len(actions.stack_at(self.state, Point.of(at)))
 
+    def thickest(self) -> tuple[int, Point]:
+        """The most layers that lie at one point, and a point where they lie."""
+        return self.state.thickest
+
     def origin(self, at: PointLike, layer: int = 1) -> Point:
         """Where a point of a layer lies on the unfolded paper, the top layer first."""
         point = Point.of(at)

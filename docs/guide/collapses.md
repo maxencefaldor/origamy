@@ -86,6 +86,7 @@ Two crossing diagonals, both valleys, put four valleys and no mountain at the ce
 maekawa.py: 2 steps folded, then step 3 refused
 error[mountain-valley-count] step 3, collapse 2 valleys, 0 mountains and 0 flat creases: models/maekawa.py:10 in fold(): 0 mountains and 4 valleys meet at (1/2, 1/2)
   faces: 0, 1, 2, 3
+1 layer at most, at (5/6, 1/2)
 wrote models/maekawa.fold, models/maekawa.png, models/maekawa.steps.png, models/maekawa.html
 ```
 
@@ -135,6 +136,7 @@ A reverse fold of flat paper finds no spine:
 flat_reverse.py: 0 steps folded, then step 1 refused
 error[no-spine] step 1, inside reverse fold along x = 1/2, the paper at (3/4, 1/8): models/flat_reverse.py:6 in fold(): the paper to reverse at (3/4, 1/8) opens into two halves in no way
   faces: 0
+1 layer at most, at (1/2, 1/2)
 wrote models/flat_reverse.fold, models/flat_reverse.png, models/flat_reverse.steps.png, models/flat_reverse.html
 ```
 

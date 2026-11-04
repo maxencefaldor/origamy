@@ -17,9 +17,14 @@ from origamy.geometry import (
     Line,
     Point,
     Polygon,
+    area,
     center,
+    clip,
     covers,
+    crosses,
+    inside,
     overlaps,
+    sides,
 )
 
 type Pair = tuple[int, int]
@@ -101,6 +106,43 @@ class State:
             for g in range(f + 1, len(folded))
             if overlaps(folded[f], folded[g])
         )
+
+    @cached_property
+    def thickest(self) -> tuple[int, Point]:
+        """The most layers of paper at one point once folded, and a point inside them.
+
+        Cutting a face along the sides of every face that overlaps it leaves cells that
+        each of those faces covers whole or misses. A cell's center then counts the
+        layers over the whole cell.
+        """
+        folded = self.folded
+        near: dict[int, set[int]] = defaultdict(set)
+        for f, g in self.overlapping:
+            near[f].add(g)
+            near[g].add(f)
+        most, where = 1, center(folded[0])
+        for f in sorted(range(len(folded)), key=lambda f: -len(near[f])):
+            if len(near[f]) < most:
+                break
+            cells = [folded[f]]
+            for p, q in (side for g in near[f] for side in sides(folded[g])):
+                line = Line.through(p, q)
+                cells = [
+                    part
+                    for cell in cells
+                    for part in (
+                        [clip(cell, line, keep) for keep in (1, -1)]
+                        if crosses(cell, line)
+                        else [cell]
+                    )
+                    if area(part).sign()
+                ]
+            for cell in cells:
+                point = center(cell)
+                count = 1 + sum(inside(folded[g], point) for g in near[f])
+                if count > most:
+                    most, where = count, point
+        return most, where
 
     def is_above(self, upper: int, lower: int) -> bool:
         """Whether face ``upper`` lies above face ``lower``, where they overlap."""

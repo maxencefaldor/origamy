@@ -95,6 +95,7 @@ def test_build_reports_steps_and_writes_a_fold_file(tmp_path: Path) -> None:
     assert report.ok, report.text
     assert report.steps == 9
     assert report.text.startswith("cup.py: 9 steps folded")
+    assert "8 layers at most, at (" in report.text
     document = json.loads((tmp_path / "cup.fold").read_text(encoding="utf-8"))
     assert document["file_spec"] == 1.2
     assert len(document["file_frames"]) == 10
