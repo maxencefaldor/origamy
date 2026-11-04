@@ -711,6 +711,11 @@ Phase 6 adds these findings so far:
   Each crease now measures its turn from its rest angle onto the circle, so the turn stays continuous past a half turn.
 - **A trust radius on failure.**
   A Newton update that no fraction lowers now shrinks the trust radius and tries again, down to the tolerance.
+- **Pinched bands at pleat joints.**
+  Four pleated strips folded in half still stop near 140° at kami's thickness.
+  Each strip's band pinches to its crease's end where it meets a pleat crease.
+  All four layers must then fold sharply at one point there, and contact holds the fold open.
+  Bands that keep their width up to the pleat crease jam earlier, as coarse cells beside a sharp crease require.
 - **Stalled updates.**
   Wrinkled paper keeps a thousandth of its stiffness, so a residual at rounding moves it tens of nanometers.
   Newton updates there hovered between 20 and 300 nm while each would lower the energy by under a billionth.
