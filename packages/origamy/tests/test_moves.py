@@ -66,8 +66,11 @@ def pleats_in_half() -> Paper:
     return paper
 
 
-FULL, THIN = 1.0, 0.05
-"""The shares of kami's thickness that contact keeps: all of it, and a twentieth."""
+FULL, THIN, NONE = 1.0, 0.05, 0.0
+"""The shares of kami's thickness that contact keeps: all of it, a twentieth, and none.
+
+With none, paper passes through paper, as a sheet without thickness does.
+"""
 
 MOVES: dict[str, Callable[[], Paper]] = {
     "rolled strip": rolled_strip,
@@ -91,6 +94,7 @@ STOPS: dict[tuple[str, float], str | None] = {
     ("top corner", THIN): None,
     ("pleats in half", FULL): None,
     ("pleats in half", THIN): "the last fold stops short of its state",
+    **{(name, NONE): None for name in MOVES},
 }
 """Each move at each share of the thickness, with what stops it if the simulator cannot
 fold it yet."""
@@ -110,7 +114,7 @@ fold it yet."""
     ],
 )
 def test_a_move_folds_to_its_states(name: str, share: float) -> None:
-    contact = Contact(thickness_share=share)
+    contact = Contact(thickness_share=share) if share else Contact(layers=False)
     physics = Physics(
         settings=Settings(time_step=math.inf, table=Table(), contact=contact)
     )

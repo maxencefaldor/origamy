@@ -1935,9 +1935,16 @@ impl Simulation {
     }
 
     /// The pairs that may touch while the vertices move from `start` to `end`.
+    ///
+    /// Without contact between layers, only pairs with a body's point may touch.
     fn candidates(&self, start: &[Point], end: &[Point]) -> Vec<Pair> {
         let gap = self.settings.contact.gap;
-        contact::candidates(&self.primitives, &self.trees, start, end, gap)
+        let mut pairs = contact::candidates(&self.primitives, &self.trees, start, end, gap);
+        if !self.settings.contact.layers {
+            let paper = self.primitives.sheet.len();
+            pairs.retain(|pair| pair.vertices.iter().any(|&v| v as usize >= paper));
+        }
+        pairs
     }
 
     /// The largest safe fraction of a motion from `x`, at most 1, and the pairs that may touch.

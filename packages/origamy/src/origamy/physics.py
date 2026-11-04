@@ -13,12 +13,19 @@ as turning it over does, moves the simulated paper the same way.
 
 Paper on a table folds up from it, never down into it. A step that turns paper down
 folds with the sheet turned over, as a folder makes a mountain fold, then turns it back.
+A step that turns paper both up and down folds with the model lifted off the table,
+then lays it back down.
 
 A crease that wraps other layers bends round them over a crease band, half a circle
 round the layers inside. Spans turn the paper beyond one side of the band against the
 paper beyond the other, and the band bends as the layers inside let it. Creases a fold
 turns together along one straight line share one band, and bands cross where their
 creases cross. Hands hold the paper beside a band, never the band itself.
+
+Without contact between layers, paper passes through paper as a sheet without
+thickness does. Creases then fold sharp, with no bands, and a hand holds all the paper
+a step leaves in place, since it rests on no other layer. The kernel alone orders the
+layers, so no pair stacks the wrong way round.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
 measure gives how far each face's corners lie from their places in that state, and
@@ -177,7 +184,10 @@ class Stage:
     """The farthest a face's corner lies from its place in the state, in meters."""
     misordered: tuple[Pair, ...]
     """The pairs of the state's stacking, upper face first, that the simulation stacks
-    the other way round."""
+    the other way round.
+
+    Without contact between layers, paper keeps no order of its own, so none misorder.
+    """
 
 
 @dataclass(frozen=True)
@@ -198,9 +208,8 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     """Fold a build's steps on the simulator, from the flat sheet of its first step.
 
     Raises:
-        PhysicsError: A step shapes the paper in space, or turns paper both up from
-            the table and down into it. A step that moves all the paper must move it
-            rigidly.
+        PhysicsError: A step shapes the paper in space, or moves all the paper but
+            not rigidly.
     """
     physics = physics or Physics()
     left, bottom, right, top = bounds(steps[0].state.vertices)
@@ -234,7 +243,8 @@ class _Folder:
         self.last, self.scale, self.physics = last, scale, physics
         contact = physics.settings.contact
         layer = physics.material.thickness * contact.thickness_share + contact.gap
-        widths = _widths(folds, last, layer)
+        # Without contact between layers, no layers lie inside a crease to bend round.
+        widths = _widths(folds, last, layer) if contact.layers else {}
         self.creep = max(widths.values(), default=0.0)
         self.mesh, self.faces, lines = _mesh(last, scale, widths, physics)
         sheet = Sheet(self.mesh, physics.material)
@@ -246,12 +256,12 @@ class _Folder:
         for band, _ in self.bands:
             self.banded[np.array(band, dtype=np.int64).ravel()] = True
         table = physics.settings.table
-        lying = 0.0 if table is None else table.height + 0.5 * layer
+        self.lying = 0.0 if table is None else table.height + 0.5 * layer
         # Paper below half a layer over the lying sheet touches the table.
-        self.ground = -math.inf if table is None else lying + 0.5 * layer
+        self.ground = -math.inf if table is None else self.lying + 0.5 * layer
         rest = self.mesh.rest
         self.simulation.set_positions(
-            0, np.column_stack([rest, np.full(len(rest), lying)])
+            0, np.column_stack([rest, np.full(len(rest), self.lying)])
         )
         self.edges = np.array(drives.edges, dtype=np.int64).reshape(-1, 2)
         self.spans = np.array(spans, dtype=np.int64)
@@ -318,7 +328,7 @@ class _Folder:
             frames, converged, iterations = (sheet.positions(0),), True, 0
         else:
             frames, converged, iterations = self._drive(
-                step, before, after, parents, held[parents]
+                before, after, parents, held[parents]
             )
         offset, misordered = self._measure(after, parents, frames[-1])
         return Stage(step, after, frames, converged, iterations, offset, misordered)
@@ -346,7 +356,6 @@ class _Folder:
 
     def _drive(
         self,
-        step: int,
         before: State,
         after: State,
         parents: NDArray[np.int64],
@@ -372,15 +381,15 @@ class _Folder:
         moving = np.flatnonzero(~staying)
         sheet.set_forces(0, moving, -self.weights[moving])
         frames: list[NDArray[np.float64]] = []
-        mirror = None
-        if self._turned_down(step, made, goals, kept):
-            mirror = self._turn_over()
+        sides = self._sides(made, goals, kept)
+        mirror = self._turn_over() if sides == {-1} else None
+        self._hold(staying)
+        # Paper that turns both up and down needs room below, so the hands lift the
+        # model off the table by as far as paper reaches.
+        lift = self.physics.size if len(sides) > 1 else 0.0
+        self._raise(lift)
+        if mirror is not None or lift:
             frames.append(sheet.positions(0))
-        # A hand holds down the paper that stays where it lies on the table, beside the
-        # bands, which bend as they must.
-        staying &= ~self.banded
-        held = staying & (sheet.positions(0)[:, 2] < self.ground)
-        sheet.hold(0, np.flatnonzero(held if held.any() else staying))
         converged, iterations = True, 0
         for angles in self._plan(before, after, pairs[made], goals):
             for drive, angle in zip(made.tolist(), angles.tolist(), strict=True):
@@ -392,6 +401,11 @@ class _Folder:
         self.angles[made] = goals
         if mirror is not None:
             self._turn_over(mirror[0])
+            frames.append(sheet.positions(0))
+        if lift:
+            # The hands lower the model until it touches the table again.
+            positions = sheet.positions(0)
+            self._raise(-min(lift, positions[:, 2].min() - self.lying))
             frames.append(sheet.positions(0))
         # The hands let go, and the paper settles under its weight.
         sheet.set_forces(0, moving, np.zeros((len(moving), 3)))
@@ -436,21 +450,33 @@ class _Folder:
         closed = math.pi - self.physics.margin
         return {"V": closed, "M": -closed, "F": 0.0}[state.sense(f, g)]
 
-    def _turned_down(
+    def _hold(self, staying: NDArray[np.bool_]) -> None:
+        """Hold down the vertices ``staying`` where they lie on the table.
+
+        A hand holds the paper beside the bands, which bend as they must. Paper that
+        passes through paper rests on none, so the hand then holds all that stays.
+        """
+        staying = staying & ~self.banded
+        held = staying & (self.simulation.positions(0)[:, 2] < self.ground)
+        if not held.any() or not self.physics.settings.contact.layers:
+            held = staying
+        self.simulation.hold(0, np.flatnonzero(held))
+
+    def _sides(
         self,
-        step: int,
         made: NDArray[np.int64],
         goals: NDArray[np.float64],
         kept: NDArray[np.bool_],
-    ) -> bool:
-        """Whether the creases turn paper down from the faces ``kept`` still.
+    ) -> set[int]:
+        """The sides of the table the creases turn paper to from the faces ``kept``.
 
-        A crease's angle is positive toward the paper's front. Paper turning about a
-        crease from a kept face sweeps the side of the face its angles share. The front
-        of the kept face points up or down, so that side lies above or below the table.
+        A side is 1 above the kept paper and -1 below it. A crease's angle is positive
+        toward the paper's front. Paper turning about a crease from a kept face sweeps
+        the side of the face its angles share. The front of the kept face points up or
+        down, so that side lies above or below. Without a table, no side matters.
         """
         if self.physics.settings.table is None:
-            return False
+            return set()
         positions = self.simulation.positions(0)
         sides = set[int]()
         for i, goal in zip(made.tolist(), goals.tolist(), strict=True):
@@ -461,10 +487,17 @@ class _Folder:
             up = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
             sides.add(int(np.sign(up * (goal + self.angles[i]))))
         sides.discard(0)
-        if len(sides) > 1:
-            msg = f"step {step} turns paper both up from the table and down into it"
-            raise PhysicsError(msg)
-        return sides == {-1}
+        return sides
+
+    def _raise(self, height: float) -> None:
+        """Raise the paper and what holds it by a height, lowering it if negative."""
+        sheet = self.simulation
+        held = sheet.held(0)
+        sheet.hold(0, np.arange(len(held)), held=False)
+        positions = sheet.positions(0)
+        positions[:, 2] += height
+        sheet.set_positions(0, positions)
+        sheet.hold(0, np.flatnonzero(held))
 
     def _turn_over(self, middle: float | None = None) -> tuple[float, float]:
         """Turn the paper over from left to right, about a line across the table.
@@ -505,7 +538,8 @@ class _Folder:
         misordered = tuple(
             (upper, lower)
             for upper, lower in sorted(state.above)
-            if not self._stacked(state, parents, positions, upper, lower)
+            if self.physics.settings.contact.layers
+            and not self._stacked(state, parents, positions, upper, lower)
         )
         return offset, misordered
 

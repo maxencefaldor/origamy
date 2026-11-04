@@ -134,6 +134,24 @@ def test_a_crease_bends_round_the_layer_it_wraps() -> None:
         assert np.isclose(folding.mesh.rest[:, 1], offset, atol=1e-9).sum() >= 2
 
 
+def test_without_contact_between_layers_creases_fold_sharp_through_the_layers() -> None:
+    # The strip folds up twice, as in the band test, on paper without thickness.
+    paper = Paper.square()
+    paper.valley(Line.through((0, "1/8"), (1, "1/8")), flap=("1/2", "1/16"))
+    paper.valley(Line.through((0, "1/4"), (1, "1/4")), flap=("1/2", "3/16"))
+    contact = PHYSICS.settings.contact.model_copy(update={"layers": False})
+    settings = PHYSICS.settings.model_copy(update={"contact": contact})
+    physics = Physics(settings=settings)
+    folding = simulate(paper.steps, physics)
+    assert_folds_as_its_states(folding)
+    # No crease bends round a layer, so no corner creeps back.
+    assert folding.creep == 0
+    crease = physics.size / 4
+    assert np.isclose(folding.mesh.rest[:, 1], crease, atol=1e-9).sum() >= 2
+    beside = np.abs(folding.mesh.rest[:, 1] - crease)
+    assert not ((beside > 1e-9) & (beside < 1e-3)).any()
+
+
 def test_bands_cross_where_their_creases_cross() -> None:
     # Both middle lines of the square cross at its center, each with a band.
     paper = Paper.square()
@@ -257,15 +275,21 @@ def test_creases_a_fold_turns_in_one_line_share_one_band() -> None:
     assert on[0.0, 0.125] not in widths
 
 
-def test_paper_turned_both_up_and_down_from_held_paper_is_refused() -> None:
+def test_paper_turned_both_up_and_down_folds_lifted_off_the_table() -> None:
     # The middle strip stays; the left strip folds up over it and the right one under.
     paper = Paper.square()
     third, two_thirds = (Line.through((x, 0), (x, 1)) for x in ("1/3", "2/3"))
     paper.precrease(third, flap=("1/6", "1/2"))
     paper.precrease(two_thirds, flap=("5/6", "1/2"))
     paper.collapse(valleys=[third], mountains=[two_thirds], fixed=("1/2", "1/2"))
-    with pytest.raises(PhysicsError, match="step 3 turns paper both up"):
-        simulate(paper.steps)
+    folding = simulate(paper.steps)
+    assert_folds_as_its_states(folding)
+    # The hands lift the model by the paper's size, then lay it back on the table.
+    stage = folding.stages[-1]
+    assert stage.frames[0][:, 2].min() > LYING + PHYSICS.size - 1e-6
+    heights = stage.frames[-1][:, 2]
+    assert heights.min() < LYING + PHYSICS.settings.contact.gap
+    assert heights.max() < LYING + 3 * LAYER + 1e-3
 
 
 def test_paper_shaped_in_space_is_refused() -> None:

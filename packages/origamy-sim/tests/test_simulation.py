@@ -344,6 +344,25 @@ def test_stacked_sheets_land_on_the_table_a_thickness_apart() -> None:
     assert reports[-1].energy.contact > 0
 
 
+def test_without_contact_between_layers_paper_passes_through_paper() -> None:
+    # Two sheets fall onto a table, the upper one starting below the lower one's top.
+    mesh = Mesh.grid(4, 4, 0.02, 0.02)
+    through = Settings(table=Table(height=0.0), contact=Contact(layers=False))
+    simulation = Simulation([Sheet(mesh), Sheet(mesh)], through)
+    for sheet, height in enumerate((1e-3, 1e-3 + 10e-6)):
+        lifted = simulation.positions(sheet)
+        lifted[:, 2] = height
+        simulation.set_positions(sheet, lifted)
+    reports = [simulation.step() for _ in range(30)]
+    assert all(r.converged for r in reports)
+    # Both rest on the table as one, with no contact between them.
+    h, gap = Material().thickness, Contact().gap
+    for sheet in (0, 1):
+        heights = simulation.positions(sheet)[:, 2]
+        assert ((heights > h / 2) & (heights < h / 2 + gap)).all()
+    assert reports[-1].energy.contact > 0
+
+
 def test_contact_keeps_its_share_of_the_paper_thickness() -> None:
     # Two sheets of kami, stacked 40 µm apart: closer than their 70 µm thickness.
     lower, upper = Sheet(SQUARE), Sheet(SQUARE)

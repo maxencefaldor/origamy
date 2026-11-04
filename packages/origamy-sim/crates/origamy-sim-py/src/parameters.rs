@@ -195,6 +195,7 @@ impl Parameters for Contact {
             friction: field(model, "friction")?,
             stick: field(model, "stick")?,
             thickness_share: field(model, "thickness_share")?,
+            layers: field(model, "layers")?,
         })
     }
 
@@ -204,7 +205,8 @@ impl Parameters for Contact {
         fields.set_item("parallel", self.parallel)?;
         fields.set_item("friction", self.friction)?;
         fields.set_item("stick", self.stick)?;
-        fields.set_item("thickness_share", self.thickness_share)
+        fields.set_item("thickness_share", self.thickness_share)?;
+        fields.set_item("layers", self.layers)
     }
 }
 

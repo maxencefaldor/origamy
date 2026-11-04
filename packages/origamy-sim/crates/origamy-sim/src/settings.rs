@@ -87,6 +87,11 @@ pub struct Contact {
     ///
     /// Studies of folding as paper thins toward a mathematical sheet set it below 1.
     pub thickness_share: f64,
+    /// Whether layers of paper push each other apart.
+    ///
+    /// Without it, paper passes through paper, as a sheet without thickness does, and contact
+    /// still keeps paper above the table and off bodies.
+    pub layers: bool,
 }
 
 /// The air paper moves through, which resists paper moving across its surface.
@@ -195,6 +200,7 @@ impl Default for Contact {
             friction: 0.4,
             stick: 1e-7,
             thickness_share: 1.0,
+            layers: true,
         }
     }
 }

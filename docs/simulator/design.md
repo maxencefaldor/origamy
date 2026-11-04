@@ -258,6 +258,12 @@ Every model starts as the flat sheet, and each step of its fold sequence moves t
 Each fold wraps the layers inside it as real paper does, so the stack's thickness comes from the folding itself.
 At every step, the layer order wherever paper overlaps must match the order origamy's kernel proves.
 
+**Paper without thickness.**
+Contact can let paper pass through paper, as a mathematical sheet does, while the table and bodies still push it away.
+Creases then fold sharp, with no bands, and origamy's kernel alone proves the layer order.
+Every example then folds end to end in seconds.
+Real thickness stays a choice for the models it can fold.
+
 **Faster contact.**
 Offset geometric contact bounds how far each vertex may move without any crossing, with no collision detection over the update.
 The simulator evaluates it as a faster filter in phase 7, and keeps the guarantee whichever filter it uses.
@@ -403,7 +409,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Strain limit | The tension cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
-| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps |
+| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps, and whether layers push each other apart |
 | Bodies and grips | Shapes, radii, friction, the stiffness of the hand, paths, and the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
 | Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, the stall share of the energy, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
@@ -757,6 +763,20 @@ Phase 6 adds these findings so far:
 - **Which way a face turns.**
   A face's first triangle could lie in a crease band, curled round, so it read the face's side wrongly.
   Folding a square in half a third time then turned paper both up and down; each face's largest triangle reads its side instead.
+- **Paper without thickness.**
+  The bird base still stopped at its first petal fold at kami's thickness, and the crane further on.
+  With contact between layers off, the bird base, crane, flapping bird and every other example fold end to end.
+  Every step settles, each within 0.01 mm of its state, in seconds.
+  Without layers to rest on, a hand holds all the paper a step keeps in place.
+- **Paths that jump.**
+  The rigid path of the petal fold took, at each share, the closed loops nearest even turns of its creases.
+  Partway, those nearest loops jumped to another path, and creases turned by up to 2.4 radians between increments.
+  The petal then swung down through the paper below.
+  The path now walks in turns of 2°, and follows its own way on where the nearest loops jump, until it meets them again.
+  A crease folded flat one way then meets its state folded flat the other, the same place a whole turn round.
+- **Folds both up and down.**
+  A petal fold turns paper up from the held paper and tucks other paper below it.
+  The table leaves no room below, so the hands lift the model by the paper's size, fold it, and lay it back down.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

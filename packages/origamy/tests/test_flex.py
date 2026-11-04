@@ -1,4 +1,6 @@
 # Copyright 2026 Maxence Faldor
+import itertools
+import math
 import runpy
 from pathlib import Path
 
@@ -10,7 +12,7 @@ from origamy import Line, Paper, Point
 from origamy.actions import stack_at
 from origamy.flex import path
 from origamy.paper import RefusedError
-from origamy.space import STILL, Form, fold_angles
+from origamy.space import STILL, Form, crease_angles, fold_angles, placements
 from origamy.state import State
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
@@ -140,3 +142,21 @@ def test_a_collapse_follows_a_whole_path_from_flat_paper() -> None:
         for v in face.corners
     ]
     assert heights == pytest.approx([0] * len(heights), abs=1e-9)
+
+
+def test_a_petal_fold_follows_one_continuous_path() -> None:
+    # Partway through the bird base's first petal fold, the closed loops nearest even
+    # turns of its creases lie on another path than the paper's.
+    paper = example("bird_base")
+    before, after = paper.steps[8].state, paper.steps[9].state
+    forms = path(before, after, [k / 60 for k in range(61)])
+    assert forms is not None
+    for form in forms:
+        assert_form_whole(after, form)
+    angles = [crease_angles(after, placements(after, form)) for form in forms]
+    for first, second in itertools.pairwise(angles):
+        turns = [math.remainder(second[e] - first[e], math.tau) for e in after.creases]
+        assert max(map(abs, turns)) < math.radians(10)
+    # The path ends where the faces lie after the step.
+    for motion in forms[-1].motions:
+        assert motion == pytest.approx(STILL, abs=1e-9)

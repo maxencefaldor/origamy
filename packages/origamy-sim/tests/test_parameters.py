@@ -163,17 +163,20 @@ def settings_data() -> st.SearchStrategy[dict[str, Any]]:
                 }
             ),
             "contact": st.fixed_dictionaries(
-                dict.fromkeys(
-                    (
-                        "gap",
-                        "stiffness",
-                        "parallel",
-                        "friction",
-                        "stick",
-                        "thickness_share",
+                {
+                    **dict.fromkeys(
+                        (
+                            "gap",
+                            "stiffness",
+                            "parallel",
+                            "friction",
+                            "stick",
+                            "thickness_share",
+                        ),
+                        NUMBERS,
                     ),
-                    NUMBERS,
-                )
+                    "layers": st.booleans(),
+                }
             ),
             "table": st.none()
             | st.fixed_dictionaries(dict.fromkeys(("height", "friction"), NUMBERS)),

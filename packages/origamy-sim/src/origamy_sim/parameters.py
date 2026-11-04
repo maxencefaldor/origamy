@@ -352,6 +352,13 @@ class Contact(_Parameters):
     mathematical sheet set it below 1.
     """
 
+    layers: bool = True
+    """Whether layers of paper push each other apart.
+
+    Without it, paper passes through paper, as a sheet without thickness does, and
+    contact still keeps paper above the table and off bodies.
+    """
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""

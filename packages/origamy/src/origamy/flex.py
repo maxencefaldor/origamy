@@ -8,11 +8,13 @@ undo one another. A solver follows the creases from their angles to the new ones
 small steps, so the paper moves along one continuous path.
 """
 
+from bisect import bisect_left
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from math import atan2, ceil, cos, pi, radians, sin, sqrt
-from typing import Final
+from itertools import accumulate, pairwise
+from math import atan2, ceil, cos, pi, radians, remainder, sin, sqrt, tau
+from typing import Final, cast
 
 import numpy as np
 
@@ -46,6 +48,8 @@ _FRAMES: Final = 8
 """How many parts the forms a flex passes through divide its path into."""
 _TOUCH: Final = 1e-7
 """How far faces may reach through each other and only touch, as floats tell."""
+_JUMP: Final = radians(8)
+"""The most a crease turns between two small parts of a path that stays continuous."""
 _RANK: Final = 1e-9
 """How small a share of the largest singular value counts as none in a correction.
 
@@ -242,12 +246,16 @@ def path(
 ) -> tuple[Form, ...] | None:
     """The forms flat paper passes through as a step turns its creases together.
 
-    Each crease turns from its angle before the step to its angle after it, and every
-    loop of creases stays closed, as rigid origami. The creases between faces that keep
-    their places stay as they are, so those faces stay still on the way. The forms are
-    motions from where faces lie after the step, one at each share of the way. Share
-    zero is where they lay before it, and share one where they lie after it. No forms
-    come back when no face keeps its place, or when no rigid motion follows the creases.
+    The creases turn from their angles before the step to their angles after it, and
+    every loop of creases stays closed, as rigid origami. At each small part of the
+    way, the paper takes the closed loops nearest the angles even rates of turning
+    give. Where those jump to another path, the paper follows its own path on until
+    it meets them again, so it moves along one continuous path. The creases between
+    faces that keep their places stay as they are, so those faces stay still on the
+    way. The forms are motions from where faces lie after the step, one at each share
+    of the path's length. Share zero is where they lay before the step, and share one
+    where they lie after it. No forms come back when no face keeps its place, or when
+    no continuous rigid motion reaches the step's end.
     """
     parents = before.parents(after)
     start = [embedding(before.faces[p].place) for p in parents]
@@ -264,16 +272,100 @@ def path(
     # The paper between faces that keep their places stays still on the way.
     kept = {f for f in range(len(end)) if same(start[f], end[f])}
     still = {i for i, e in enumerate(creases) if set(after.creases[e]) <= kept}
+    first = [begin[e] for e in creases]
+    turns = [finish[e] - begin[e] for e in creases]
+    count = max(1, ceil(max(map(abs, turns), default=0.0) / _STEP))
+    nearest: list[list[float] | None] = []
+    for k in range(1, count + 1):
+        angles = [a + t * k / count for a, t in zip(first, turns, strict=True)]
+        nearest.append(angles if _close(loops, angles, still) else None)
+    walk = _walk(loops, first, nearest, still)
+    if walk is None:
+        return None
+    lengths = list(accumulate(_apart(p, q) for p, q in pairwise(walk)))
     forms = []
     for share in shares:
         if share == 0:
             forms.append(_form(after, start))
             continue
-        angles = [begin[e] + (finish[e] - begin[e]) * share for e in creases]
+        angles = _along(walk, lengths, share)
         if not _close(loops, angles, still):
             return None
         forms.append(_form(after, _place(after, creases, angles, root, end[root])))
     return tuple(forms)
+
+
+def _walk(
+    loops: Sequence[_Loop],
+    first: list[float],
+    nearest: Sequence[list[float] | None],
+    held: set[int],
+) -> list[list[float]] | None:
+    """The angles of the closed loops paper passes through, in small turns.
+
+    The walk starts at the first angles and ends at the last of the nearest closed
+    loops. At each turn, the paper takes the next of the nearest closed loops a small
+    turn away. Where none lies that near, it follows its own path on by a small turn,
+    the way it last turned, until it meets them. No walk comes back when the paper
+    cannot follow its path, or meets the nearest closed loops nowhere within twice
+    their way. The creases ``held`` keep their angles.
+    """
+    walk: list[list[float]] = [first]
+    k, followed = 0, 0
+    while k < len(nearest):
+        here = walk[-1]
+        meet = next(
+            (
+                j
+                for j in range(k, len(nearest))
+                if (near := nearest[j]) is not None and _apart(near, here) <= _JUMP
+            ),
+            None,
+        )
+        if meet is not None:
+            walk.append(cast("list[float]", nearest[meet]))
+            k = meet + 1
+            continue
+        followed += 1
+        last = _apart(here, walk[-2]) if len(walk) > 1 else 0.0
+        if not last or followed > 2 * len(nearest):
+            return None
+        ahead: list[float] = [
+            a + remainder(a - b, tau) * _STEP / last
+            for a, b in zip(here, walk[-2], strict=True)
+        ]
+        if not _close(loops, ahead, held) or _apart(ahead, here) > _JUMP:
+            return None
+        walk.append(ahead)
+    return walk
+
+
+def _along(
+    walk: Sequence[list[float]], lengths: Sequence[float], share: float
+) -> list[float]:
+    """The angles a share of the way along a walk, between the angles it passes."""
+    if not lengths or lengths[-1] == 0:
+        return list(walk[-1] if share else walk[0])
+    reach = share * lengths[-1]
+    i = min(bisect_left(lengths, reach), len(lengths) - 1)
+    low = lengths[i - 1] if i else 0.0
+    part = (reach - low) / (lengths[i] - low) if lengths[i] > low else 1.0
+    return [
+        a + remainder(b - a, tau) * part
+        for a, b in zip(walk[i], walk[i + 1], strict=True)
+    ]
+
+
+def _apart(first: Sequence[float], second: Sequence[float]) -> float:
+    """How far apart two sets of angles lie: the most one crease turns between them.
+
+    A crease turned a whole turn further lies where it lay, so a crease folded flat
+    one way lies where it lies folded flat the other way.
+    """
+    return max(
+        (abs(remainder(a - b, tau)) for a, b in zip(first, second, strict=True)),
+        default=0.0,
+    )
 
 
 def _form(state: State, world: Sequence[Motion]) -> Form:
