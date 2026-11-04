@@ -47,7 +47,9 @@ pub(crate) struct Turn {
 ///
 /// Quasi-static steps span no time, so creases yield in them but do not age.
 pub(crate) fn turn(crease: &Crease, length: f64, start: Plastic, angle: f64, elapsed: f64) -> Turn {
-    let trial = angle - start.rest;
+    // Angles live on a circle, so a crease turned just past a half turn is turned just past
+    // its rest near a half turn, not most of a turn back from it.
+    let trial = wrap(angle - start.rest);
     let flow = Flow::of(crease, start.rotation, trial.abs(), elapsed);
     let flowed = flow.creep + flow.yielded;
     // The elastic part of the turn is what flowing leaves. The energy is then the step's
@@ -59,9 +61,20 @@ pub(crate) fn turn(crease: &Crease, length: f64, start: Plastic, angle: f64, ela
         moment: (length * crease.stiffness * elastic).copysign(trial),
         stiffness: length * flow.stiffness,
         state: Plastic {
-            rest: start.rest + flowed.copysign(trial),
+            rest: wrap(start.rest + flowed.copysign(trial)),
             rotation: start.rotation + flowed,
         },
+    }
+}
+
+/// An angle brought onto the half-open turn from −π to π.
+fn wrap(angle: f64) -> f64 {
+    let turns = (angle / std::f64::consts::TAU).round();
+    let wrapped = angle - turns * std::f64::consts::TAU;
+    if wrapped <= -std::f64::consts::PI {
+        wrapped + std::f64::consts::TAU
+    } else {
+        wrapped
     }
 }
 
@@ -192,6 +205,22 @@ mod tests {
         aging_rate: 4.25e-2,
         ..Crease::kami()
     };
+
+    #[test]
+    fn a_crease_turned_past_a_half_turn_stays_beside_its_rest() {
+        let crease = Crease::kami();
+        let start = Plastic {
+            rest: 3.13,
+            rotation: 0.0,
+        };
+        let pi = std::f64::consts::PI;
+        // Just past a half turn, the angle reads as just after minus a half turn.
+        let beyond = turn(&crease, 0.01, start, -pi + 0.002, 0.0);
+        let before = turn(&crease, 0.01, start, pi - 0.002, 0.0);
+        let past = pi + 0.002 - 3.13;
+        assert!((beyond.moment - 0.01 * crease.stiffness * past).abs() < 1e-12);
+        assert!(before.elastic < beyond.elastic && beyond.elastic < 1e-6);
+    }
 
     #[test]
     fn a_crease_rests_at_its_angle() {

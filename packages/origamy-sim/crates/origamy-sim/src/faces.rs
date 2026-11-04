@@ -358,7 +358,7 @@ fn edge_beside(cdt: &Cdt, position: Point2<f64>) -> Option<FixedUndirectedEdgeHa
             .face(face)
             .adjacent_edges()
             .into_iter()
-            .map(|e| e.as_undirected())
+            .map(spade::handles::DirectedEdgeHandle::as_undirected)
             .collect(),
         PositionInTriangulation::OutsideOfConvexHull(edge) => {
             vec![cdt.directed_edge(edge).as_undirected()]

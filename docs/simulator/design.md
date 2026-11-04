@@ -122,8 +122,8 @@ E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_
 
 | Term | Meaning |
 | --- | --- |
-| E_stretch | Hyperelastic membrane energy of each triangle, orthotropic, from E, ν and the fiber direction |
-| E_strain-limit | A smooth barrier on the size of each triangle's strain, growing without bound as the strain nears its cap |
+| E_stretch | Hyperelastic membrane energy of each triangle, orthotropic, from E, ν and the fiber direction, relaxed where the triangle wrinkles |
+| E_strain-limit | A smooth barrier on the size of each triangle's tension, growing without bound as the tension nears its cap |
 | E_bend | Plate bending energy of each triangle, from a discrete curvature built from its edges' dihedral angles |
 | E_crease | Bending energy of crease bands, softer than the paper around them, about a rest curvature |
 | E_yield | The work creases take as they yield over a time step, dissipated or stored by hardening |
@@ -135,8 +135,24 @@ E(x) = E_stretch + E_strain-limit + E_bend + E_crease + E_yield + E_contact + E_
 | E_gravity | The weight of each vertex's share of the sheet |
 
 The real modulus governs small strains, and the direct solver absorbs the stiffness it brings.
-The barrier makes strains past the cap unreachable, whatever the forces.
-The barrier acts on the norm of the Green strain, which bounds every principal strain and stays smooth where principal stretches coincide.
+Paper buckles under the slightest compression into wrinkles finer than any mesh, so compression barely resists it.
+The membrane therefore relaxes where a triangle's stress turns compressive, as tension field theory has it.
+A wrinkled triangle carries tension along its wrinkles alone, and a slack one, compressed every way, carries none.
+Paper alike in every direction relaxes in Pipkin's closed form, with ε₁ ≥ ε₂ the principal strains:
+
+```text
+W = E t / 2 · max(0, ε₁)² + E t / (2 (1 − ν²)) · max(0, ε₂ + ν ε₁)²
+```
+
+The two squares sum to the full energy wherever the triangle is taut.
+The energy therefore stays smooth where the principal strains coincide.
+Other paper relaxes through a search over wrinkle directions, with the envelope's exact derivatives.
+Each triangle keeps a share of the full energy under compression, so no motion costs nothing.
+The kami preset keeps all of it, as uncrumpled paper does, and origamy's folds keep a thousandth.
+A wrinkling strain shifts where wrinkles start, so paper resists small compression in full.
+The default is three millionths, which keeps paper at rest clear of where wrinkles start, so Newton's method converges there.
+The barrier makes tension past the cap unreachable, whatever the forces.
+The barrier acts on the norm of the positive principal strains, which leaves compression to the wrinkles.
 
 The bending energy is the Kirchhoff plate energy, D/2 [(tr K)² − 2(1 − ν) det K] per area, with K a curvature per triangle.
 Each triangle's K comes from the normals at the midpoints of its edges, which tilt by half the dihedral angle there.
@@ -372,8 +388,8 @@ Phase 4 calibrates the crease parameters on published measurements.
 
 | Group | Parameters |
 | --- | --- |
-| Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction |
-| Strain limit | The strain cap, the fraction of it where the barrier starts, the barrier's energy per volume |
+| Sheet | Thickness, mass per area, Young's modulus along and across the grain, shear modulus, Poisson's ratio, grain direction, the share of energy kept under compression, for the sheet and for each triangle, and the wrinkling strain |
+| Strain limit | The tension cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
 | Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps |
@@ -682,6 +698,18 @@ Phase 6 adds these findings so far:
 - **Tipping points.**
   The rolled strip at a twentieth of the thickness folds on the continuous integration machines and stops short on others.
   Threads change nothing, so the last bits of rounding in each machine's math library decide the fold's way.
+- **Joined layers wrinkle.**
+  Folding a square in half twice jammed at kami's thickness, and ten times the strain cap barely helped.
+  A hundredth of the in-plane stiffness let it fold within 2.4 mm, so stiffness in the plane jammed it.
+  The outer layer travels a thickness times π farther round the fold, and the crease joining the layers holds the two together.
+  Real kami takes the difference by buckling the outer layer into small wrinkles.
+  With wrinkles, folding in half twice, rolling a strip and folding the top corner alone all fold at kami's thickness.
+- **Angles on the circle.**
+  A span turned a hair past a half turn read as most of a turn back, and its energy jumped by 80 mJ.
+  The line search then found no descent, and the fold never settled.
+  Each crease now measures its turn from its rest angle onto the circle, so the turn stays continuous past a half turn.
+- **A trust radius on failure.**
+  A Newton update that no fraction lowers now shrinks the trust radius and tries again, down to the tolerance.
 - **Which way a face turns.**
   A face's first triangle could lie in a crease band, curled round, so it read the face's side wrongly.
   Folding a square in half a third time then turned paper both up and down; each face's largest triangle reads its side instead.
@@ -704,7 +732,8 @@ A research track runs alongside, with ambitious targets:
 | Time stepping | Implicit Euler as an incremental potential | Explicit integration, which needs tiny time steps for stiff paper |
 | Reference solver | Global projected Newton with sparse Cholesky | Local block descent, fast on GPUs but slow to converge on stiff paper |
 | Contact | Thickness barrier with conservative collision-checked updates | Penalty springs, which let paper cross under load |
-| Inextensibility | Real modulus plus a strain barrier | Very stiff springs, ill conditioned; hard constraints, brittle |
+| Inextensibility | Real modulus plus a barrier on tension | Very stiff springs, ill conditioned; hard constraints, brittle |
+| Compression | Tension field theory: the membrane relaxes where it wrinkles, keeping a share of the full energy | Full stiffness, which jams layers a crease joins when a fold wraps them; a softer modulus everywhere, which also softens tension |
 | Creases | Plastic bands, reducing to sharp creases | Sharp creases only, with no width at the fold and no springback |
 | Folded states | Folding from the flat sheet, step by step, as paper is folded | Thickening a flat fold into a stack, which cannot wrap a layer that ends at a fold's crease on a coarse mesh |
 | Fold paths | Creases driven along origamy's rigid folding path, where one exists | Creases turning at even rates, which bend faces off any rigid motion |

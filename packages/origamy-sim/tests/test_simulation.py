@@ -136,6 +136,31 @@ def test_a_span_turns_the_paper_beyond_a_band() -> None:
     assert simulation.span_angles(0) == pytest.approx([math.pi / 2], abs=0.02)
 
 
+def test_a_squeezed_sheet_wrinkles_and_keeps_its_share_of_the_energy() -> None:
+    # The square squeezed by 0.3% every way is slack: each triangle keeps its
+    # share of the full energy, the material's or its own, where wrinkles start at once.
+    squeezed = np.column_stack([SQUARE.rest * 0.997, np.zeros(4)])
+    energies = []
+    for share in (1.0, 1e-3):
+        material = Material(compression=share, wrinkling=0.0)
+        simulation = Simulation([Sheet(SQUARE, material)], STILL)
+        simulation.set_positions(0, squeezed)
+        energies.append(simulation.energy().stretching)
+    assert energies[1] == pytest.approx(1e-3 * energies[0], rel=1e-9)
+    sheet = Sheet(SQUARE, Material(compression=1.0, wrinkling=0.0))
+    sheet.set_compression(1, 0.5)
+    assert (sheet.compression(0), sheet.compression(1)) == (1.0, 0.5)
+    simulation = Simulation([sheet], STILL)
+    simulation.set_positions(0, squeezed)
+    assert simulation.energy().stretching == pytest.approx(0.75 * energies[0])
+    sheet.set_compression(1, None)
+    assert sheet.compression(1) == 1.0
+    with pytest.raises(ValueError, match="compression is 0, but it must be above 0"):
+        sheet.set_compression(0, 0.0)
+    with pytest.raises(ValueError, match="no triangle 2"):
+        sheet.compression(2)
+
+
 def test_holds_take_one_vertex_or_an_array_of_them() -> None:
     simulation = Simulation([Sheet(SQUARE)])
     simulation.hold(0, 3)

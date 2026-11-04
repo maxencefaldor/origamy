@@ -138,6 +138,12 @@ pub enum SheetError {
         /// The span.
         span: usize,
     },
+    /// The sheet has no triangle of this index.
+    #[error("the sheet has no triangle {triangle}")]
+    NoTriangle {
+        /// The triangle.
+        triangle: usize,
+    },
     /// A parameter lies outside its values.
     #[error(transparent)]
     Parameter(#[from] ParameterError),
@@ -180,6 +186,8 @@ pub struct Sheet {
     /// The rotation each crease has yielded and crept through, in radians.
     rotations: Vec<f64>,
     triangles: Vec<RestTriangle>,
+    /// The compression share each triangle keeps in place of its material's, if any.
+    compressions: Vec<Option<f64>>,
     plates: Vec<RestPlate>,
     stencils: Vec<EdgeStencils>,
     lengths: Vec<f64>,
@@ -198,7 +206,7 @@ impl Sheet {
         let triangles: Vec<_> = mesh
             .triangles()
             .iter()
-            .map(|t| RestTriangle::new(corners(t)))
+            .map(|t| RestTriangle::new(corners(t), material.compression))
             .collect();
         let plates = mesh
             .triangles()
@@ -225,6 +233,7 @@ impl Sheet {
             .map(|t| edge_stencils(&mesh, t))
             .collect();
         Ok(Self {
+            compressions: vec![None; mesh.triangles().len()],
             creases: vec![None; mesh.dihedrals().len()],
             spans: Vec::new(),
             rest_angles: vec![0.0; mesh.dihedrals().len()],
@@ -259,6 +268,52 @@ impl Sheet {
     pub fn set_material(&mut self, material: Material) -> Result<(), ParameterError> {
         material.check()?;
         self.material = material;
+        for (rest, share) in self.triangles.iter_mut().zip(&self.compressions) {
+            rest.compression = share.unwrap_or(material.compression);
+        }
+        Ok(())
+    }
+
+    /// The share of its full stretching energy a triangle keeps where it is compressed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoTriangle`] when the sheet has no such triangle.
+    pub fn compression(&self, triangle: usize) -> Result<f64, SheetError> {
+        self.triangles
+            .get(triangle)
+            .map(|rest| rest.compression)
+            .ok_or(SheetError::NoTriangle { triangle })
+    }
+
+    /// Sets the share of its full stretching energy a triangle keeps where it is compressed,
+    /// or with `None` returns it to its material's.
+    ///
+    /// Paper crumples where creases cross, and a crumpled triangle barely resists
+    /// compression.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoTriangle`] when the sheet has no such triangle, and a parameter
+    /// error when the share is not above 0 and at most 1.
+    pub fn set_compression(
+        &mut self,
+        triangle: usize,
+        share: Option<f64>,
+    ) -> Result<(), SheetError> {
+        if triangle >= self.triangles.len() {
+            return Err(SheetError::NoTriangle { triangle });
+        }
+        if let Some(share) = share {
+            require(
+                "compression",
+                share,
+                share > 0.0 && share <= 1.0,
+                "above 0, and at most 1",
+            )?;
+        }
+        self.compressions[triangle] = share;
+        self.triangles[triangle].compression = share.unwrap_or(self.material.compression);
         Ok(())
     }
 

@@ -101,14 +101,16 @@ class Stiffness(_Parameters):
 
 
 class StrainLimit(_Parameters):
-    """The barrier that caps a sheet's strain.
+    """The barrier that caps a sheet's tension.
 
-    Paper barely stretches, so the barrier keeps every triangle's Green strain below a
-    cap. The barrier pushes back harder the closer the strain comes to the cap.
+    Paper barely stretches, so the barrier keeps the tension in every triangle's Green
+    strain below a cap: the norm of its positive principal strains. The barrier pushes
+    back harder the closer the tension comes to the cap.
     """
 
     cap: Positive = 0.005
-    """The greatest norm of any triangle's Green strain: 0.005 is half a percent."""
+    """The greatest norm of the tension in any triangle's Green strain: 0.005 is half a
+    percent."""
 
     onset: Fraction = 0.8
     """The fraction of the cap at which the barrier starts to push back."""
@@ -132,8 +134,25 @@ class Material(_Parameters):
     stiffness: Stiffness = Stiffness()
     """The stiffness of the sheet in its plane."""
 
+    compression: Annotated[float, Field(gt=0, le=1)] = 1.0
+    """The share of its full stretching energy the sheet keeps where it is compressed.
+
+    A crumpled sheet buckles into wrinkles finer than a mesh, so compression barely
+    resists it. Where a triangle is compressed, its stretching energy is the relaxed
+    energy of tension field theory, with this share of the full energy added back. One
+    keeps the full energy, as uncrumpled paper does.
+    """
+
+    wrinkling: NonNegative = 3e-6
+    """The compression a sheet squeezed alike every way takes before it wrinkles.
+
+    Up to it the sheet resists compression in full, as paper does before it buckles.
+    Past it the compressive stress stays at the buckling stress, plus the share of the
+    full energy that the compression keeps.
+    """
+
     strain_limit: StrainLimit = StrainLimit()
-    """The barrier that caps the sheet's strain."""
+    """The barrier that caps the sheet's tension."""
 
     @classmethod
     def kami(cls) -> Self:
@@ -141,7 +160,8 @@ class Material(_Parameters):
 
         Returns:
             Kami: 70 µm thick and 60 g/m², with a Young's modulus of 4 GPa, a Poisson's
-            ratio of 0.3, and strain capped at half a percent.
+            ratio of 0.3, stretch capped at half a percent, and its full stiffness
+            under compression, as uncrumpled paper has.
         """
         return cls()
 

@@ -81,22 +81,19 @@ TIPPING: Final = "the second fold folds on some machines and stops short on othe
 """A fold at a tipping point, where the last bits of rounding decide its way."""
 
 STOPS: dict[tuple[str, float], str | None] = {
-    ("rolled strip", FULL): "the second fold reaches Newton's iteration limit",
+    ("rolled strip", FULL): None,
     ("rolled strip", THIN): TIPPING,
-    (
-        "half twice",
-        FULL,
-    ): "the second fold stops at the strain cap where the folds cross",
+    ("half twice", FULL): None,
     ("half twice", THIN): None,
-    ("half three times", THIN): "the second fold stops short of its state",
-    ("top corner", FULL): "the corner's fold stops short of its state",
+    ("half three times", FULL): "the second fold stops short of its state",
+    ("half three times", THIN): "the third fold turns paper both up and down",
+    ("top corner", FULL): None,
     ("top corner", THIN): None,
-    ("pleats in half", FULL): "the last fold stops at the strain cap",
+    ("pleats in half", FULL): "the last fold stops short of its state",
     ("pleats in half", THIN): "the last fold stops short of its state",
 }
 """Each move at each share of the thickness, with what stops it if the simulator cannot
-fold it yet. Folding in half three times at kami's thickness stops as folding twice
-does."""
+fold it yet."""
 
 
 @pytest.mark.parametrize(

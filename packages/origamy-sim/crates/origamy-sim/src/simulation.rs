@@ -1162,6 +1162,12 @@ impl Simulation {
                         radius *= 2.0;
                     }
                 }
+                // An update no fraction of which lowers the energy runs where its model fails,
+                // as soft motion into contact does: the radius shrinks below it, down to the
+                // tolerance.
+                None if update.min(radius) > self.settings.solver.tolerance => {
+                    radius = update.min(radius) * self.settings.solver.backtracking;
+                }
                 None => break,
             }
         }

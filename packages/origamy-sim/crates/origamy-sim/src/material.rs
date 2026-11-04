@@ -2,7 +2,7 @@
 
 use nalgebra::{Matrix2, Matrix3, Vector3};
 
-use crate::parameter::{ParameterError, finite, fraction, positive, require};
+use crate::parameter::{ParameterError, finite, fraction, non_negative, positive, require};
 
 /// The material of a sheet.
 ///
@@ -16,7 +16,22 @@ pub struct Material {
     pub mass_per_area: f64,
     /// The stiffness of the sheet in its plane.
     pub stiffness: Stiffness,
-    /// The barrier that caps the sheet's strain.
+    /// The share of its full stretching energy the sheet keeps where it is compressed, above 0
+    /// and at most 1.
+    ///
+    /// A crumpled sheet buckles into wrinkles finer than a mesh, so compression barely resists
+    /// it. Where a triangle is compressed, its stretching energy is the relaxed energy of
+    /// tension field theory, with this share of the full energy added back. One keeps the full
+    /// energy, as uncrumpled paper does. A sheet sets the share of each triangle apart.
+    pub compression: f64,
+    /// The compression a sheet squeezed alike every way takes before it wrinkles, a strain of
+    /// at least 0.
+    ///
+    /// Up to it the sheet resists compression in full, as paper does before it buckles. Past
+    /// it the compressive stress stays at the buckling stress, plus the share of the full
+    /// energy that [`Material::compression`] keeps.
+    pub wrinkling: f64,
+    /// The barrier that caps the sheet's tension.
     pub strain_limit: StrainLimit,
 }
 
@@ -38,14 +53,15 @@ pub struct Stiffness {
     pub grain: f64,
 }
 
-/// The barrier that caps a sheet's strain.
+/// The barrier that caps a sheet's tension.
 ///
-/// Paper barely stretches, so the barrier keeps every triangle's Green strain below a cap. The
-/// barrier pushes back harder the closer the strain comes to the cap.
+/// Paper barely stretches, so the barrier keeps the tension in every triangle's Green strain
+/// below a cap: the norm of its positive principal strains. The barrier pushes back harder the
+/// closer the tension comes to the cap.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StrainLimit {
-    /// The greatest norm the Green strain of any triangle may reach: 0.005 caps strain at half
-    /// a percent.
+    /// The greatest norm the tension in any triangle's Green strain may reach: 0.005 caps
+    /// stretch at half a percent.
     pub cap: f64,
     /// The fraction of the cap at which the barrier starts to push back, between 0 and 1.
     pub onset: f64,
@@ -57,13 +73,16 @@ impl Material {
     /// Kami, the thin paper most origami uses.
     ///
     /// Kami is 70 µm thick and weighs 60 g/m². Its Young's modulus is 4 gigapascals and its
-    /// Poisson's ratio 0.3, with strain capped at half a percent.
+    /// Poisson's ratio 0.3, with stretch capped at half a percent. It resists compression in
+    /// full, as uncrumpled paper does; a compression share below one lets it wrinkle.
     #[must_use]
     pub fn kami() -> Self {
         Self {
             thickness: 70e-6,
             mass_per_area: 0.060,
             stiffness: Stiffness::isotropic(4e9, 0.3),
+            compression: 1.0,
+            wrinkling: 3e-6,
             strain_limit: StrainLimit {
                 cap: 0.005,
                 onset: 0.8,
@@ -89,6 +108,13 @@ impl Material {
         positive("thickness", self.thickness)?;
         positive("mass per area", self.mass_per_area)?;
         self.stiffness.check()?;
+        require(
+            "compression",
+            self.compression,
+            self.compression > 0.0 && self.compression <= 1.0,
+            "above 0, and at most 1",
+        )?;
+        non_negative("wrinkling", self.wrinkling)?;
         self.strain_limit.check()
     }
 }

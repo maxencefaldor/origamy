@@ -140,8 +140,12 @@ class Physics(BaseModel):
     bands: Bands = Bands()
     """How creases that wrap other layers bend round them."""
 
-    material: Material = Material()
-    """The paper's material; kami by default."""
+    material: Material = Material(compression=1e-3)
+    """The paper's material: kami, which wrinkles under compression, keeping a
+    thousandth of its stiffness there.
+
+    A fold that wraps layers a crease joins makes the outer layer travel farther round
+    it, and folded kami takes the difference by wrinkling."""
 
     settings: Settings = Settings(time_step=math.inf, table=Table())
     """The simulation's settings.

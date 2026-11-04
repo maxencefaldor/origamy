@@ -112,6 +112,8 @@ impl Parameters for Material {
             thickness: field(model, "thickness")?,
             mass_per_area: field(model, "mass_per_area")?,
             stiffness: field::<Model<Stiffness>>(model, "stiffness")?.0,
+            compression: field(model, "compression")?,
+            wrinkling: field(model, "wrinkling")?,
             strain_limit: field::<Model<StrainLimit>>(model, "strain_limit")?.0,
         })
     }
@@ -120,6 +122,8 @@ impl Parameters for Material {
         fields.set_item("thickness", self.thickness)?;
         fields.set_item("mass_per_area", self.mass_per_area)?;
         fields.set_item("stiffness", Model(self.stiffness))?;
+        fields.set_item("compression", self.compression)?;
+        fields.set_item("wrinkling", self.wrinkling)?;
         fields.set_item("strain_limit", Model(self.strain_limit))
     }
 }

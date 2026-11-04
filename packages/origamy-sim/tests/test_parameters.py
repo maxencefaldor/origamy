@@ -57,24 +57,26 @@ def limit_data() -> st.SearchStrategy[dict[str, object]]:
     return st.fixed_dictionaries(dict.fromkeys(("cap", "onset", "stiffness"), NUMBERS))
 
 
-@given(stiffness_data(), limit_data(), NUMBERS, NUMBERS)
+@given(
+    stiffness_data(),
+    limit_data(),
+    st.fixed_dictionaries(
+        dict.fromkeys(
+            ("thickness", "mass_per_area", "compression", "wrinkling"), NUMBERS
+        )
+    ),
+)
 def test_pydantic_accepts_a_material_exactly_when_the_core_does(
     stiffness: dict[str, float],
     limit: dict[str, float],
-    thickness: float,
-    mass_per_area: float,
+    numbers: dict[str, float],
 ) -> None:
-    data = {
-        "thickness": thickness,
-        "mass_per_area": mass_per_area,
-        "stiffness": stiffness,
-        "strain_limit": limit,
-    }
+    data = {**numbers, "stiffness": stiffness, "strain_limit": limit}
     unchecked = Material.model_construct(
-        thickness=thickness,
-        mass_per_area=mass_per_area,
+        None,
         stiffness=Stiffness.model_construct(None, **stiffness),
         strain_limit=StrainLimit.model_construct(None, **limit),
+        **numbers,
     )
     try:
         Sheet(SQUARE, unchecked)

@@ -441,6 +441,28 @@ impl PySheet {
         self.0.set_span_rest_angle(span, angle).map_err(value_error)
     }
 
+    /// The share of its full stretching energy a triangle keeps where it is compressed.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such triangle.
+    fn compression(&self, triangle: usize) -> PyResult<f64> {
+        self.0.compression(triangle).map_err(value_error)
+    }
+
+    /// Sets the share of its full stretching energy a triangle keeps where it is compressed,
+    /// or with `None` returns it to the material's.
+    ///
+    /// Paper crumples where creases cross, and a crumpled triangle barely resists
+    /// compression.
+    ///
+    /// Raises:
+    ///     ValueError: When the sheet has no such triangle, or the share is not above 0 and
+    ///         at most 1.
+    #[pyo3(signature = (triangle, share))]
+    fn set_compression(&mut self, triangle: usize, share: Option<f64>) -> PyResult<()> {
+        self.0.set_compression(triangle, share).map_err(value_error)
+    }
+
     fn __repr__(&self) -> String {
         let creases = (0..self.0.mesh().dihedrals().len())
             .filter(|&d| {
