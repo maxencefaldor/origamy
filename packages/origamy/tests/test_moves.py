@@ -89,7 +89,7 @@ STOPS: dict[tuple[str, float], str | None] = {
     ("half twice", FULL): None,
     ("half twice", THIN): None,
     ("half three times", FULL): "the second fold stops short of its state",
-    ("half three times", THIN): "the third fold turns paper both up and down",
+    ("half three times", THIN): "the second fold does not settle",
     ("top corner", FULL): None,
     ("top corner", THIN): None,
     ("pleats in half", FULL): None,
