@@ -716,6 +716,10 @@ Phase 6 adds these findings so far:
   Each strip's band pinches to its crease's end where it meets a pleat crease.
   All four layers must then fold sharply at one point there, and contact holds the fold open.
   Bands that keep their width up to the pleat crease jam earlier, as coarse cells beside a sharp crease require.
+  Crushing the paper's thickness round the crossings changes little, and so does softer compression there.
+  A shorter pinch helps most: band ends of 1.5 mm, growing by 1.2, stop 1.3 mm short instead of 15 mm.
+  The result swings with the mesh, and those settings leave the top corner's fold unsettled.
+  The joined layers likely need a shared bend at the joint, with the inner sharp layer banded there too.
 - **Stalled updates.**
   Wrinkled paper keeps a thousandth of its stiffness, so a residual at rounding moves it tens of nanometers.
   Newton updates there hovered between 20 and 300 nm while each would lower the energy by under a billionth.
