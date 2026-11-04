@@ -9,7 +9,9 @@ holds down the paper the step leaves in place where it touches the table. Hands 
 the weight of the paper that moves, as a folder's do, then let go, and the paper
 settles under its weight. A precrease folds
 to the paper it passes through, then unfolds. A step that moves all the paper rigidly,
-as turning it over does, moves the simulated paper the same way.
+as turning it over or a tilt does, moves the simulated paper the same way, resting on
+the table where it rested. A step that shapes the paper in space turns its creases to
+the angles the step's form gives them.
 
 Paper on a table folds up from it, never down into it. A step that turns paper down
 folds with the sheet turned over, as a folder makes a mountain fold, then turns it back.
@@ -56,7 +58,18 @@ from origamy.geometry import (
     intersection,
 )
 from origamy.paper import Step
-from origamy.space import crease_angles, placements
+from origamy.space import (
+    Form,
+    Motion,
+    Shaped,
+    Vector,
+    apply,
+    compose,
+    crease_angles,
+    invert,
+    placements,
+    same,
+)
 from origamy.state import Edge, Pair, State
 from origamy_sim import (
     Crease,
@@ -170,6 +183,8 @@ class Stage:
     """The step the fold belongs to, counted from the start."""
     state: State
     """The paper the fold reaches."""
+    form: Form | None
+    """Where its faces lie in space once shaping turns the paper; None while flat."""
     frames: tuple[NDArray[np.float64], ...]
     """The mesh's vertices in meters as the fold goes, each of shape (n, 3).
 
@@ -181,7 +196,11 @@ class Stage:
     iterations: int
     """The Newton iterations of all the fold's time steps."""
     offset: float
-    """The farthest a face's corner lies from its place in the state, in meters."""
+    """The farthest a face's corner lies from its place in the state, in meters.
+
+    Shaped paper settles where its weight takes it, so its place in space is matched to
+    the simulated paper first, as rigidly as fits best.
+    """
     misordered: tuple[Pair, ...]
     """The pairs of the state's stacking, upper face first, that the simulation stacks
     the other way round.
@@ -208,24 +227,21 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     """Fold a build's steps on the simulator, from the flat sheet of its first step.
 
     Raises:
-        PhysicsError: A step shapes the paper in space, or moves all the paper but
-            not rigidly.
+        PhysicsError: A step moves all the paper, but not rigidly.
     """
     physics = physics or Physics()
     left, bottom, right, top = bounds(steps[0].state.vertices)
     scale = physics.size / float(max(right - left, top - bottom))
-    folds: list[tuple[int, State, State]] = []
+    folds: list[tuple[int, Shaped, Shaped]] = []
     for index, step in enumerate(steps[1:], 1):
-        if step.form is not None:
-            msg = (
-                f"step {index} shapes the paper in space, and the simulation folds flat"
-            )
-            raise PhysicsError(msg)
-        before = steps[index - 1].state
-        for after in (step.through, step.state) if step.through else (step.state,):
+        before = Shaped(steps[index - 1].state, steps[index - 1].form)
+        reached = Shaped(step.state, step.form)
+        for after in (Shaped(step.through), reached) if step.through else (reached,):
             folds.append((index, before, after))
             before = after
-    folder = _Folder(steps[-1].state, [(b, a) for _, b, a in folds], scale, physics)
+    folder = _Folder(
+        steps[-1].state, [(b.state, a.state) for _, b, a in folds], scale, physics
+    )
     stages = tuple(folder.fold(index, before, after) for index, before, after in folds)
     return Folding(folder.mesh, folder.faces, folder.creep, stages)
 
@@ -308,56 +324,65 @@ class _Folder:
         else:
             sheet.set_span_rest_angle(0, int(self.spans[drive - sharp]), angle)
 
-    def fold(self, step: int, before: State, after: State) -> Stage:
+    def fold(self, step: int, before: Shaped, after: Shaped) -> Stage:
         """Fold the paper from one state to the next, and measure it there.
 
-        A face keeps still where its place does not change.
+        A face keeps still where neither its place nor its motion in space changes.
         """
-        under = before.parents(after)
+        under = before.state.parents(after.state)
+        start = placements(before.state, before.form)
+        end = placements(after.state, after.form)
         held = np.array(
             [
-                face.place == before.faces[under[f]].place
-                for f, face in enumerate(after.faces)
+                face.place == before.state.faces[under[f]].place
+                and same(start[under[f]], end[f])
+                for f, face in enumerate(after.state.faces)
             ]
         )
-        parents = np.array(after.parents(self.last), dtype=np.int64)
+        parents = np.array(after.state.parents(self.last), dtype=np.int64)
         sheet = self.simulation
         sheet.hold(0, np.arange(len(self.mesh.rest)), held=False)
         if not held.any():
-            self._move(step, before, after, under)
+            self._move(step, [start[p] for p in under], end)
             frames, converged, iterations = (sheet.positions(0),), True, 0
         else:
             frames, converged, iterations = self._drive(
                 before, after, parents, held[parents]
             )
         offset, misordered = self._measure(after, parents, frames[-1])
-        return Stage(step, after, frames, converged, iterations, offset, misordered)
+        return Stage(
+            step,
+            after.state,
+            after.form,
+            frames,
+            converged,
+            iterations,
+            offset,
+            misordered,
+        )
 
-    def _move(self, step: int, before: State, after: State, under: list[int]) -> None:
-        """Move all the paper rigidly, as the step moves every face."""
-        motion = after.faces[0].place @ before.faces[under[0]].place.inverse()
-        if any(
-            face.place != motion @ before.faces[under[f]].place
-            for f, face in enumerate(after.faces)
+    def _move(self, step: int, start: Sequence[Motion], end: Sequence[Motion]) -> None:
+        """Move all the paper rigidly from where faces lie to where they go.
+
+        The paper keeps the lowest height it reaches, so it rests where it rested.
+        """
+        motion = compose(invert(start[0]), end[0])
+        if not all(
+            same(compose(first, motion), last)
+            for first, last in zip(start, end, strict=True)
         ):
             msg = f"step {step} moves all the paper, but not rigidly"
             raise PhysicsError(msg)
         positions = self.simulation.positions(0)
-        matrix = np.array(
-            [[float(motion.xx), float(motion.xy)], [float(motion.yx), float(motion.yy)]]
-        )
-        shift = np.array([float(motion.tx), float(motion.ty)]) * self.scale
-        positions[:, :2] = positions[:, :2] @ matrix.T + shift
-        if motion.flips:
-            positions[:, 2] = (
-                positions[:, 2].min() + positions[:, 2].max() - positions[:, 2]
-            )
-        self.simulation.set_positions(0, positions)
+        rotation = np.array(motion[:9]).reshape(3, 3)
+        moved = positions @ rotation.T + np.array(motion[9:]) * self.scale
+        moved[:, 2] += positions[:, 2].min() - moved[:, 2].min()
+        self.simulation.set_positions(0, moved)
 
     def _drive(
         self,
-        before: State,
-        after: State,
+        before: Shaped,
+        after: Shaped,
         parents: NDArray[np.int64],
         kept: NDArray[np.bool_],
     ) -> tuple[tuple[NDArray[np.float64], ...], bool, int]:
@@ -374,7 +399,7 @@ class _Folder:
         for drive in np.flatnonzero(fresh).tolist():
             self._make(drive)
         made = np.flatnonzero(self.made)
-        goals = np.array([self._angle(after, f, g) for f, g in pairs[made].tolist()])
+        goals = self._angles(after, pairs[made])
         staying = np.zeros(len(self.mesh.rest), dtype=bool)
         staying[self.mesh.triangles[kept[self.faces]]] = True
         # Hands carry the weight of the paper the fold moves, as a folder's do.
@@ -417,38 +442,45 @@ class _Folder:
 
     def _plan(
         self,
-        before: State,
-        after: State,
+        before: Shaped,
+        after: Shaped,
         pairs: NDArray[np.int64],
         goals: NDArray[np.float64],
     ) -> list[NDArray[np.float64]]:
         """The angles the creases between faces of ``after`` rest at, by increment.
 
         The creases follow the paper as rigid origami where its faces can fold rigidly
-        from one state to the other. Elsewhere they turn together at even rates, and the
-        faces bend as they must. Either way, they turn slowly near both ends. Flat paper
-        there offers several ways to fold, and small turns keep to the one the step
-        takes.
+        from one flat state to the other. Elsewhere, and where shaping turns the paper
+        in space, they turn together at even rates, and the faces bend as they must.
+        Either way, they turn slowly near both ends. Flat paper there offers several
+        ways to fold, and small turns keep to the one the step takes.
         """
         count = self.physics.increments
         shares = [(1 - math.cos(math.pi * i / count)) / 2 for i in range(1, count)]
         start = self.angles[self.made]
-        forms = path(before, after, shares)
+        flat = before.form is None and after.form is None
+        forms = path(before.state, after.state, shares) if flat else None
         if forms is None:
             return [start + (goals - start) * share for share in (*shares, 1.0)]
-        edge = {frozenset(faces): e for e, faces in after.creases.items()}
-        creases = [edge[frozenset((f, g))] for f, g in pairs.tolist()]
-        closed = math.pi - self.physics.margin
-        angles = []
-        for form in forms:
-            turns = crease_angles(after, placements(after, form))
-            angles.append(np.clip([turns[e] for e in creases], -closed, closed))
-        return [*angles, goals]
+        return [
+            *(self._angles(Shaped(after.state, form), pairs) for form in forms),
+            goals,
+        ]
 
-    def _angle(self, state: State, f: int, g: int) -> float:
-        """The angle the crease between two faces of a state rests at."""
+    def _angles(self, shaped: Shaped, pairs: NDArray[np.int64]) -> NDArray[np.float64]:
+        """The angles the creases between pairs of faces rest at, as shaped paper lies.
+
+        A crease pressed flat rests a margin short of a half turn.
+        """
+        state = shaped.state
+        turns = crease_angles(state, placements(state, shaped.form))
+        edge = {frozenset(faces): e for e, faces in state.creases.items()}
         closed = math.pi - self.physics.margin
-        return {"V": closed, "M": -closed, "F": 0.0}[state.sense(f, g)]
+        return np.clip(
+            [turns[edge[frozenset((f, g))]] for f, g in pairs.tolist()],
+            -closed,
+            closed,
+        )
 
     def _hold(self, staying: NDArray[np.bool_]) -> None:
         """Hold down the vertices ``staying`` where they lie on the table.
@@ -521,24 +553,34 @@ class _Folder:
         return mirror
 
     def _measure(
-        self, state: State, parents: NDArray[np.int64], positions: NDArray[np.float64]
+        self, shaped: Shaped, parents: NDArray[np.int64], positions: NDArray[np.float64]
     ) -> tuple[float, tuple[Pair, ...]]:
-        """How far paper at positions lies from a state, and which pairs misorder."""
-        places: dict[int, Point] = {}
+        """How far paper at positions lies from a state, and which pairs misorder.
+
+        Flat paper lies where its state puts it on the table. Shaped paper is first
+        matched to where its form puts it, by the rigid motion that fits best.
+        """
+        state = shaped.state
+        placed = placements(state, shaped.form)
+        places: dict[int, Vector] = {}
         for f, face in enumerate(self.last.faces):
-            place = state.faces[parents[f]].place
             for v in face.corners:
-                places.setdefault(v, place(self.last.vertices[v]))
-        expected = np.array([(float(p.x), float(p.y)) for p in places.values()])
-        offset = float(
-            np.linalg.norm(
-                positions[list(places), :2] - expected * self.scale, axis=1
-            ).max()
-        )
+                x, y = self.last.vertices[v].floats()
+                places.setdefault(v, apply(placed[parents[f]], (x, y, 0.0)))
+        vertices = list(places)
+        expected = np.array(list(places.values())) * self.scale
+        found = positions[vertices]
+        if shaped.form is None:
+            found, expected = found[:, :2], expected[:, :2]
+        else:
+            expected = _fitted(expected, found)
+        offset = float(np.linalg.norm(found - expected, axis=1).max())
+        motions = shaped.form.motions if shaped.form else None
         misordered = tuple(
             (upper, lower)
             for upper, lower in sorted(state.above)
             if self.physics.settings.contact.layers
+            and (motions is None or same(motions[upper], motions[lower]))
             and not self._stacked(state, parents, positions, upper, lower)
         )
         return offset, misordered
@@ -551,10 +593,20 @@ class _Folder:
         upper: int,
         lower: int,
     ) -> bool:
-        """Whether the simulated paper lays a face above another where they overlap."""
+        """Whether the simulated paper lays a face above another where they overlap.
+
+        Above is along the upper face's front in the simulated paper, or its back
+        where the face shows the paper's back.
+        """
         point = center(intersection(state.folded[upper], state.folded[lower]))
+        sample = self.sample[np.flatnonzero(parents == upper)[0]]
+        a, b, c = positions[self.mesh.triangles[sample]]
+        up = np.cross(b - a, c - a) * (-1 if state.faces[upper].place.flips else 1)
         high, low = (
-            self._height(state.faces[face].place, parents == face, positions, point)
+            float(
+                self._height(state.faces[face].place, parents == face, positions, point)
+                @ up
+            )
             for face in (upper, lower)
         )
         return high > low
@@ -565,8 +617,8 @@ class _Folder:
         within: NDArray[np.bool_],
         positions: NDArray[np.float64],
         point: Point,
-    ) -> float:
-        """The simulated height of the paper a face's place puts at a point.
+    ) -> NDArray[np.float64]:
+        """Where the simulated paper a face's place puts at a point lies.
 
         The paper is the face's, made of the last state's faces ``within`` it. The
         triangle holding the point is the one with the greatest least barycentric
@@ -580,7 +632,7 @@ class _Folder:
         u = np.linalg.solve(edges, (target - a)[..., None])[..., 0]
         weights = np.column_stack([1 - u.sum(axis=1), u])
         best = int(weights.min(axis=1).argmax())
-        return float(weights[best] @ positions[corners[best], 2])
+        return weights[best] @ positions[corners[best]]
 
 
 def _widths(
@@ -1138,3 +1190,17 @@ def _reflect(
     return np.column_stack(
         [2 * middle - points[:, 0], points[:, 1], level - points[:, 2]]
     )
+
+
+def _fitted(
+    points: NDArray[np.float64], target: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Points moved by the rigid motion that brings them nearest a target, by Kabsch.
+
+    Each point pairs with the target's point of the same row, and the motion keeps the
+    points' handedness, so it never mirrors them.
+    """
+    middle, aim = points.mean(axis=0), target.mean(axis=0)
+    u, _, vt = np.linalg.svd((points - middle).T @ (target - aim))
+    turn = np.diag([1.0, 1.0, np.sign(np.linalg.det(u @ vt))])
+    return (points - middle) @ (u @ turn @ vt) + aim

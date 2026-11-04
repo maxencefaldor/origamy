@@ -775,6 +775,10 @@ Phase 6 adds these findings so far:
   The petal then swung down through the paper below.
   The path now walks in turns of 2°, and follows its own way on where the nearest loops jump, until it meets them again.
   A crease folded flat one way then meets its state folded flat the other, the same place a whole turn round.
+- **Shaping in space.**
+  Shape steps, flexes and tilts turn origamy's paper out of the plane, and the simulation once refused them.
+  A shape step now turns its creases to the angles its form gives, and a tilt moves all the paper as one.
+  The crane, flapping bird and paper plane then spread their wings, within 0.8 mm of their forms once each settles under its weight.
 - **Folds both up and down.**
   A petal fold turns paper up from the held paper and tucks other paper below it.
   The table leaves no room below, so the hands lift the model by the paper's size, fold it, and lay it back down.

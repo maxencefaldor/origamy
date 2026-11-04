@@ -16,7 +16,6 @@ from origamy.geometry import HALF
 from origamy.physics import (
     Folding,
     Physics,
-    PhysicsError,
     _mesh,
     _widths,
     simulate,
@@ -292,11 +291,31 @@ def test_paper_turned_both_up_and_down_folds_lifted_off_the_table() -> None:
     assert heights.max() < LYING + 3 * LAYER + 1e-3
 
 
-def test_paper_shaped_in_space_is_refused() -> None:
+def test_shaping_stands_a_flap_up_in_space() -> None:
+    # The square folds in half, then its top layer turns up square to the table.
     paper = Paper.square()
-    paper.shape(UPRIGHT, flap=("3/4", "1/2"), angle=90)
-    with pytest.raises(PhysicsError, match="step 1 shapes the paper in space"):
-        simulate(paper.steps)
+    paper.valley(UPRIGHT, flap=("3/4", "1/2"))
+    paper.shape(UPRIGHT, flap=("1/4", "1/2"), angle=90, layers=1)
+    folding = simulate(paper.steps)
+    shaped = folding.stages[-1]
+    assert shaped.form is not None
+    assert shaped.converged
+    # The flap stands half the square's side high, and keeps its shape within 1 mm.
+    top = shaped.frames[-1][:, 2].max()
+    assert top == pytest.approx(PHYSICS.size / 2, abs=2e-3)
+    assert shaped.offset < 1e-3
+
+
+def test_a_tilt_stands_the_whole_paper_up_on_the_table() -> None:
+    paper = Paper.square()
+    paper.valley(UPRIGHT, flap=("3/4", "1/2"))
+    paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/4", "1/2"), angle=90)
+    stage = simulate(paper.steps).stages[-1]
+    assert stage.form is not None
+    heights = stage.frames[-1][:, 2]
+    assert heights.min() == pytest.approx(LYING, abs=PHYSICS.settings.contact.gap)
+    assert heights.max() == pytest.approx(LYING + PHYSICS.size, abs=1e-3)
+    assert stage.offset < 1e-4
 
 
 @pytest.mark.parametrize(
