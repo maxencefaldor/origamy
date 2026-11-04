@@ -730,6 +730,15 @@ Phase 6 adds these findings so far:
   A shorter pinch helps most: band ends of 1.5 mm, growing by 1.2, stop 1.3 mm short instead of 15 mm.
   The result swings with the mesh, and those settings leave the top corner's fold unsettled.
   The joined layers likely need a shared bend at the joint, with the inner sharp layer banded there too.
+- **Joints that share a band.**
+  The strips' bands now share the widest width, and run on through the sharp pleat creases at the joints.
+  Their lines then put points only on the pleat creases, so the pleats still fold flat.
+  Pleats folded in half then fold at kami's thickness, and the pleated fan folds within 1.1 mm of its state.
+- **A fold banded on part of its line.**
+  The bird base's middle fold had a band where it wraps layers later, and a sharp crease along the rest of its line.
+  The flap then bent, and the fold stopped upright.
+  Creases a fold turns together along one line now share one band, and the bird base folds through its collapse within 0.4 mm.
+  Some of its time steps still end unsettled.
 - **Bands that stopped at each other.**
   The bird base's second diagonal stopped near 120° at kami's thickness, before its precrease could unfold.
   Its band crossed another band, and each band's lines stopped at the other's outer line.

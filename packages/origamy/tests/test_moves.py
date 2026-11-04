@@ -89,7 +89,7 @@ STOPS: dict[tuple[str, float], str | None] = {
     ("half three times", THIN): "the third fold turns paper both up and down",
     ("top corner", FULL): None,
     ("top corner", THIN): None,
-    ("pleats in half", FULL): "the last fold stops short of its state",
+    ("pleats in half", FULL): None,
     ("pleats in half", THIN): "the last fold stops short of its state",
 }
 """Each move at each share of the thickness, with what stops it if the simulator cannot
