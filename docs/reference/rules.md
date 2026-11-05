@@ -15,7 +15,7 @@ A refusal rule is always an error, and the other rules state a fact about a step
 | [`no-crease`](#no-crease) | `error` | yes | A collapse names a line with no crease of the paper along it. |
 | [`no-spine`](#no-spine) | `error` | yes | The paper to reverse has no spine to turn inside out. |
 | [`several-spines`](#several-spines) | `error` | yes | The paper to reverse could turn inside out about more than one spine. |
-| [`no-side`](#no-side) | `error` | yes | The layer a petal fold lifts has no folded side to open. |
+| [`no-side`](#no-side) | `error` | yes | The layer a petal or squash fold lifts has no folded side to open. |
 | [`mountain-valley-count`](#mountain-valley-count) | `error` | yes | Mountains and valleys at a vertex do not differ by two. |
 | [`unbalanced-angles`](#unbalanced-angles) | `error` | yes | The angles between folds at a vertex do not alternate to 180°. |
 | [`layer-crossing`](#layer-crossing) | `error` | yes | No stacking of the faces keeps paper from passing through paper. |
@@ -68,6 +68,7 @@ An unfold moves paper about an edge on its line whose two faces lie flat, on bot
 A collapse names a line with no crease of the paper along it.
 
 A collapse sets creases along a line or segment of the crease pattern, and no crease inside the paper lies along it; for a petal fold, no flat crease of the lifted layer lies along its line.
+For a squash fold, no crease of the flap's top layer lies along its line, or no crease precreased in one of its layers runs from where its side meets the line.
 
 ## no-spine
 
@@ -83,9 +84,10 @@ The tip a reverse fold turns splits into an upper and a lower half, each one pie
 
 ## no-side
 
-The layer a petal fold lifts has no folded side to open.
+The layer a petal or squash fold lifts has no folded side to open.
 
 A petal fold lifts a layer whose creases along its line end at no folded side of the layer, so no side opens flat as the layer lifts.
+A squash fold swings a top layer with no folded side off its line.
 
 ## mountain-valley-count
 
