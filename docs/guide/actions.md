@@ -9,7 +9,7 @@ Each action asks the paper to fold, unfold, turn over or take shape, and the pap
 | `unfold(line, flap, layers=None)` | Turns the paper at `flap`, folded along `line`, back the way it came |
 | `precrease(line, flap, layers=None, mountain=False)` | Folds and unfolds, leaving creases along `line` in the paper it takes |
 | `turn_over()` | Turns the paper over, from left to right |
-| `collapse(...)`, `reverse(...)`, `petal(...)` | Folds many creases at once (see [Collapses](collapses.md)) |
+| `collapse(...)`, `reverse(...)`, `petal(...)`, `squash(...)` | Folds many creases at once (see [Collapses](collapses.md)) |
 | `shape(...)`, `tilt(...)` | Turns folded paper out of the plane (see [Shaping](shaping.md)) |
 
 ## Folds

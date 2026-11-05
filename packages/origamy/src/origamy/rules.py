@@ -91,7 +91,9 @@ RULES = {
             "A collapse names a line with no crease of the paper along it.",
             "A collapse sets creases along a line or segment of the crease pattern, "
             "and no crease inside the paper lies along it; for a petal fold, no flat "
-            "crease of the lifted layer lies along its line.",
+            "crease of the lifted layer lies along its line. For a squash fold, no "
+            "crease of the flap's top layer lies along its line, or no crease "
+            "precreased in one of its layers runs from where its side meets the line.",
             refusal=True,
         ),
         Rule(
@@ -114,9 +116,10 @@ RULES = {
         Rule(
             "no-side",
             Level.ERROR,
-            "The layer a petal fold lifts has no folded side to open.",
+            "The layer a petal or squash fold lifts has no folded side to open.",
             "A petal fold lifts a layer whose creases along its line end at no "
-            "folded side of the layer, so no side opens flat as the layer lifts.",
+            "folded side of the layer, so no side opens flat as the layer lifts. "
+            "A squash fold swings a top layer with no folded side off its line.",
             refusal=True,
         ),
         Rule(

@@ -237,6 +237,22 @@ class Paper:
             point,
         )
 
+    def squash(self, line: Line, flap: PointLike) -> None:
+        """Squash fold: swing the top flap at ``flap`` over ``line``, pressing it flat.
+
+        The flap's folded side opens flat along the line, and each of its two layers
+        folds in half. The creases from where the side meets the line into both
+        layers must be precreased first.
+        """
+        point = Point.of(flap)
+        self._act(
+            "squash",
+            f"squash fold over {line}, the paper at {point}",
+            _flat(lambda state: moves.squash(state, line, point)),
+            line,
+            point,
+        )
+
     def collapse(
         self,
         *,

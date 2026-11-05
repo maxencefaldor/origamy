@@ -88,6 +88,7 @@ Named moves compute their creases and collapse in one step, judged like any coll
 | --- | --- |
 | `paper.reverse(line, flap)` | Turns the tip of a folded flap inside out between its two halves; `outside=True` wraps it around them |
 | `paper.petal(line, flap)` | Lifts the top layer over a line while its sides fold in along precreased creases |
+| `paper.squash(line, flap)` | Swings the top flap over a line and presses it flat, each of its layers folding in half along precreased creases |
 
 The [bird base](examples/bird_base.py) collapses a preliminary base, then petal folds each side:
 
@@ -141,7 +142,7 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `no-hinge` | error | The paper to move is joined to no other paper along the fold line |
 | `already-folded`, `not-folded` | error | A fold turns a crease already folded that way, or an unfold turns flat paper |
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
-| `no-side` | error | The layer a petal fold lifts has no folded side to open |
+| `no-side` | error | The layer a petal or squash fold lifts has no folded side to open |
 | `no-spine`, `several-spines` | error | A reverse fold's tip opens into two halves in no way, or in several equally even ways |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
@@ -169,7 +170,7 @@ When no stacking exists, origamy names the constraints that conflict.
 ## Status
 
 The project is in its first phase.
-The phase covers exact folds, unfolds, precreases, collapses, reverse and petal folds, and shaping.
+The phase covers exact folds, unfolds, precreases, collapses, reverse, petal and squash folds, and shaping.
 The layer solver, pictures, a 3D viewer, an MCP server and FOLD export complete it.
 The [crane](examples/crane.py) folds end to end, from the square to its wings spread in space.
 Squash and sink folds, and shaping that bends paper as well as folding it, come next.

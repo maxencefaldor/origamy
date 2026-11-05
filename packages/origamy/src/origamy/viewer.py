@@ -44,7 +44,7 @@ THREE_PACKAGE: Final = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/"
 
 type Data = dict[str, Any]
 
-_COLLAPSES: Final = frozenset({"collapse", "reverse", "petal"})
+_COLLAPSES: Final = frozenset({"collapse", "reverse", "petal", "squash"})
 """The actions that turn many creases at once, which the viewer follows as a flex."""
 
 _FRAMES: Final = 12

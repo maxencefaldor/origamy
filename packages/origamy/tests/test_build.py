@@ -263,6 +263,55 @@ def test_a_petal_fold_needs_a_folded_side() -> None:
     assert refused.value.refusal.rule == "no-side"
 
 
+def preliminary_base() -> Paper:
+    paper = Paper.square()
+    rising = Line.through((0, 0), (1, 1))
+    falling = Line.through((1, 0), (0, 1))
+    upright = Line.through(("1/2", 0), ("1/2", 1))
+    level = Line.through((0, "1/2"), (1, "1/2"))
+    paper.precrease(rising, flap=("3/4", "1/4"))
+    paper.precrease(falling, flap=("7/8", "5/8"), mountain=True)
+    paper.precrease(upright, flap=("3/4", "1/8"))
+    paper.precrease(level, flap=("1/8", "3/4"))
+    paper.collapse(valleys=[upright, level], mountains=[falling], fixed=("7/8", "5/8"))
+    return paper
+
+
+def test_a_squash_fold_spreads_a_flap_over_the_middle_line() -> None:
+    # The preliminary base lies with its middle line from (1/2, 1/2) to (1, 1); the
+    # top flap on its lower right is the paper's bottom quarter, folded at x = 1/2.
+    paper = preliminary_base()
+    center, tip, side = (paper.where(p) for p in (("1/2", "1/2"), (0, 0), ("1/2", 0)))
+    flap = Point.of(("19/20", "11/20"))
+    paper.precrease(bisect(side, center, tip), flap=flap, layers=2)
+    paper.squash(Line.through(center, tip), flap=flap)
+    state = paper.state
+    # The flap's folded side lies open along the middle line, and the halves on top
+    # of each side of it are the quarter's two halves next to that side.
+    side_crease = actions.along(state, (Point.of(("1/2", "1/2")), Point.of(("1/2", 0))))
+    assert {state.assignment(edge) for edge in side_crease} == {"F"}
+    for point in (("7/10", "17/20"), ("17/20", "7/10")):
+        top = actions.stack_at(state, Point.of(point))[0]
+        assert Point.of(("1/2", 0)) in state.patterns[top]
+
+
+def test_a_squash_fold_needs_precreased_halves() -> None:
+    paper = preliminary_base()
+    center, tip = paper.where(("1/2", "1/2")), paper.where((0, 0))
+    with pytest.raises(RefusedError) as refused:
+        paper.squash(Line.through(center, tip), flap=("19/20", "11/20"))
+    assert refused.value.refusal.rule == "no-crease"
+
+
+def test_a_squash_fold_needs_a_folded_side() -> None:
+    paper = Paper.square()
+    middle = Line.through(("1/2", 0), ("1/2", 1))
+    paper.precrease(middle, flap=("3/4", "1/2"))
+    with pytest.raises(RefusedError) as refused:
+        paper.squash(middle, flap=("3/4", "1/2"))
+    assert refused.value.refusal.rule == "no-side"
+
+
 def test_a_search_out_of_budget_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     def exhausted(*_: object, **__: object) -> frozenset[tuple[int, int]]:
         msg = "the search reached its budget of 0 dead ends"

@@ -51,10 +51,10 @@ def fold() -> Paper:
 - Lines come from `Line.through(p, q)` and the constructions `fold_onto`, `bisect`, `perpendicular`, `meet` and `midpoint`.
 - A fold takes the paper at its flap point and everything joined to it on that side of the line.
   `layers=n` takes the top n layers there instead of all the paper on that side.
-- The folds are `valley`, `mountain`, `unfold`, `precrease`, `collapse`, `reverse`, `petal` and `turn_over`.
+- The folds are `valley`, `mountain`, `unfold`, `precrease`, `collapse`, `reverse`, `petal`, `squash` and `turn_over`.
 - The angles are set by `shape`, `flex` and `tilt`.
   `shape(line, flap, angle, layers)` turns a flap about its hinge by an angle, up when positive.
   `flex({crease: angle})` folds creases to angles, from 0 open to 180 pressed flat, and the creases around each vertex follow together.
   `tilt(line, flap, angle)` turns the whole model in space.
 - Within one script, a fold after `shape`, `flex` or `tilt` is refused (`not-flat`).
-- The queries are `where` (unfolded point to where it lies now), `origin` (back), `creases` (crease pattern segments along a line) and `layers` (layers at a point).
+- The queries are `where` (unfolded point to where it lies now), `origin` (back), `creases` (crease pattern segments along a line), `layers` (layers at a point) and `thickest` (the most layers at one point).

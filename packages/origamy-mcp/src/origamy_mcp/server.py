@@ -54,12 +54,12 @@ Actions: valley and mountain fold the paper at a flap point over a line, with th
 unfold reverses a fold, precrease folds and unfolds, turn_over flips the paper. collapse
 sets creases already in the paper to valley, mountain or flat at once, named as lines
 or segments of the crease pattern, with valley and mountain seen from the front.
-reverse and petal fold compute their creases and collapse. shape, flex and tilt turn
-folded paper out of the plane: shape opens a fold about its hinge by an angle, flex
-folds creases that meet at a vertex together, and tilt holds the whole model up.
+reverse, petal and squash fold compute their creases and collapse. shape, flex and tilt
+turn folded paper out of the plane: shape opens a fold about its hinge by an angle,
+flex folds creases that meet at a vertex together, and tilt holds the whole model up.
 Queries: where maps a point of the unfolded paper to where it lies now, origin maps
-back, creases lists the crease pattern segments along a line, and layers counts the
-layers at a point.
+back, creases lists the crease pattern segments along a line, layers counts the layers
+at a point, and thickest finds the most layers at one point.
 
 view_model draws one step in 3D from any direction, given as an azimuth round the
 paper and an elevation above the table; call it once per direction to see a model from

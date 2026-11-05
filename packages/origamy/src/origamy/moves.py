@@ -2,8 +2,8 @@
 """Named moves of origami, each one action that sets many creases at once.
 
 A named move is a shorthand for creases a script could set itself. A reverse fold turns
-a tip inside out between its layers; a petal fold collapses creases made before. The
-checks and the layer solver judge the result as they judge any action.
+a tip inside out between its layers; petal and squash folds collapse creases made
+before. The checks and the layer solver judge the result as they judge any action.
 """
 
 from dataclasses import dataclass
@@ -165,6 +165,77 @@ def petal(state: State, line: Line, flap: Point) -> Outcome:
         f for f in sorted(layer) if any(line.side(p) == -side for p in state.folded[f])
     )
     return collapse(state, changes, still)
+
+
+def squash(state: State, line: Line, flap: Point) -> Outcome:
+    """Squash fold: swing the top flap at ``flap`` over ``line`` and press it flat.
+
+    The flap's top layer is the top face at ``flap`` and every face it continues into
+    across flat creases, on the flap's side of the line. Its creases along the line
+    are its hinge, and its folded side, off the line, joins it to the layer beneath.
+    The top layer swings over the hinge onto the paper beyond, and the side opens flat,
+    so the layer beneath spreads out on the near side. Where the side meets the line,
+    the creases that run from there into each layer, precreased before, fold each
+    layer in two halves, one on top of the other.
+    """
+    side, stack = flap_stack(state, line, flap)
+    top = _side_of(state, flat_with(state, stack[:1]), line, side)
+    hinge = [
+        edge
+        for edge, faces in state.creases.items()
+        if len(set(faces) & top) == 1 and _along(state, edge, line)
+    ]
+    if not hinge:
+        msg = f"no crease of the top layer at {flap} lies along {line}"
+        raise RefusalError(msg, rule="no-crease", faces=tuple(sorted(top)), state=state)
+    spine = [
+        edge
+        for edge, faces in state.creases.items()
+        if state.is_folded(edge)
+        and len(set(faces) & top) == 1
+        and not _along(state, edge, line)
+    ]
+    if not spine:
+        msg = f"the top layer at {flap} has no folded side to open"
+        raise RefusalError(msg, rule="no-side", faces=tuple(sorted(top)), state=state)
+    beneath = {f for edge in spine for f in state.creases[edge]} - top
+    bottom = _side_of(state, flat_with(state, beneath), line, side)
+    ends = {
+        v
+        for edge in spine
+        for v in edge
+        if line.contains(state.folded_point(state.edges[edge][0], v))
+    }
+    over = _toward_viewer(state, top)
+    changes = dict.fromkeys(spine, "F")
+    changes |= dict.fromkeys(hinge, over)
+    for layer, kind in (
+        (top, "V" if over == "M" else "M"),
+        (bottom, _toward_viewer(state, bottom)),
+    ):
+        halves = [
+            edge
+            for edge in _flat_creases(state, layer, line, along_line=False)
+            if set(edge) & ends
+        ]
+        if not halves:
+            msg = f"no precreased crease of the flap at {flap} runs from its side"
+            raise RefusalError(
+                msg, rule="no-crease", faces=tuple(sorted(layer)), state=state
+            )
+        changes |= dict.fromkeys(halves, kind)
+    still = next(f for edge in hinge for f in state.creases[edge] if f not in top)
+    return collapse(state, changes, still)
+
+
+def _side_of(state: State, faces: set[int], line: Line, side: int) -> set[int]:
+    """The faces of a set that lie on one side of a line once folded."""
+    return {f for f in faces if all(line.side(p) in {0, side} for p in state.folded[f])}
+
+
+def _toward_viewer(state: State, layer: set[int]) -> str:
+    """How a crease of a layer reads that folds part of it up toward the viewer."""
+    return "M" if state.flips(min(layer)) else "V"
 
 
 @dataclass(frozen=True, slots=True)

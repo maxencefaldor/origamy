@@ -102,6 +102,7 @@ A named move computes its creases and collapses in one step, judged like any col
 | --- | --- |
 | `reverse(line, flap, layers=None, outside=False)` | Turns the tip of a folded flap inside out between its two halves; `outside=True` wraps it around them |
 | `petal(line, flap)` | Lifts the top layer over a line while its sides fold in along precreased creases |
+| `squash(line, flap)` | Swings the top flap over a line and presses it flat, each of its layers folding in half along precreased creases |
 
 ### Reverse folds
 
@@ -170,3 +171,23 @@ paper.petal(top, flap=midpoint(corner, midpoint(top_left, middle)))
 ```
 
 ![Every step of the bird base, each next fold dashed](../images/bird-base-steps.png)
+
+### Squash folds
+
+A squash fold swings the top flap at the flap point over the line and presses it flat.
+The flap's top layer is the top face at the flap point, with every face it continues into across flat creases on its side of the line.
+Its creases along the line are its hinge, and its folded side, off the line, joins it to the layer beneath.
+The top layer swings over the hinge, and the side opens flat, so the layer beneath spreads out on the near side.
+The creases that run from where the side meets the line into both layers fold each layer in half.
+The script must precrease these creases first.
+
+The paper refuses a squash fold with no crease of the top layer along its line, or with no precreased crease in a layer (`no-crease`).
+It refuses a top layer with no folded side off the line (`no-side`).
+A frog base folds each flap's side to the middle line and back, then squashes the flap there:
+
+```python
+center, tip, side = (paper.where(p) for p in (("1/2", "1/2"), (0, 0), ("1/2", 0)))
+flap = midpoint(side, midpoint(center, tip))
+paper.precrease(bisect(side, center, tip), flap=flap, layers=2)
+paper.squash(Line.through(center, tip), flap=flap)
+```

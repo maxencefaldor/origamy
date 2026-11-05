@@ -70,7 +70,7 @@ uv run origamy view models/crane.py --azimuth 90 --elevation 10
 A build writes `name.html`, a standalone page that replays the fold step by step in 3D.
 The page holds the build as data and loads three.js from jsDelivr, so it needs a network connection but no server.
 The crease pattern sits beside the folded paper, and each step's motion animates.
-A fold turns its paper about the fold line, and a collapse, reverse fold or petal fold turns its creases together, as rigid origami, so the paper stays whole on the way.
+A fold turns its paper about the fold line, and a collapse, reverse, petal or squash fold turns its creases together, as rigid origami, so the paper stays whole on the way.
 Layers sit a small gap apart, and a fold's crease bends round from one layer to the other, so a folded edge reads as one sheet.
 
 ![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](../images/viewer.png)
