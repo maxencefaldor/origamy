@@ -6,6 +6,7 @@ the refused action, as a crease pattern, the folded paper and an x-ray. The seco
 every step, as diagrams do. Shaped paper shows in space, tilted, in place of from above.
 """
 
+import asyncio
 import os
 from collections.abc import Sequence
 from html import escape
@@ -52,11 +53,24 @@ _NEXT: dict[str, str | float] = {
 
 
 async def render(result: BuildResult, name: str, overview: Path, steps: Path) -> None:
-    """Write a build's two pictures."""
-    pages = [(_overview(result, name), overview), (_steps(result, name), steps)]
+    """Write a build's two pictures.
+
+    Chromium starts while the pictures' pages are drawn.
+    """
     executable = os.environ.get(BROWSER) or None
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(executable_path=executable)
+        launching = asyncio.ensure_future(
+            playwright.chromium.launch(executable_path=executable)
+        )
+        try:
+            pages = await asyncio.to_thread(
+                lambda: [
+                    (_overview(result, name), overview),
+                    (_steps(result, name), steps),
+                ]
+            )
+        finally:
+            browser = await launching
         try:
             page = await browser.new_page(viewport={"width": 1400, "height": 800})
             for html, path in pages:

@@ -250,10 +250,19 @@ class BuildResult(_Data):
         default=(),
         description="The radicands of the build's tower of numbers, level 1 first.",
     )
+    layers: int = Field(
+        default=0,
+        description="The most layers of paper at one point after the last step.",
+    )
+    thickest: tuple[NumberData, NumberData] | None = Field(
+        default=None,
+        description="A point where that many layers lie, as exact x and y.",
+    )
 
     @classmethod
     def of(cls, paper: Paper, root: Path, refused: Step | None = None) -> Self:
         """The result of a script that folded ``paper``, paths relative to ``root``."""
+        layers, point = paper.state.thickest
         return cls(
             paper=PaperData(
                 width=paper.width.data(),
@@ -264,4 +273,6 @@ class BuildResult(_Data):
             steps=tuple(StepData.of(step, root) for step in paper.steps),
             refused=StepData.of(refused, root) if refused else None,
             tower=tuple(radicand.data() for radicand in radicands()),
+            layers=layers,
+            thickest=(point.x.data(), point.y.data()),
         )

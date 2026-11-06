@@ -18,6 +18,7 @@ from pydantic_settings import CliPositionalArg
 from origamy.errors import OrigamyError
 from origamy.exports import to_fold
 from origamy.field import Number, tower
+from origamy.geometry import Point
 from origamy.provenance import Source
 from origamy.render import render
 from origamy.result import BuildResult, DiagnosticData, Failure, StepData
@@ -182,8 +183,12 @@ async def build(request: BuildRequest) -> BuildReport:
         if result.refused.refusal:
             refused = Fact.of(step, result.refused, result.refused.refusal)
     with tower(Number.from_data(radicand) for radicand in result.tower):
-        layers, point = result.steps[-1].state.state().thickest
-        thickest = str(point)
+        layers = result.layers
+        thickest = (
+            str(Point(*(Number.from_data(c) for c in result.thickest)))
+            if result.thickest
+            else ""
+        )
         stem = script.with_suffix("")
         fold_file = stem.with_suffix(".fold")
         fold_file.write_text(
@@ -194,9 +199,12 @@ async def build(request: BuildRequest) -> BuildReport:
         if request.pictures:
             overview = stem.with_suffix(".png")
             steps = stem.with_name(f"{stem.name}.steps.png")
-            await render(result, script.stem, overview, steps)
-            viewer = await asyncio.to_thread(
-                write_viewer, result, script.stem, stem.with_suffix(".html")
+            # The viewer is written while Chromium draws the pictures.
+            _, viewer = await asyncio.gather(
+                render(result, script.stem, overview, steps),
+                asyncio.to_thread(
+                    write_viewer, result, script.stem, stem.with_suffix(".html")
+                ),
             )
             files += [overview, steps, viewer]
     return BuildReport(
