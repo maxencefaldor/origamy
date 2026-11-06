@@ -87,6 +87,9 @@ class CreasePattern:
     """The paper's width."""
     height: Number
     """The paper's height."""
+    outline: tuple[Point, ...]
+    """The paper's corners: the convex hull of its edges' ends, counterclockwise from
+    the lowest leftmost corner."""
     valleys: tuple[Segment, ...] = ()
     mountains: tuple[Segment, ...] = ()
     flats: tuple[Segment, ...] = ()
@@ -100,7 +103,8 @@ class CreasePattern:
     def read(cls, path: str | Path, *, tolerance: float = TOLERANCE) -> CreasePattern:
         """Read a crease pattern from a FOLD file or an ORIPA ``.cp`` file.
 
-        The paper's lower left corner goes to (0, 0) and its longer side to length 1.
+        The box around the paper's edges goes from (0, 0), and its longer side to
+        length 1.
         ``tolerance`` is how far, as a share of that side, a coordinate may lie from the
         exact number it snaps to.
 
@@ -126,17 +130,40 @@ class CreasePattern:
         exact = _exact([(p, q) for _, p, q in segments], tolerance)
         width = snap((max(xs) - left) / size, tolerance)
         height = snap((max(ys) - bottom) / size, tolerance)
-        kinds: dict[str, list[Segment]] = {"V": [], "M": [], "F": []}
+        kinds: dict[str, list[Segment]] = {"B": [], "V": [], "M": [], "F": []}
         for kind, p, q in segments:
-            if kind in kinds:
-                kinds[kind].append((exact[_key(p)], exact[_key(q)]))
+            kinds[kind].append((exact[_key(p)], exact[_key(q)]))
+        corners = {end for edge in kinds["B"] for end in edge} or {
+            Point(x, y) for x in (ZERO, width) for y in (ZERO, height)
+        }
         return cls(
             width,
             height,
+            _hull(corners),
             tuple(kinds["V"]),
             tuple(kinds["M"]),
             tuple(kinds["F"]),
         )
+
+
+def _hull(points: Iterable[Point]) -> tuple[Point, ...]:
+    """The convex hull's corners, counterclockwise from the lowest leftmost point."""
+    ordered = sorted(set(points), key=cmp_to_key(_by_place))
+    chains: list[list[Point]] = [[], []]
+    for chain, run in zip(chains, (ordered, ordered[::-1]), strict=True):
+        for point in run:
+            while len(chain) >= 2 and orientation(chain[-2], chain[-1], point) <= 0:  # noqa: PLR2004 - a turn needs two corners
+                chain.pop()
+            chain.append(point)
+    lower, upper = chains
+    return (*lower[:-1], *upper[:-1])
+
+
+def _by_place(p: Point, q: Point) -> int:
+    """Order points by x, then by y."""
+    if p.x != q.x:
+        return -1 if p.x < q.x else 1
+    return (p.y > q.y) - (p.y < q.y)
 
 
 def _key(point: _Float) -> _Float:

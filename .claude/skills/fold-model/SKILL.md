@@ -53,7 +53,7 @@ def fold() -> Paper:
   `layers=n` takes the top n layers there instead of all the paper on that side.
 - The folds are `valley`, `mountain`, `unfold`, `precrease`, `collapse`, `reverse`, `petal`, `squash` and `turn_over`.
 - `crease(segments)` creases the open paper along a whole crease pattern, and one `collapse` then folds it.
-  `CreasePattern.read(path)` reads a pattern from a FOLD or ORIPA file.
+  `CreasePattern.read(path)` reads a pattern from a FOLD or ORIPA file, and `Paper.polygon(pattern.outline)` makes its paper.
 - The angles are set by `shape`, `flex` and `tilt`.
   `shape(line, flap, angle, layers)` turns a flap about its hinge by an angle, up when positive.
   `flex({crease: angle})` folds creases to angles, from 0 open to 180 pressed flat, and the creases around each vertex follow together.

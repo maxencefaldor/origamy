@@ -7,6 +7,8 @@ Fold scripts locate points and fold lines on the paper as it lies now, in exact 
 The paper starts unfolded and front up, from (0, 0) to (width, height).
 The x axis points right and the y axis points up, as seen from above.
 The call `Paper.square()` makes a square from (0, 0) to (1, 1), and `Paper(2, 1)` makes a rectangle twice as wide as it is tall.
+The call `Paper.polygon(corners)` makes paper of any convex shape, its corners counterclockwise, touching both axes.
+A hexagon is `Paper.polygon([(1, 0), (3, 0), (4, "√3"), (3, "2√3"), (1, "2√3"), (0, "√3")])`.
 The paper's front is vermilion and its back is cream, and the arguments `front` and `back` take other colors as hex codes.
 
 Every coordinate names a place where the paper lies now, after every step so far.

@@ -17,7 +17,7 @@ from origamy.actions import Outcome, Sense
 from origamy.checks import is_referenced, where
 from origamy.errors import OrigamyError
 from origamy.field import Exact, Number
-from origamy.geometry import Line, Point, PointLike
+from origamy.geometry import Line, Point, PointLike, bounds, convex
 from origamy.provenance import Source, capture
 from origamy.rules import Diagnostic, RefusalError
 from origamy.space import Form, Shaped, Turn
@@ -130,6 +130,38 @@ class Paper:
     ) -> Paper:
         """A square of paper from (0, 0) to (size, size), its front up."""
         return cls(size, size, front=front, back=back)
+
+    @classmethod
+    def polygon(
+        cls,
+        corners: Iterable[PointLike],
+        *,
+        front: str = DEFAULT_FRONT,
+        back: str = DEFAULT_BACK,
+    ) -> Paper:
+        """Unfolded paper of a convex shape, its corners counterclockwise, front up.
+
+        The paper's lowest corner lies on the x axis and its leftmost on the y axis,
+        so the paper fills the box from (0, 0) to its width and height.
+
+        Raises:
+            ValueError: The corners turn other than left at every corner, or the
+                paper reaches below the x axis or left of the y axis, or not to them.
+        """
+        points = [Point.of(c) for c in corners]
+        if not convex(points):
+            msg = "the paper's corners must turn left at each one, round a convex shape"
+            raise ValueError(msg)
+        left, bottom, right, top = bounds(points)
+        if left or bottom:
+            msg = (
+                f"the paper must reach the x and y axes, not stop at ({left}, {bottom})"
+            )
+            raise ValueError(msg)
+        paper = cls(right, top, front=front, back=back)
+        description = f"paper with {len(points)} corners, front up"
+        paper.steps = [Step("start", description, State.sheet(points))]
+        return paper
 
     @property
     def state(self) -> State:

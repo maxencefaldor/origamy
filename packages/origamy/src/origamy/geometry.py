@@ -10,7 +10,7 @@ that line, and a reflection takes its entries from the line's own coordinates.
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import override
+from typing import Final, override
 
 from origamy.field import ONE, ZERO, Exact, Number, Real, remembered
 
@@ -19,6 +19,9 @@ type PointLike = Point | tuple[Exact, Exact]
 
 type Polygon = tuple[Point, ...]
 """A convex polygon, its corners counterclockwise."""
+
+_FEWEST_CORNERS: Final = 3
+"""The fewest corners a polygon has."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +308,14 @@ def orientation(p: Point, q: Point, r: Point) -> int:
     ) * (r.x.estimate() - p.x.estimate())
     side = estimate.sign()
     return (q - p).cross(r - p).sign() if side is None else side
+
+
+def convex(polygon: Sequence[Point]) -> bool:
+    """Whether a polygon turns left at each corner: convex, counterclockwise."""
+    return len(polygon) >= _FEWEST_CORNERS and all(
+        orientation(p, q, r) > 0
+        for (p, q), r in zip(sides(polygon), [*polygon[2:], *polygon[:2]], strict=True)
+    )
 
 
 def sides(polygon: Sequence[Point]) -> list[tuple[Point, Point]]:

@@ -224,13 +224,14 @@ from origamy import CreasePattern, Paper
 
 def fold() -> Paper:
     pattern = CreasePattern.read("models/frog_base.cp")
-    paper = Paper(pattern.width, pattern.height)
+    paper = Paper.polygon(pattern.outline)
     paper.crease(pattern.creases)
     paper.collapse(valleys=pattern.valleys, mountains=pattern.mountains)
     return paper
 ```
 
-The paper's lower left corner goes to (0, 0), and its longer side to length 1.
+The box around the paper's edges goes from (0, 0), and its longer side to length 1.
+The pattern's `outline` gives the paper's corners, the convex hull of its edges' ends, for `Paper.polygon`.
 A file gives its coordinates as floats, and reading finds the exact number each one stands for.
 
 | Candidate | Size |

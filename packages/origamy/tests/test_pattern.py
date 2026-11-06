@@ -159,3 +159,54 @@ def test_a_crease_through_a_vertex_meets_the_creases_there() -> None:
         sum(center in (state.vertices[u], state.vertices[v]) for u, v in state.creases)
         == 4
     )
+
+
+def test_a_pattern_on_hexagonal_paper_folds_on_its_outline(tmp_path: Path) -> None:
+    # A hexagon folded in half along its long diagonal, written in ORIPA's format.
+    height = 3**0.5
+    corners = [
+        (1, 0),
+        (3, 0),
+        (4, height),
+        (3, 2 * height),
+        (1, 2 * height),
+        (0, height),
+    ]
+    rows = [
+        f"1 {x} {y} {u} {v}"
+        for (x, y), (u, v) in zip(corners, [*corners[1:], corners[0]], strict=True)
+    ]
+    path = tmp_path / "hexagon.cp"
+    path.write_text("\n".join([*rows, f"3 0 {height} 4 {height}"]), encoding="utf-8")
+    pattern = CreasePattern.read(path)
+    assert pattern.outline == tuple(
+        Point.of((Fraction(x, 4), y))
+        for x, y in [
+            (0, "√3/4"),
+            (1, 0),
+            (3, 0),
+            (4, "√3/4"),
+            (3, "√3/2"),
+            (1, "√3/2"),
+        ]
+    )
+    paper = Paper.polygon(pattern.outline)
+    paper.crease(pattern.creases)
+    paper.collapse(valleys=pattern.valleys)
+    assert paper.thickest()[0] == 2
+
+
+@pytest.mark.parametrize(
+    "corners",
+    [
+        [(0, 0), (1, 1), (1, 0)],
+        [(0, 0), (2, 0), (1, "1/2"), (2, 1), (0, 1)],
+        [(1, 1), (2, 1), (2, 2)],
+    ],
+    ids=["clockwise", "concave", "off-axes"],
+)
+def test_paper_must_be_convex_and_counterclockwise_on_the_axes(
+    corners: list[tuple[int | str, int | str]],
+) -> None:
+    with pytest.raises(ValueError, match="paper"):
+        Paper.polygon(corners)
