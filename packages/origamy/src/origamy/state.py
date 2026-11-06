@@ -18,12 +18,9 @@ from origamy.geometry import (
     Line,
     Point,
     Polygon,
-    area,
     center,
     clip,
     covers,
-    crosses,
-    inside,
     overlaps,
     sides,
 )
@@ -156,8 +153,10 @@ class State:
         """The most layers of paper at one point once folded, and a point inside them.
 
         Cutting a footprint along the sides of every footprint that overlaps it leaves
-        cells that each of those footprints covers whole or misses. A cell's center then
-        counts the layers over the whole cell, each footprint's faces all at once.
+        cells that each of those footprints covers whole or misses. A cell on the outer
+        side of any side of a footprint misses it, so each cut lowers a bound on the
+        cell's layers. Depth first, a cell whose bound reaches no further than the most
+        found so far is dropped uncut.
         """
         shapes, stacked = self.footprints, self.stacked
         near: dict[int, set[int]] = defaultdict(set)
@@ -173,26 +172,14 @@ class State:
         for a in sorted(range(len(shapes)), key=lambda a: -bound(a)):
             if bound(a) <= most:
                 break
-            cells = [shapes[a]]
-            lines = {Line.through(p, q) for b in near[a] for p, q in sides(shapes[b])}
-            for line in sorted(lines, key=str):
-                cells = [
-                    part
-                    for cell in cells
-                    for part in (
-                        [clip(cell, line, keep) for keep in (1, -1)]
-                        if crosses(cell, line)
-                        else [cell]
-                    )
-                    if area(part).sign()
-                ]
-            for cell in cells:
-                point = center(cell)
-                count = depth[a] + sum(
-                    depth[b] for b in near[a] if inside(shapes[b], point)
-                )
-                if count > most:
-                    most, where = count, point
+            # Each line cut holds the footprints with a side along it: their bit, the
+            # side their inside lies on, and their layers.
+            users: dict[Line, list[tuple[int, int, int]]] = defaultdict(list)
+            for k, b in enumerate(sorted(near[a])):
+                for line, side in _inner_sides(shapes[b]).items():
+                    users[line].append((1 << k, side, depth[b]))
+            if deeper := _deepest(shapes[a], users, bound(a), most):
+                most, where = deeper
         return most, where
 
     def is_above(self, upper: int, lower: int) -> bool:
@@ -321,3 +308,60 @@ def _insert(
                 sorted(between, key=lambda w: direction.dot(vertices[w] - start))
             )
     return tuple(result)
+
+
+def _inner_sides(polygon: Polygon) -> dict[Line, int]:
+    """The line of each side of a convex polygon, and the side its inside lies on."""
+    inner = {}
+    for p, q in sides(polygon):
+        line = Line.through(p, q)
+        inner[line] = next(side for corner in polygon if (side := line.side(corner)))
+    return inner
+
+
+def _deepest(
+    shape: Polygon,
+    users: Mapping[Line, list[tuple[int, int, int]]],
+    upper: int,
+    most: int,
+) -> tuple[int, Point] | None:
+    """The deepest cell of a footprint, if deeper than ``most``, and a point inside it.
+
+    Each cell carries how many lines it has been cut along, the footprints it misses
+    as bits, and its bound on layers.
+    """
+    lines = sorted(users, key=str)
+    found: tuple[int, Point] | None = None
+    cells = [(shape, 0, 0, upper)]
+    while cells:
+        cell, cuts, missed, upper = cells.pop()
+        if upper <= most:
+            continue
+        if cuts == len(lines):
+            most = upper
+            found = most, center(cell)
+            continue
+        line = lines[cuts]
+        sides_of = {line.side(p) for p in cell}
+        parts = (
+            [(clip(cell, line, side), side) for side in (1, -1)]
+            if 1 in sides_of and -1 in sides_of
+            else [(cell, 1 if 1 in sides_of else -1)]
+        )
+        split = []
+        for part, side in parts:
+            lost = [
+                (bit, layers)
+                for bit, inside, layers in users[line]
+                if inside != side and not missed & bit
+            ]
+            split.append(
+                (
+                    part,
+                    cuts + 1,
+                    missed | sum(bit for bit, _ in lost),
+                    upper - sum(layers for _, layers in lost),
+                )
+            )
+        cells += sorted(split, key=lambda entry: entry[3])
+    return found

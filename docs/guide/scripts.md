@@ -69,7 +69,7 @@ Each warning names the line in `hem()`, then the line in `fold()` that called it
 hem.py: 2 steps folded
 warn[unreferenced-fold] step 1, valley fold along x = 1/8, the paper at (1/16, 1/2): models/hem.py:5 in hem(), called from models/hem.py:10 in fold(): no point or line on the paper locates the fold line x = 1/8
 warn[unreferenced-fold] step 2, valley fold along x = 7/8, the paper at (15/16, 1/2): models/hem.py:5 in hem(), called from models/hem.py:11 in fold(): no point or line on the paper locates the fold line x = 7/8
-2 layers at most, at (13/16, 1/2)
+2 layers at most, at (3/16, 1/2)
 wrote models/hem.fold, models/hem.png, models/hem.steps.png, models/hem.html
 ```
 

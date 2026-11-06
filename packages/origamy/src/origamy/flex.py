@@ -13,7 +13,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import accumulate, pairwise
-from math import atan2, ceil, cos, pi, radians, remainder, sin, sqrt, tau
+from math import atan2, ceil, cos, inf, pi, radians, remainder, sin, sqrt, tau
 from typing import Final, cast
 
 import numpy as np
@@ -44,6 +44,10 @@ _CLOSED: Final = 1e-11
 """How far from undone the turns around a vertex may stay, in radians."""
 _TRIES: Final = 40
 """How many corrections the solver makes at each step before it gives up."""
+_SHRINK: Final = 0.9
+"""How much a correction must shrink the loops' largest gap to count as progress."""
+_STALLED: Final = 5
+"""How many corrections in a row without progress make the solver give up early."""
 _FRAMES: Final = 8
 """How many parts the forms a flex passes through divide its path into."""
 _TOUCH: Final = 1e-7
@@ -460,7 +464,8 @@ def _close(loops: _Loops, angles: list[float], driven: set[int]) -> bool:
     """Turn the free creases as little as closes every loop; whether it does.
 
     Each correction is Newton's: the smallest turns of the free creases that close
-    every loop to first order, as least squares find them.
+    every loop to first order, as least squares find them. The solver gives up when
+    corrections stop shrinking the largest gap.
     """
     free = np.array(sorted(loops.used - driven), dtype=np.int64)
     column = np.full(len(angles), -1, dtype=np.int64)
@@ -468,12 +473,16 @@ def _close(loops: _Loops, angles: list[float], driven: set[int]) -> bool:
     columns = np.where(loops.creases >= 0, column[loops.creases], -1)
     turned = np.array(angles, dtype=float)
     closed = False
+    best, stalled = inf, 0
     for _ in range(_TRIES):
         residuals, jacobian = _linearize(loops, turned, columns, len(free))
-        if not residuals.size or float(np.max(np.abs(residuals))) < _CLOSED:
+        gap = float(np.max(np.abs(residuals))) if residuals.size else 0.0
+        if gap < _CLOSED:
             closed = True
             break
-        if not len(free):
+        stalled = 0 if gap < _SHRINK * best else stalled + 1
+        best = min(best, gap)
+        if not len(free) or stalled == _STALLED:
             break
         turned[free] -= np.linalg.lstsq(jacobian, residuals, rcond=_RANK)[0]
     angles[:] = turned.tolist()

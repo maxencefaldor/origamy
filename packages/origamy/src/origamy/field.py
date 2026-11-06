@@ -97,7 +97,7 @@ class Number:
         2 + √2
     """
 
-    __slots__ = ("_estimate", "denominator", "numerators")
+    __slots__ = ("_estimate", "_hash", "denominator", "numerators")
 
     numerators: Coefficients
     """One integer for each product of the tower's roots, 2 to the level of them."""
@@ -120,6 +120,7 @@ class Number:
             denominator = 1
         self.numerators, self.denominator = numerators, denominator
         self._estimate: Estimate | None = None
+        self._hash: int | None = None
 
     @classmethod
     def of(cls, value: Exact) -> Number:
@@ -288,9 +289,13 @@ class Number:
     @override
     def __hash__(self) -> int:
         """A hash equal to a rational's own when the number is rational."""
-        if self.rational:
-            return hash(self.fraction())
-        return hash((self.numerators, self.denominator))
+        if self._hash is None:
+            self._hash = (
+                hash(self.fraction())
+                if self.rational
+                else hash((self.numerators, self.denominator))
+            )
+        return self._hash
 
     def __lt__(self, other: Real) -> bool:
         """Whether this number is less than another."""
