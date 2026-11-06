@@ -202,6 +202,14 @@ impl Number {
     /// The sum.
     #[must_use]
     pub fn plus(&self, other: &Number) -> Number {
+        if let Some(sum) = self.small_pair(other).and_then(|((a, b), (c, d))| {
+            rational(
+                i128::from(a) * i128::from(d) + i128::from(c) * i128::from(b),
+                i128::from(b) * i128::from(d),
+            )
+        }) {
+            return sum;
+        }
         if self.denominator == other.denominator {
             return Number::new(
                 plus(&self.numerators, &other.numerators),
@@ -217,7 +225,24 @@ impl Number {
     /// The difference.
     #[must_use]
     pub fn minus(&self, other: &Number) -> Number {
-        self.plus(&other.negated())
+        if let Some(difference) = self.small_pair(other).and_then(|((a, b), (c, d))| {
+            rational(
+                i128::from(a) * i128::from(d) - i128::from(c) * i128::from(b),
+                i128::from(b) * i128::from(d),
+            )
+        }) {
+            return difference;
+        }
+        if self.denominator == other.denominator {
+            return Number::new(
+                difference(&self.numerators, &other.numerators),
+                self.denominator.clone(),
+            );
+        }
+        let common = &self.denominator * &other.denominator;
+        let x = scaled(&self.numerators, &other.denominator);
+        let y = scaled(&other.numerators, &self.denominator);
+        Number::new(difference(&x, &y), common)
     }
 
     /// The opposite number.
@@ -232,6 +257,11 @@ impl Number {
     /// The product.
     #[must_use]
     pub fn times(&self, other: &Number, tower: &Tower) -> Number {
+        if let Some(product) = self.small_pair(other).and_then(|((a, b), (c, d))| {
+            rational(i128::from(a) * i128::from(c), i128::from(b) * i128::from(d))
+        }) {
+            return product;
+        }
         let denominator = &self.denominator * &other.denominator;
         if other.is_rational() {
             return Number::new(scaled(&self.numerators, &other.numerators[0]), denominator);
@@ -314,6 +344,21 @@ impl Number {
             return sign.cmp(&0);
         }
         self.minus(other).sign(tower).cmp(&0)
+    }
+
+    /// Both numbers as fractions of small integers, when both are rational and small.
+    fn small_pair(&self, other: &Number) -> Option<((i64, i64), (i64, i64))> {
+        match (
+            &self.numerators[..],
+            &self.denominator,
+            &other.numerators[..],
+            &other.denominator,
+        ) {
+            ([Int::Small(a)], Int::Small(b), [Int::Small(c)], Int::Small(d)) => {
+                Some(((*a, *b), (*c, *d)))
+            }
+            _ => None,
+        }
     }
 
     /// The number as `a + b√d` at its level, `a` and `b` one level down.
@@ -460,6 +505,18 @@ fn plus(x: &[Int], y: &[Int]) -> Coefficients {
         .collect()
 }
 
+/// The coefficients of a difference, as long as the longer of the two.
+fn difference(x: &[Int], y: &[Int]) -> Coefficients {
+    (0..x.len().max(y.len()))
+        .map(|i| match (x.get(i), y.get(i)) {
+            (Some(a), Some(b)) => a - b,
+            (Some(a), None) => a.clone(),
+            (None, Some(b)) => -b,
+            (None, None) => Int::ZERO,
+        })
+        .collect()
+}
+
 fn minus(x: &[Int], y: &[Int]) -> Coefficients {
     x.iter().zip(y).map(|(a, b)| a - b).collect()
 }
@@ -481,6 +538,40 @@ fn product(x: &[Int], y: &[Int], vectors: &[Coefficients]) -> Coefficients {
     let mut out = plus(&ac, &product(&be, radicand, vectors));
     out.extend(minus(&minus(&mixed, &ac), &be));
     out
+}
+
+/// The fraction `numerator / denominator` in lowest terms, its denominator positive, when
+/// both fit in 64 bits once reduced. The denominator is positive and never zero.
+fn rational(numerator: i128, denominator: i128) -> Option<Number> {
+    if numerator == 0 {
+        return Some(Number::zero());
+    }
+    let common = gcd_i128(numerator, denominator);
+    let (n, d) = (
+        i64::try_from(numerator / common).ok()?,
+        i64::try_from(denominator / common).ok()?,
+    );
+    Some(Number {
+        numerators: smallvec![Int::Small(n)],
+        denominator: Int::Small(d),
+    })
+}
+
+/// The greatest common divisor of two integers, the second positive.
+fn gcd_i128(a: i128, b: i128) -> i128 {
+    let (mut a, mut b) = (a.unsigned_abs(), b.unsigned_abs());
+    let shift = (a | b).trailing_zeros();
+    a >>= a.trailing_zeros();
+    loop {
+        b >>= b.trailing_zeros();
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        b -= a;
+        if b == 0 {
+            return i128::try_from(a << shift).expect("a divisor of an i128 fits in one");
+        }
+    }
 }
 
 /// The product of two coefficient vectors over a tower of integer radicands: each pair

@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::field::{Number, Tower};
-use crate::geometry::{Line, Point, float_box, orientation};
+use crate::geometry::{Line, Point, float_box, left_of, orientation};
 
 /// A segment, with a label and a side its caller cares about.
 #[derive(Clone, Debug)]
@@ -40,6 +40,9 @@ pub struct Edge {
     pub line: u32,
     /// The segments covering it, by index.
     pub segments: Vec<u32>,
+    /// The side of its line, as [`Line::side`] gives it, on the left of the way from
+    /// its first vertex to its second.
+    pub left: i32,
 }
 
 /// The stretches that segments make of their lines: an arrangement's vertices and
@@ -180,6 +183,7 @@ impl Stretches {
                         ends: [vertex(&stops[k].1), vertex(&stops[k + 1].1)],
                         line: u32::try_from(l).expect("lines fit in 32 bits"),
                         segments: covering,
+                        left: left_of(&stops[k].1, &stops[k + 1].1, tower),
                     });
                 }
             }
@@ -215,18 +219,9 @@ impl Arrangement {
     /// The side of its line that a half-edge has on its left, as [`Line::side`] gives
     /// it.
     #[must_use]
-    pub fn left_side(&self, half: u32, tower: &Tower) -> i32 {
-        let edge = &self.edges[(half / 2) as usize];
-        let (tail, head) = (
-            &self.points[self.tail(half) as usize],
-            &self.points[self.head(half) as usize],
-        );
-        let d = head.minus(tail, tower);
-        let (nx, ny) = &self.lines[edge.line as usize].normal;
-        // The left of direction d is (-dy, dx); its side is the sign of the normal's dot.
-        ny.times(&d.x, tower)
-            .minus(&nx.times(&d.y, tower))
-            .sign(tower)
+    pub fn left_side(&self, half: u32) -> i32 {
+        let left = self.edges[(half / 2) as usize].left;
+        if half % 2 == 0 { left } else { -left }
     }
 }
 
@@ -308,7 +303,8 @@ fn crossings(
                 {
                     continue;
                 }
-                if let Some(point) = meet(&segments[i], &segments[j], tower) {
+                let lines = (&lines[line_of[i] as usize], &lines[line_of[j] as usize]);
+                if let Some(point) = meet(&segments[i], &segments[j], lines, tower) {
                     found.push((i, j, point));
                 }
             }
@@ -319,7 +315,12 @@ fn crossings(
 
 /// Where two segments on crossing lines meet, if they do inside one of them: a meeting
 /// at both their ends is no news.
-fn meet(first: &(Point, Point), second: &(Point, Point), tower: &Tower) -> Option<Point> {
+fn meet(
+    first: &(Point, Point),
+    second: &(Point, Point),
+    (l, m): (&Line, &Line),
+    tower: &Tower,
+) -> Option<Point> {
     let ((a, b), (c, d)) = (first, second);
     if a == c || a == d || b == c || b == d {
         return None;
@@ -338,12 +339,12 @@ fn meet(first: &(Point, Point), second: &(Point, Point), tower: &Tower) -> Optio
         (_, _, 0, _) => a.clone(),
         (_, _, _, 0) => b.clone(),
         _ => {
-            // a + (b - a) · t, with t the share of c's distance from ab over cd's.
-            let ab = b.minus(a, tower);
-            let ca = c.minus(a, tower);
-            let cd = d.minus(c, tower);
-            let t = ca.cross(&cd, tower).over(&ab.cross(&cd, tower), tower);
-            a.plus(&ab.scaled(&t, tower), tower)
+            // Where the two lines meet: Cramer's rule on their equations.
+            let ((a, b), (c, d)) = (&l.normal, &m.normal);
+            let det = a.times(d, tower).minus(&b.times(c, tower)).inverse(tower);
+            let x = l.offset.times(d, tower).minus(&m.offset.times(b, tower));
+            let y = a.times(&m.offset, tower).minus(&c.times(&l.offset, tower));
+            Point::new(x.times(&det, tower), y.times(&det, tower), tower)
         }
     })
 }
@@ -380,14 +381,14 @@ fn before(p: &Point, q: &Point, tower: &Tower) -> bool {
 }
 
 /// Order directions counterclockwise from east.
-fn by_angle(first: &Point, second: &Point, tower: &Tower) -> Ordering {
-    let half = |v: &Point| -> u8 {
-        let y = v.y.sign(tower);
-        u8::from(!(y > 0 || (y == 0 && v.x.sign(tower) > 0)))
+fn by_angle(center: &Point, first: &Point, second: &Point, tower: &Tower) -> Ordering {
+    let half = |p: &Point| -> u8 {
+        let y = p.y.compare(&center.y, tower);
+        u8::from(!(y.is_gt() || (y.is_eq() && p.x.compare(&center.x, tower).is_gt())))
     };
     half(first)
         .cmp(&half(second))
-        .then_with(|| 0.cmp(&first.cross(second, tower).sign(tower)))
+        .then_with(|| 0.cmp(&orientation(center, first, second, tower)))
 }
 
 type Traced = (Vec<Vec<u32>>, Vec<u32>, Vec<bool>);
@@ -404,11 +405,15 @@ fn trace(points: &[Point], edges: &[Edge], tower: &Tower) -> Traced {
     let head = |h: u32| edges[(h / 2) as usize].ends[1 - (h % 2) as usize];
     let mut rank = vec![0u32; 2 * edges.len()];
     for (v, list) in leaving.iter_mut().enumerate() {
-        let directions: FxHashMap<u32, Point> = list
-            .iter()
-            .map(|&h| (h, points[head(h) as usize].minus(&points[v], tower)))
-            .collect();
-        list.sort_by(|a, b| by_angle(&directions[a], &directions[b], tower));
+        let center = &points[v];
+        list.sort_by(|&a, &b| {
+            by_angle(
+                center,
+                &points[head(a) as usize],
+                &points[head(b) as usize],
+                tower,
+            )
+        });
         for (k, &h) in list.iter().enumerate() {
             rank[h as usize] = u32::try_from(k).expect("degrees fit in 32 bits");
         }

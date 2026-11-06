@@ -78,7 +78,7 @@ impl Overlay {
                 continue;
             }
             let most = cycle.iter().all(|&h| {
-                let left = arrangement.left_side(h, tower);
+                let left = arrangement.left_side(h);
                 arrangement.edges[(h / 2) as usize]
                     .segments
                     .iter()
@@ -205,7 +205,7 @@ fn covers(
             if covers[other].is_some() {
                 continue;
             }
-            let left = arrangement.left_side(h, tower);
+            let left = arrangement.left_side(h);
             let mut next = cover.clone();
             for &s in &arrangement.edges[(h / 2) as usize].segments {
                 let segment = &segments[s as usize];
@@ -242,7 +242,7 @@ fn cover_beside(
     );
     let half_number = Number::integer(1).over(&Number::integer(2), tower);
     let middle = tail.plus(&head.minus(tail, tower).scaled(&half_number, tower), tower);
-    let left = arrangement.left_side(half, tower);
+    let left = arrangement.left_side(half);
     let edge = &arrangement.edges[(half / 2) as usize];
     let mut cover = vec![];
     for (k, shape) in footprints.iter().enumerate() {

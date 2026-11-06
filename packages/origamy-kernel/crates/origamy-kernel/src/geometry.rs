@@ -112,9 +112,11 @@ pub fn orientation(p: &Point, q: &Point, r: &Point, tower: &Tower) -> i32 {
     if r == p || r == q || p == q {
         return 0;
     }
-    q.minus(p, tower)
-        .cross(&r.minus(p, tower), tower)
-        .sign(tower)
+    let (ux, uy) = (q.x.minus(&p.x), q.y.minus(&p.y));
+    let (vx, vy) = (r.x.minus(&p.x), r.y.minus(&p.y));
+    ux.times(&vy, tower)
+        .minus(&uy.times(&vx, tower))
+        .exact_sign(tower)
 }
 
 /// The points `p` with `normal · p == offset`, the normal's first nonzero coordinate 1.
@@ -232,16 +234,17 @@ impl Isometry {
         let (nx, ny) = &line.normal;
         let two = Number::integer(2);
         let scale = two.over(&nx.times(nx, tower).plus(&ny.times(ny, tower)), tower);
+        let (sx, sy) = (scale.times(nx, tower), scale.times(ny, tower));
         let one = Number::one();
-        let xy = scale.times(nx, tower).times(ny, tower).negated();
+        let xy = sx.times(ny, tower).negated();
         Isometry {
             entries: [
-                one.minus(&scale.times(nx, tower).times(nx, tower)),
+                one.minus(&sx.times(nx, tower)),
                 xy.clone(),
                 xy,
-                one.minus(&scale.times(ny, tower).times(ny, tower)),
-                scale.times(&line.offset, tower).times(nx, tower),
-                scale.times(&line.offset, tower).times(ny, tower),
+                one.minus(&sy.times(ny, tower)),
+                line.offset.times(&sx, tower),
+                line.offset.times(&sy, tower),
             ],
         }
     }

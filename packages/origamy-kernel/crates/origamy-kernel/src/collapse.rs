@@ -245,17 +245,35 @@ fn check_vertices(paper: &Paper, target: &[Kind]) -> Result<(), CollapseError> {
                 valleys,
             });
         }
-        let mut turn = Isometry::identity();
-        for &c in &folds {
-            let [a, b] = paper.creases[c].0;
-            let line = Line::through(
-                &paper.vertices[a as usize],
-                &paper.vertices[b as usize],
-                tower,
+        // The reflections across the folds, one after another, turn the paper about the
+        // vertex. As complex numbers, the reflection across direction d maps z to
+        // d z̄ / d̄, so each two in turn rotate by w / w̄ with w = d₂ d̄₁: the whole turn
+        // is no turn exactly when the product of those w is real.
+        let mut product = (Number::one(), Number::zero());
+        for pair in folds.chunks(2) {
+            let (first, second) = (&directions[&pair[0]], &directions[&pair[1]]);
+            let w = (
+                second
+                    .x
+                    .times(&first.x, tower)
+                    .plus(&second.y.times(&first.y, tower)),
+                second
+                    .y
+                    .times(&first.x, tower)
+                    .minus(&second.x.times(&first.y, tower)),
             );
-            turn = Isometry::reflection(&line, tower).after(&turn, tower);
+            product = (
+                product
+                    .0
+                    .times(&w.0, tower)
+                    .minus(&product.1.times(&w.1, tower)),
+                product
+                    .0
+                    .times(&w.1, tower)
+                    .plus(&product.1.times(&w.0, tower)),
+            );
         }
-        if turn != Isometry::identity() {
+        if !product.1.is_zero() {
             let (cx, cy) = center.floats();
             let angles: Vec<f64> = folds
                 .iter()
