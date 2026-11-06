@@ -83,9 +83,9 @@ impl Folded {
                 .iter()
                 .position(|&c| c == vertex)
                 .expect("the face holds the crease");
-            images[corner_images[face as usize][at] as usize].clone()
+            &images[corner_images[face as usize][at] as usize]
         };
-        let ends: Vec<(Point, Point)> = creases
+        let ends: Vec<(&Point, &Point)> = creases
             .iter()
             .map(|&([v, w], [f, _])| (image(f, v), image(f, w)))
             .collect();

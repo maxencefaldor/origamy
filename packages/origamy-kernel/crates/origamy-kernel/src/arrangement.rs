@@ -21,11 +21,11 @@ use crate::geometry::{Line, Point, float_box, left_of, orientation};
 
 /// A segment, with a label and a side its caller cares about.
 #[derive(Clone, Debug)]
-pub struct Segment {
+pub struct Segment<'p> {
     /// One end.
-    pub start: Point,
+    pub start: &'p Point,
     /// The other end.
-    pub end: Point,
+    pub end: &'p Point,
     /// The caller's label.
     pub tag: u32,
     /// A side of the segment's line, as [`Line::side`] gives it, or 0.
@@ -85,7 +85,7 @@ impl Arrangement {
     ///
     /// When a segment's ends are equal.
     #[must_use]
-    pub fn new(segments: &[Segment], tower: &Tower) -> Arrangement {
+    pub fn new(segments: &[Segment<'_>], tower: &Tower) -> Arrangement {
         let Stretches {
             points,
             lines,
@@ -112,12 +112,12 @@ impl Stretches {
     ///
     /// When a segment's ends are equal.
     #[must_use]
-    pub fn new(segments: &[Segment], tower: &Tower) -> Stretches {
+    pub fn new(segments: &[Segment<'_>], tower: &Tower) -> Stretches {
         // Every end and crossing once, by an id in the order first met.
         let mut seen = Seen::default();
         let ends: Vec<[u32; 2]> = segments
             .iter()
-            .map(|s| [seen.id(&s.start), seen.id(&s.end)])
+            .map(|s| [seen.id(s.start), seen.id(s.end)])
             .collect();
         let (distinct, copies) = distinct(&ends, &seen.points, tower);
         let through: Vec<Line> = distinct
@@ -551,27 +551,41 @@ mod tests {
         Point::new(Number::integer(x), Number::integer(y), tower)
     }
 
-    fn segment(a: (i128, i128), b: (i128, i128), tag: u32, tower: &Tower) -> Segment {
-        Segment {
-            start: point(a.0, a.1, tower),
-            end: point(b.0, b.1, tower),
-            tag,
-            side: 0,
-        }
+    /// A segment as its two ends' coordinates and its tag.
+    type Ends = ((i128, i128), (i128, i128), u32);
+
+    fn arrangement(ends: &[Ends], tower: &Tower) -> Arrangement {
+        let points: Vec<(Point, Point)> = ends
+            .iter()
+            .map(|&(a, b, _)| (point(a.0, a.1, tower), point(b.0, b.1, tower)))
+            .collect();
+        let segments: Vec<Segment> = points
+            .iter()
+            .zip(ends)
+            .map(|((start, end), &(_, _, tag))| Segment {
+                start,
+                end,
+                tag,
+                side: 0,
+            })
+            .collect();
+        Arrangement::new(&segments, tower)
     }
 
     #[test]
     fn a_square_with_its_diagonals_has_four_faces_inside() {
         let tower = Tower::default();
-        let segments = [
-            segment((0, 0), (2, 0), 0, &tower),
-            segment((2, 0), (2, 2), 0, &tower),
-            segment((2, 2), (0, 2), 0, &tower),
-            segment((0, 2), (0, 0), 0, &tower),
-            segment((0, 0), (2, 2), 1, &tower),
-            segment((2, 0), (0, 2), 1, &tower),
-        ];
-        let arrangement = Arrangement::new(&segments, &tower);
+        let arrangement = arrangement(
+            &[
+                ((0, 0), (2, 0), 0),
+                ((2, 0), (2, 2), 0),
+                ((2, 2), (0, 2), 0),
+                ((0, 2), (0, 0), 0),
+                ((0, 0), (2, 2), 1),
+                ((2, 0), (0, 2), 1),
+            ],
+            &tower,
+        );
         assert_eq!(arrangement.points.len(), 5);
         assert_eq!(arrangement.edges.len(), 8);
         assert_eq!(arrangement.bounded.iter().filter(|&&b| b).count(), 4);
@@ -581,11 +595,7 @@ mod tests {
     #[test]
     fn overlapping_segments_share_their_common_stretch() {
         let tower = Tower::default();
-        let segments = [
-            segment((0, 0), (3, 0), 0, &tower),
-            segment((1, 0), (4, 0), 1, &tower),
-        ];
-        let arrangement = Arrangement::new(&segments, &tower);
+        let arrangement = arrangement(&[((0, 0), (3, 0), 0), ((1, 0), (4, 0), 1)], &tower);
         let covers: Vec<Vec<u32>> = arrangement
             .edges
             .iter()

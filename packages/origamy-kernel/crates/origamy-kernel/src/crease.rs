@@ -67,9 +67,9 @@ pub fn crease(
     }
     let segments: Vec<Segment> = (0u32..)
         .zip(&lines)
-        .map(|(tag, (p, q))| Segment {
-            start: p.clone(),
-            end: q.clone(),
+        .map(|(tag, (start, end))| Segment {
+            start,
+            end,
             tag,
             side: 0,
         })

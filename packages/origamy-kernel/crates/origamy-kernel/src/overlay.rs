@@ -13,6 +13,7 @@
 
 use std::collections::VecDeque;
 
+use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use crate::arrangement::{Arrangement, Segment};
@@ -44,7 +45,7 @@ impl Overlay {
     ///
     /// When the footprints and creases number 2³² or more, or a segment is a point.
     #[must_use]
-    pub fn new(footprints: &[Polygon], creases: &[(Point, Point)], tower: &Tower) -> Overlay {
+    pub fn new(footprints: &[Polygon], creases: &[(&Point, &Point)], tower: &Tower) -> Overlay {
         let count = u32::try_from(footprints.len()).expect("footprints fit in 32 bits");
         let mut segments = vec![];
         // A footprint runs counterclockwise, so its inside lies left of each side.
@@ -52,19 +53,19 @@ impl Overlay {
             for (p, q) in sides(shape) {
                 let side = left_of(p, q, tower);
                 segments.push(Segment {
-                    start: p.clone(),
-                    end: q.clone(),
+                    start: p,
+                    end: q,
                     tag: k,
                     side,
                 });
             }
         }
         // A crease takes a tag past the footprints' and no side: it changes no cover.
-        for (c, (p, q)) in creases.iter().enumerate() {
+        for (c, &(p, q)) in creases.iter().enumerate() {
             let tag = count + u32::try_from(c).expect("creases fit in 32 bits");
             segments.push(Segment {
-                start: p.clone(),
-                end: q.clone(),
+                start: p,
+                end: q,
                 tag,
                 side: 0,
             });
@@ -111,10 +112,10 @@ impl Overlay {
                 crossed[c].extend_from_slice(&both);
             }
         }
-        for through in &mut crossed {
+        crossed.par_iter_mut().for_each(|through| {
             through.sort_unstable();
             through.dedup();
-        }
+        });
         Overlay {
             arrangement,
             covers,
@@ -180,7 +181,7 @@ fn common(first: &[u32], second: &[u32]) -> Vec<u32> {
 /// The footprints covering each face, sorted.
 fn covers(
     arrangement: &Arrangement,
-    segments: &[Segment],
+    segments: &[Segment<'_>],
     footprints: &[Polygon],
     tower: &Tower,
 ) -> Vec<Vec<u32>> {
@@ -237,7 +238,7 @@ fn covers(
 fn cover_beside(
     arrangement: &Arrangement,
     half: u32,
-    segments: &[Segment],
+    segments: &[Segment<'_>],
     footprints: &[Polygon],
     tower: &Tower,
 ) -> Vec<u32> {
@@ -324,7 +325,7 @@ mod tests {
             let k = pick % distinct.len();
             let [left, bottom, right, _] = distinct[k];
             let crease = (point(left, bottom, &tower), point(right, bottom, &tower));
-            let overlay = Overlay::new(&footprints, &[crease], &tower);
+            let overlay = Overlay::new(&footprints, &[(&crease.0, &crease.1)], &tower);
             let expected: Vec<u32> = distinct
                 .iter()
                 .enumerate()
