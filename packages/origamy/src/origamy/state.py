@@ -7,10 +7,11 @@ Everything else, such as whether a crease is folded or flat, follows from these 
 """
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from itertools import combinations
+from typing import Final
 
 from origamy.geometry import (
     IDENTITY,
@@ -24,6 +25,10 @@ from origamy.geometry import (
     overlaps,
     sides,
 )
+
+_ROOM: Final = 1e-9
+"""How far, relative to its coordinates, a box in floats reaches beyond its polygon:
+far more than rounding moves a corner."""
 
 type Pair = tuple[int, int]
 """Two faces, the upper first: ``(upper, lower)``."""
@@ -126,13 +131,14 @@ class State:
 
     @cached_property
     def meeting(self) -> frozenset[Pair]:
-        """Every pair of footprints that share area, the lesser index first."""
+        """Every pair of footprints that share area, the lesser index first.
+
+        A sweep across the footprints' boxes, in floats with room for rounding, finds
+        the pairs whose boxes may meet, and exact geometry decides those alone.
+        """
         shapes = self.footprints
         return frozenset(
-            (a, b)
-            for a in range(len(shapes))
-            for b in range(a + 1, len(shapes))
-            if overlaps(shapes[a], shapes[b])
+            (a, b) for a, b in _near_pairs(shapes) if overlaps(shapes[a], shapes[b])
         )
 
     @cached_property
@@ -365,3 +371,26 @@ def _deepest(
             )
         cells += sorted(split, key=lambda entry: entry[3])
     return found
+
+
+def _near_pairs(shapes: Sequence[Polygon]) -> list[Pair]:
+    """The pairs of polygons whose boxes may meet, the lesser index first."""
+    boxes = []
+    for polygon in shapes:
+        points = [p.floats() for p in polygon]
+        xs, ys = [x for x, _ in points], [y for _, y in points]
+        room = _ROOM * max(1.0, *map(abs, xs), *map(abs, ys))
+        boxes.append((min(xs) - room, min(ys) - room, max(xs) + room, max(ys) + room))
+    order = sorted(range(len(boxes)), key=lambda k: boxes[k][0])
+    pairs: list[Pair] = []
+    active: list[int] = []
+    for k in order:
+        left, bottom, _, top = boxes[k]
+        active = [j for j in active if boxes[j][2] > left]
+        pairs.extend(
+            (min(j, k), max(j, k))
+            for j in active
+            if boxes[j][1] < top and bottom < boxes[j][3]
+        )
+        active.append(k)
+    return sorted(pairs)
