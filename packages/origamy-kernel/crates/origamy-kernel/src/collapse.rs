@@ -12,6 +12,7 @@
 
 use std::cmp::Ordering;
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::field::{Number, Tower};
@@ -132,7 +133,7 @@ pub fn collapse(
     }
     let change: Vec<Isometry> = paper
         .places
-        .iter()
+        .par_iter()
         .zip(&places)
         .map(|(old, new)| new.after(&inverse(old, tower), tower))
         .collect();
@@ -190,7 +191,6 @@ fn inverse(place: &Isometry, tower: &Tower) -> Isometry {
 
 /// Refuse an assignment that no flat fold meets at some vertex.
 fn check_vertices(paper: &Paper, target: &[Kind]) -> Result<(), CollapseError> {
-    let tower = &paper.tower;
     let on_border: FxHashSet<u32> = paper.border.iter().flatten().copied().collect();
     let mut order: Vec<u32> = vec![];
     let mut around: FxHashMap<u32, Vec<usize>> = FxHashMap::default();
@@ -205,7 +205,21 @@ fn check_vertices(paper: &Paper, target: &[Kind]) -> Result<(), CollapseError> {
             }
         }
     }
-    let away = |c: usize, v: u32| -> &Point {
+    let check = |v: u32| check_vertex(paper, target, v, &around[&v]);
+    // The vertices check on every core; the first to fail, in order, is the refusal.
+    let checked: Vec<Result<(), CollapseError>> = order.into_par_iter().map(check).collect();
+    checked.into_iter().collect()
+}
+
+/// Refuse an assignment that no flat fold meets at a vertex, given the creases at it.
+fn check_vertex(
+    paper: &Paper,
+    target: &[Kind],
+    v: u32,
+    creases: &[usize],
+) -> Result<(), CollapseError> {
+    let tower = &paper.tower;
+    let away = |c: usize| -> &Point {
         let [a, b] = paper.creases[c].0;
         &paper.vertices[if a == v { b } else { a } as usize]
     };
@@ -213,90 +227,92 @@ fn check_vertices(paper: &Paper, target: &[Kind]) -> Result<(), CollapseError> {
         let y = p.y.sign(tower);
         u8::from(!(y > 0 || (y == 0 && p.x.sign(tower) > 0)))
     };
-    for v in order {
-        let center = &paper.vertices[v as usize];
-        let mut creases = around.remove(&v).expect("each vertex has creases");
-        let directions: FxHashMap<usize, Point> = creases
-            .iter()
-            .map(|&c| (c, away(c, v).minus(center, tower)))
-            .collect();
-        creases.sort_by(|a, b| {
-            let (va, vb) = (&directions[a], &directions[b]);
-            half(va)
-                .cmp(&half(vb))
-                .then_with(|| 0.cmp(&va.cross(vb, tower).sign(tower)))
+    let center = &paper.vertices[v as usize];
+    let mut creases = creases.to_vec();
+    let directions: FxHashMap<usize, Point> = creases
+        .iter()
+        .map(|&c| (c, away(c).minus(center, tower)))
+        .collect();
+    creases.sort_by(|a, b| {
+        let (va, vb) = (&directions[a], &directions[b]);
+        half(va)
+            .cmp(&half(vb))
+            .then_with(|| 0.cmp(&va.cross(vb, tower).sign(tower)))
+    });
+    let folds: Vec<usize> = creases
+        .into_iter()
+        .filter(|&c| target[c] != Kind::Flat)
+        .collect();
+    if folds.is_empty() {
+        return Ok(());
+    }
+    let mountains = folds
+        .iter()
+        .filter(|&&c| target[c] == Kind::Mountain)
+        .count();
+    let valleys = folds.len() - mountains;
+    if mountains.abs_diff(valleys) != 2 {
+        return Err(CollapseError::Count {
+            vertex: v,
+            mountains,
+            valleys,
         });
-        let folds: Vec<usize> = creases
-            .into_iter()
-            .filter(|&c| target[c] != Kind::Flat)
-            .collect();
-        if folds.is_empty() {
-            continue;
-        }
-        let mountains = folds
+    }
+    // The reflections across the folds, one after another, turn the paper about the
+    // vertex. As complex numbers, the reflection across direction d maps z to
+    // d z̄ / d̄, so each two in turn rotate by w / w̄ with w = d₂ d̄₁: the whole turn
+    // is no turn exactly when the product of those w is real.
+    let mut product = (Number::one(), Number::zero());
+    for pair in folds.chunks(2) {
+        let (first, second) = (&directions[&pair[0]], &directions[&pair[1]]);
+        let w = (
+            second
+                .x
+                .times(&first.x, tower)
+                .plus(&second.y.times(&first.y, tower)),
+            second
+                .y
+                .times(&first.x, tower)
+                .minus(&second.x.times(&first.y, tower)),
+        );
+        product = (
+            product
+                .0
+                .times(&w.0, tower)
+                .minus(&product.1.times(&w.1, tower)),
+            product
+                .0
+                .times(&w.1, tower)
+                .plus(&product.1.times(&w.0, tower)),
+        );
+    }
+    if !product.1.is_zero() {
+        let (cx, cy) = center.floats();
+        let angles: Vec<f64> = folds
             .iter()
-            .filter(|&&c| target[c] == Kind::Mountain)
-            .count();
-        let valleys = folds.len() - mountains;
-        if mountains.abs_diff(valleys) != 2 {
-            return Err(CollapseError::Count {
-                vertex: v,
-                mountains,
-                valleys,
-            });
-        }
-        // The reflections across the folds, one after another, turn the paper about the
-        // vertex. As complex numbers, the reflection across direction d maps z to
-        // d z̄ / d̄, so each two in turn rotate by w / w̄ with w = d₂ d̄₁: the whole turn
-        // is no turn exactly when the product of those w is real.
-        let mut product = (Number::one(), Number::zero());
-        for pair in folds.chunks(2) {
-            let (first, second) = (&directions[&pair[0]], &directions[&pair[1]]);
-            let w = (
-                second
-                    .x
-                    .times(&first.x, tower)
-                    .plus(&second.y.times(&first.y, tower)),
-                second
-                    .y
-                    .times(&first.x, tower)
-                    .minus(&second.x.times(&first.y, tower)),
-            );
-            product = (
-                product
-                    .0
-                    .times(&w.0, tower)
-                    .minus(&product.1.times(&w.1, tower)),
-                product
-                    .0
-                    .times(&w.1, tower)
-                    .plus(&product.1.times(&w.0, tower)),
-            );
-        }
-        if !product.1.is_zero() {
-            let (cx, cy) = center.floats();
-            let angles: Vec<f64> = folds
-                .iter()
-                .map(|&c| {
-                    let (x, y) = away(c, v).floats();
-                    (y - cy).atan2(x - cx).to_degrees().rem_euclid(360.0)
-                })
-                .collect();
-            let gaps: Vec<f64> = (0..angles.len())
-                .map(|i| (angles[(i + 1) % angles.len()] - angles[i]).rem_euclid(360.0))
-                .collect();
-            let odd = gaps.iter().step_by(2).sum();
-            let even = gaps.iter().skip(1).step_by(2).sum();
-            return Err(CollapseError::Angles {
-                vertex: v,
-                sums: (odd, even),
-            });
-        }
+            .map(|&c| {
+                let (x, y) = away(c).floats();
+                (y - cy).atan2(x - cx).to_degrees().rem_euclid(360.0)
+            })
+            .collect();
+        let gaps: Vec<f64> = (0..angles.len())
+            .map(|i| (angles[(i + 1) % angles.len()] - angles[i]).rem_euclid(360.0))
+            .collect();
+        let odd = gaps.iter().step_by(2).sum();
+        let even = gaps.iter().skip(1).step_by(2).sum();
+        return Err(CollapseError::Angles {
+            vertex: v,
+            sums: (odd, even),
+        });
     }
     Ok(())
 }
 
 /// Where each face lies, from the creases between it and the fixed face.
+///
+/// A depth-first walk from the fixed face finds each face's parent and the crease
+/// between. Each face's place is its parent's, reflected across a folded crease: the
+/// reflections come on every core, and the places follow the walk.
 fn places(paper: &Paper, target: &[Kind], fixed: u32) -> Vec<Isometry> {
     let tower = &paper.tower;
     let crease_of: FxHashMap<[u32; 2], usize> = paper
@@ -305,10 +321,13 @@ fn places(paper: &Paper, target: &[Kind], fixed: u32) -> Vec<Isometry> {
         .enumerate()
         .map(|(c, (edge, _))| (*edge, c))
         .collect();
-    let mut found: Vec<Option<Isometry>> = vec![None; paper.places.len()];
-    found[fixed as usize] = Some(paper.places[fixed as usize].clone());
-    let mut queue = vec![fixed];
-    while let Some(face) = queue.pop() {
+    let count = paper.places.len();
+    let mut reached = vec![false; count];
+    reached[fixed as usize] = true;
+    // Each face the walk reaches, after its parent, with the parent and the crease.
+    let mut walk: Vec<(u32, u32, usize)> = vec![];
+    let mut stack = vec![fixed];
+    while let Some(face) = stack.pop() {
         let corners = &paper.corners[face as usize];
         for i in 0..corners.len() {
             let (u, v) = (corners[i], corners[(i + 1) % corners.len()]);
@@ -317,24 +336,38 @@ fn places(paper: &Paper, target: &[Kind], fixed: u32) -> Vec<Isometry> {
             };
             let [f, g] = paper.creases[c].1;
             let other = if g == face { f } else { g };
-            if found[other as usize].is_some() {
+            if reached[other as usize] {
                 continue;
             }
-            let mut place = found[face as usize]
-                .clone()
-                .expect("a face in the queue has its place");
-            if target[c] != Kind::Flat {
+            reached[other as usize] = true;
+            walk.push((other, face, c));
+            stack.push(other);
+        }
+    }
+    let reflections: Vec<Option<Isometry>> = walk
+        .par_iter()
+        .map(|&(_, _, c)| {
+            (target[c] != Kind::Flat).then(|| {
                 let [a, b] = paper.creases[c].0;
                 let line = Line::through(
                     &paper.vertices[a as usize],
                     &paper.vertices[b as usize],
                     tower,
                 );
-                place = place.after(&Isometry::reflection(&line, tower), tower);
-            }
-            found[other as usize] = Some(place);
-            queue.push(other);
-        }
+                Isometry::reflection(&line, tower)
+            })
+        })
+        .collect();
+    let mut found: Vec<Option<Isometry>> = vec![None; count];
+    found[fixed as usize] = Some(paper.places[fixed as usize].clone());
+    for (&(face, from, _), reflection) in walk.iter().zip(reflections) {
+        let place = found[from as usize]
+            .as_ref()
+            .expect("the walk reaches a parent first");
+        found[face as usize] = Some(match reflection {
+            Some(reflection) => place.after(&reflection, tower),
+            None => place.clone(),
+        });
     }
     found
         .into_iter()

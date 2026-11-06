@@ -13,6 +13,7 @@
 
 use std::cmp::Ordering;
 
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::field::{Number, Tower};
@@ -119,15 +120,19 @@ impl Stretches {
             .map(|s| [seen.id(&s.start), seen.id(&s.end)])
             .collect();
         let (distinct, copies) = distinct(&ends, &seen.points, tower);
+        let through: Vec<Line> = distinct
+            .par_iter()
+            .map(|&[a, b]| Line::through(&seen.points[a as usize], &seen.points[b as usize], tower))
+            .collect();
         let mut lines: Vec<Line> = vec![];
         let mut line_index: FxHashMap<Line, u32> = FxHashMap::default();
-        let line_of: Vec<u32> = distinct
-            .iter()
-            .map(|&[a, b]| {
-                let line = Line::through(&seen.points[a as usize], &seen.points[b as usize], tower);
-                *line_index.entry(line.clone()).or_insert_with(|| {
-                    lines.push(line);
-                    u32::try_from(lines.len() - 1).expect("lines fit in 32 bits")
+        let line_of: Vec<u32> = through
+            .into_iter()
+            .map(|line| {
+                let next = u32::try_from(lines.len()).expect("lines fit in 32 bits");
+                *line_index.entry(line).or_insert_with_key(|line| {
+                    lines.push(line.clone());
+                    next
                 })
             })
             .collect();
@@ -145,6 +150,15 @@ impl Stretches {
             by_line[l as usize].push(u32::try_from(s).expect("segments fit in 32 bits"));
         }
         let points = &seen.points;
+        // Each line's stretches, on every core.
+        let stretches: Vec<Vec<Stretch>> = lines
+            .par_iter()
+            .zip(on_line)
+            .zip(&by_line)
+            .map(|((line, stops), on)| {
+                stretches_along(line, stops, on, (&distinct, &copies), points, tower)
+            })
+            .collect();
         // The arrangement numbers its vertices as its edges first meet them.
         let mut number = vec![u32::MAX; points.len()];
         let mut numbered: Vec<Point> = vec![];
@@ -156,47 +170,15 @@ impl Stretches {
             }
             *slot
         };
-        let mut position = vec![0usize; points.len()];
         let mut edges = vec![];
-        for (l, line) in lines.iter().enumerate() {
-            let along = |id: &u32| {
-                let p = &points[*id as usize];
-                if line.normal.1.is_zero() { &p.y } else { &p.x }
-            };
-            let stops = &mut on_line[l];
-            stops.sort_unstable();
-            stops.dedup();
-            stops.sort_by(|a, b| along(a).compare(along(b), tower));
-            for (k, &id) in stops.iter().enumerate() {
-                position[id as usize] = k;
-            }
-            // Each segment covers the stretches from its first stop to its last.
-            let mut starting: Vec<Vec<u32>> = vec![vec![]; stops.len()];
-            let mut ending: Vec<Vec<u32>> = vec![vec![]; stops.len()];
-            for &s in &by_line[l] {
-                let [a, b] = distinct[s as usize];
-                let (a, b) = (position[a as usize], position[b as usize]);
-                starting[a.min(b)].push(s);
-                ending[a.max(b)].push(s);
-            }
-            let mut active: Vec<u32> = vec![];
-            for k in 0..stops.len() {
-                active.retain(|s| !ending[k].contains(s));
-                active.extend(&starting[k]);
-                if k + 1 < stops.len() && !active.is_empty() {
-                    let mut covering: Vec<u32> = active
-                        .iter()
-                        .flat_map(|&s| copies[s as usize].iter().copied())
-                        .collect();
-                    covering.sort_unstable();
-                    let (from, to) = (stops[k], stops[k + 1]);
-                    edges.push(Edge {
-                        ends: [vertex(from), vertex(to)],
-                        line: u32::try_from(l).expect("lines fit in 32 bits"),
-                        segments: covering,
-                        left: left_of(&points[from as usize], &points[to as usize], tower),
-                    });
-                }
+        for (l, found) in stretches.into_iter().enumerate() {
+            for ([from, to], segments, left) in found {
+                edges.push(Edge {
+                    ends: [vertex(from), vertex(to)],
+                    line: u32::try_from(l).expect("lines fit in 32 bits"),
+                    segments,
+                    left,
+                });
             }
         }
         let mut segment_lines = vec![0; segments.len()];
@@ -212,6 +194,62 @@ impl Stretches {
             edges,
         }
     }
+}
+
+/// A stretch of a line: its ends' ids in order along the line, the segments covering
+/// it, and the side of the line on its left.
+type Stretch = ([u32; 2], Vec<u32>, i32);
+
+/// The stretches of a line between its stops: the ends and crossings on it, by id.
+/// `on` lists the distinct segments on the line, which `segments` gives with their
+/// copies.
+fn stretches_along(
+    line: &Line,
+    mut stops: Vec<u32>,
+    on: &[u32],
+    (distinct, copies): (&[[u32; 2]], &[Vec<u32>]),
+    points: &[Point],
+    tower: &Tower,
+) -> Vec<Stretch> {
+    let along = |id: &u32| {
+        let p = &points[*id as usize];
+        if line.normal.1.is_zero() { &p.y } else { &p.x }
+    };
+    stops.sort_unstable();
+    stops.dedup();
+    let by_id: Vec<u32> = stops.clone();
+    stops.sort_by(|a, b| along(a).compare(along(b), tower));
+    let mut position = vec![0; stops.len()];
+    for (k, &id) in stops.iter().enumerate() {
+        position[by_id.binary_search(&id).expect("a stop")] = k;
+    }
+    let at = |id: u32| position[by_id.binary_search(&id).expect("a stop")];
+    // Each segment covers the stretches from its first stop to its last.
+    let mut starting: Vec<Vec<u32>> = vec![vec![]; stops.len()];
+    let mut ending: Vec<Vec<u32>> = vec![vec![]; stops.len()];
+    for &s in on {
+        let [a, b] = distinct[s as usize];
+        let (a, b) = (at(a), at(b));
+        starting[a.min(b)].push(s);
+        ending[a.max(b)].push(s);
+    }
+    let mut active: Vec<u32> = vec![];
+    let mut found = vec![];
+    for k in 0..stops.len() {
+        active.retain(|s| !ending[k].contains(s));
+        active.extend(&starting[k]);
+        if k + 1 < stops.len() && !active.is_empty() {
+            let mut covering: Vec<u32> = active
+                .iter()
+                .flat_map(|&s| copies[s as usize].iter().copied())
+                .collect();
+            covering.sort_unstable();
+            let (from, to) = (stops[k], stops[k + 1]);
+            let left = left_of(&points[from as usize], &points[to as usize], tower);
+            found.push(([from, to], covering, left));
+        }
+    }
+    found
 }
 
 /// Points met so far, each once, by id.
@@ -324,31 +362,38 @@ fn crossings(
             }
         }
     }
-    let mut found = vec![];
-    for (c, members) in grid.iter().enumerate() {
-        for (k, &i) in members.iter().enumerate() {
-            for &j in &members[k + 1..] {
-                let (i, j) = (i as usize, j as usize);
-                let (a, b) = (&boxes[i], &boxes[j]);
-                if a[0] > b[2] || b[0] > a[2] || a[1] > b[3] || b[1] > a[3] {
-                    continue;
-                }
-                // Each pair is decided in one cell: the one holding its boxes' meeting corner.
-                let (x, y) = cell(a[0].max(b[0]), a[1].max(b[1]));
-                if x * size + y != c
-                    || line_of[i] == line_of[j]
-                    || lines[line_of[i] as usize].parallel(&lines[line_of[j] as usize])
-                {
-                    continue;
-                }
-                let lines = (&lines[line_of[i] as usize], &lines[line_of[j] as usize]);
-                if let Some(point) = meet(ends(i), ends(j), lines, tower) {
-                    found.push((i, j, point));
+    // Cells decide their pairs on every core, and their crossings come in cell order.
+    let found: Vec<Vec<(usize, usize, Point)>> = grid
+        .par_iter()
+        .enumerate()
+        .map(|(c, members)| {
+            let mut found = vec![];
+            for (k, &i) in members.iter().enumerate() {
+                for &j in &members[k + 1..] {
+                    let (i, j) = (i as usize, j as usize);
+                    let (a, b) = (&boxes[i], &boxes[j]);
+                    if a[0] > b[2] || b[0] > a[2] || a[1] > b[3] || b[1] > a[3] {
+                        continue;
+                    }
+                    // Each pair is decided in one cell: the one holding its boxes' meeting
+                    // corner.
+                    let (x, y) = cell(a[0].max(b[0]), a[1].max(b[1]));
+                    if x * size + y != c
+                        || line_of[i] == line_of[j]
+                        || lines[line_of[i] as usize].parallel(&lines[line_of[j] as usize])
+                    {
+                        continue;
+                    }
+                    let lines = (&lines[line_of[i] as usize], &lines[line_of[j] as usize]);
+                    if let Some(point) = meet(ends(i), ends(j), lines, tower) {
+                        found.push((i, j, point));
+                    }
                 }
             }
-        }
-    }
-    found
+            found
+        })
+        .collect();
+    found.into_iter().flatten().collect()
 }
 
 /// Where two segments on crossing lines meet, if they do inside one of them: a meeting
@@ -439,8 +484,7 @@ fn trace(points: &[Point], edges: &[Edge], tower: &Tower) -> Traced {
     }
     let tail = |h: u32| edges[(h / 2) as usize].ends[(h % 2) as usize];
     let head = |h: u32| edges[(h / 2) as usize].ends[1 - (h % 2) as usize];
-    let mut rank = vec![0u32; 2 * edges.len()];
-    for (v, list) in leaving.iter_mut().enumerate() {
+    leaving.par_iter_mut().enumerate().for_each(|(v, list)| {
         let center = &points[v];
         list.sort_by(|&a, &b| {
             by_angle(
@@ -450,6 +494,9 @@ fn trace(points: &[Point], edges: &[Edge], tower: &Tower) -> Traced {
                 tower,
             )
         });
+    });
+    let mut rank = vec![0u32; 2 * edges.len()];
+    for list in &leaving {
         for (k, &h) in list.iter().enumerate() {
             rank[h as usize] = u32::try_from(k).expect("degrees fit in 32 bits");
         }

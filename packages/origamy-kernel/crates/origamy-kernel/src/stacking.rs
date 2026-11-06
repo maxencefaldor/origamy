@@ -19,6 +19,7 @@
 
 use std::collections::BTreeSet;
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::folded::{Folded, Pair};
@@ -65,6 +66,16 @@ impl Origin {
     }
 }
 
+/// A rule as the problem builds it: its constraint, and its literals, then 0s.
+type Rule = (Origin, [i32; 4]);
+
+/// The rule that two literals agree, when both exist and differ: an even number of them
+/// hold.
+fn equal(origin: Origin, x: Option<i32>, y: Option<i32>) -> Option<Rule> {
+    let (x, y) = (x?, y?);
+    (x != y).then_some((origin, [x, y, 0, 0]))
+}
+
 /// Why no stacking was found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StackError {
@@ -101,9 +112,8 @@ pub struct Problem<'a> {
     /// Each face's overlapping faces, sorted, each with the literal that puts the face
     /// above it.
     neighbors: Vec<(u32, i32)>,
-    /// Where each rule's literals start in `rule_literals`.
-    rule_starts: Vec<u32>,
-    rule_literals: Vec<i32>,
+    /// Each rule's literals, then 0s.
+    rules: Vec<[i32; 4]>,
     /// Each rule's constraint.
     constraints: Vec<Origin>,
     /// The faces of each region where the most footprints meet, footprint by footprint
@@ -146,11 +156,17 @@ impl<'a> Problem<'a> {
             neighbors[fill[g as usize] as usize] = (f, -literal);
             fill[g as usize] += 1;
         }
-        // The pairs come sorted, so each face's neighbors below it come first and in
-        // order, then those above it in order: a merge sorts them.
+        // Each face sorts its neighbors on its own core.
+        let mut rest = &mut neighbors[..];
+        let mut lists = Vec::with_capacity(paper.folded.len());
         for f in 0..paper.folded.len() {
-            neighbors[rows[f] as usize..rows[f + 1] as usize].sort_unstable_by_key(|&(g, _)| g);
+            let (list, tail) = rest.split_at_mut((rows[f + 1] - rows[f]) as usize);
+            lists.push(list);
+            rest = tail;
         }
+        lists
+            .par_iter_mut()
+            .for_each(|list| list.sort_unstable_by_key(|&(g, _)| g));
         let covers: Vec<Vec<u32>> = paper
             .overlay
             .regions
@@ -188,8 +204,7 @@ impl<'a> Problem<'a> {
             paper,
             rows,
             neighbors,
-            rule_starts: vec![0],
-            rule_literals: vec![],
+            rules: vec![],
             constraints: vec![],
             regions,
             rank,
@@ -198,8 +213,12 @@ impl<'a> Problem<'a> {
             buckets,
         };
         let creases = problem.creases();
-        problem.folds_and_flats(&creases);
-        problem.crossings(&creases);
+        let (mut constraints, mut rules) = problem.folds_and_flats(&creases);
+        let (crossing, crossed) = problem.crossings(&creases);
+        constraints.extend(crossing);
+        rules.extend(crossed);
+        problem.constraints = constraints;
+        problem.rules = rules;
         problem
     }
 
@@ -234,32 +253,15 @@ impl<'a> Problem<'a> {
 
     /// A rule's literals, by index: an even number of them hold.
     fn rule(&self, index: u32) -> &[i32] {
-        &self.rule_literals[self.rule_starts[index as usize] as usize
-            ..self.rule_starts[index as usize + 1] as usize]
-    }
-
-    fn add(&mut self, origin: Origin, literals: &[i32]) {
-        assert!(literals.len() <= 4, "a rule holds at most four literals");
-        self.constraints.push(origin);
-        self.rule_literals.extend_from_slice(literals);
-        self.rule_starts
-            .push(u32::try_from(self.rule_literals.len()).expect("literals fit in 32 bits"));
-    }
-
-    /// Two literals that agree: an even number of them hold.
-    fn equal(&mut self, origin: Origin, x: Option<i32>, y: Option<i32>) {
-        if let (Some(x), Some(y)) = (x, y) {
-            if x != y {
-                self.add(origin, &[x, y]);
-            }
-        }
+        let literals = &self.rules[index as usize];
+        &literals[..literals.iter().position(|&l| l == 0).unwrap_or(4)]
     }
 
     fn creases(&self) -> Vec<Crease> {
         let paper = self.paper;
         paper
             .creases
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(index, &([v, w], [f, g]))| {
                 let ends = (paper.image(f, v).clone(), paper.image(f, w).clone());
@@ -288,7 +290,9 @@ impl<'a> Problem<'a> {
             .collect()
     }
 
-    fn folds_and_flats(&mut self, creases: &[Crease]) {
+    /// The rules of creases that share a stretch of a line: each line finds its own on
+    /// every core, and the rules come line by line.
+    fn folds_and_flats(&self, creases: &[Crease]) -> (Vec<Origin>, Vec<[i32; 4]>) {
         let tower = &self.paper.tower;
         let mut lines: FxHashMap<u32, usize> = FxHashMap::default();
         let mut groups: Vec<Vec<&Crease>> = vec![];
@@ -300,98 +304,107 @@ impl<'a> Problem<'a> {
             }
             groups[k].push(crease);
         }
-        for group in &groups {
-            let line = &self.paper.overlay.arrangement.lines[group[0].line as usize];
-            for (i, j) in overlapping_stretches(group, line, tower) {
-                let (first, second) = (group[i], group[j]);
-                if first.side != 0 && second.side != 0 {
-                    if first.side == second.side {
-                        self.taco_taco(first, second);
-                    }
-                } else if first.side != 0 || second.side != 0 {
-                    let (taco, flat) = if first.side != 0 {
-                        (first, second)
+        groups
+            .par_iter()
+            .flat_map_iter(|group| {
+                let line = &self.paper.overlay.arrangement.lines[group[0].line as usize];
+                let mut rules = vec![];
+                for (i, j) in overlapping_stretches(group, line, tower) {
+                    let (first, second) = (group[i], group[j]);
+                    let rule = if first.side != 0 && second.side != 0 {
+                        if first.side == second.side {
+                            self.taco_taco(first, second)
+                        } else {
+                            None
+                        }
+                    } else if first.side != 0 || second.side != 0 {
+                        let (taco, flat) = if first.side != 0 {
+                            (first, second)
+                        } else {
+                            (second, first)
+                        };
+                        let tortilla = if taco.side > 0 {
+                            flat.faces[0]
+                        } else {
+                            flat.faces[1]
+                        };
+                        self.taco_tortilla(taco, tortilla)
                     } else {
-                        (second, first)
+                        self.tortilla_tortilla(first, second)
                     };
-                    let tortilla = if taco.side > 0 {
-                        flat.faces[0]
-                    } else {
-                        flat.faces[1]
-                    };
-                    self.taco_tortilla(taco, tortilla);
-                } else {
-                    self.tortilla_tortilla(first, second);
+                    rules.extend(rule);
                 }
-            }
-        }
+                rules
+            })
+            .unzip()
     }
 
-    fn taco_taco(&mut self, first: &Crease, second: &Crease) {
+    fn taco_taco(&self, first: &Crease, second: &Crease) -> Option<Rule> {
         let ([a, b], [c, d]) = (first.faces, second.faces);
         if repeats(&[a, b, c, d]) {
-            return;
+            return None;
         }
-        let (Some(ca), Some(cb), Some(da), Some(db)) = (
-            self.literal(c, a),
-            self.literal(c, b),
-            self.literal(d, a),
-            self.literal(d, b),
-        ) else {
-            return;
-        };
+        let literals = [
+            self.literal(c, a)?,
+            self.literal(c, b)?,
+            self.literal(d, a)?,
+            self.literal(d, b)?,
+        ];
         // c lies between a and b when exactly one of a and b is below it; so does d.
         // Nesting or stacking puts both or neither between: the parity is even.
-        self.add(
+        Some((
             Origin::new("taco-taco", &[a, b, c, d], first.index),
-            &[ca, cb, da, db],
-        );
+            literals,
+        ))
     }
 
-    fn taco_tortilla(&mut self, taco: &Crease, tortilla: u32) {
+    fn taco_tortilla(&self, taco: &Crease, tortilla: u32) -> Option<Rule> {
         let [a, b] = taco.faces;
         if tortilla == a || tortilla == b {
-            return;
+            return None;
         }
-        let (x, y) = (self.literal(tortilla, a), self.literal(tortilla, b));
-        self.equal(
-            Origin::new("taco-tortilla", &[a, b, tortilla], taco.index),
-            x,
-            y,
-        );
+        let origin = Origin::new("taco-tortilla", &[a, b, tortilla], taco.index);
+        equal(origin, self.literal(tortilla, a), self.literal(tortilla, b))
     }
 
-    fn tortilla_tortilla(&mut self, first: &Crease, second: &Crease) {
+    fn tortilla_tortilla(&self, first: &Crease, second: &Crease) -> Option<Rule> {
         let ([p1, n1], [p2, n2]) = (first.faces, second.faces);
         if repeats(&[p1, n1, p2, n2]) {
-            return;
+            return None;
         }
-        let (x, y) = (self.literal(p1, p2), self.literal(n1, n2));
-        self.equal(
-            Origin::new("tortilla-tortilla", &[p1, n1, p2, n2], first.index),
-            x,
-            y,
-        );
+        let origin = Origin::new("tortilla-tortilla", &[p1, n1, p2, n2], first.index);
+        equal(origin, self.literal(p1, p2), self.literal(n1, n2))
     }
 
-    fn crossings(&mut self, creases: &[Crease]) {
+    /// The rules of creases that run through footprints, crease by crease, each crease's
+    /// found on every core.
+    fn crossings(&self, creases: &[Crease]) -> (Vec<Origin>, Vec<[i32; 4]>) {
         let paper = self.paper;
-        for crease in creases {
-            let [a, b] = crease.faces;
-            let kind = if crease.side != 0 {
-                "taco-tortilla"
-            } else {
-                "tortilla-tortilla"
-            };
-            for &k in &paper.overlay.crossed[crease.index as usize] {
-                for &face in &paper.stacked[k as usize] {
-                    if face != a && face != b {
-                        let (x, y) = (self.literal(face, a), self.literal(face, b));
-                        self.equal(Origin::new(kind, &[a, b, face], crease.index), x, y);
+        creases
+            .par_iter()
+            .flat_map_iter(|crease| {
+                let [a, b] = crease.faces;
+                let kind = if crease.side != 0 {
+                    "taco-tortilla"
+                } else {
+                    "tortilla-tortilla"
+                };
+                let mut rules = vec![];
+                for &k in &paper.overlay.crossed[crease.index as usize] {
+                    for &face in &paper.stacked[k as usize] {
+                        if face != a && face != b {
+                            let origin = Origin::new(kind, &[a, b, face], crease.index);
+                            rules.extend(equal(
+                                origin,
+                                self.literal(face, a),
+                                self.literal(face, b),
+                            ));
+                        }
                     }
                 }
-            }
-        }
+                rules
+            })
+            .unzip()
     }
 
     /// The regions holding both faces of a pair, by its variable, each with the faces'
@@ -534,7 +547,7 @@ impl<'p, 'a> Solver<'p, 'a> {
     fn new(problem: &'p Problem<'a>) -> Self {
         let variables = problem.variables() + 1;
         let mut starts = vec![0u32; variables + 1];
-        for &literal in &problem.rule_literals {
+        for literal in problem.rules.iter().flatten().filter(|&&l| l != 0) {
             starts[literal.unsigned_abs() as usize + 1] += 1;
         }
         for v in 0..variables {
@@ -546,7 +559,7 @@ impl<'p, 'a> Solver<'p, 'a> {
                 index: 0,
                 others: [0; 3]
             };
-            problem.rule_literals.len()
+            starts[variables] as usize
         ];
         for index in 0..u32::try_from(problem.constraints.len()).expect("rules fit in 32 bits") {
             let rule = problem.rule(index);

@@ -76,7 +76,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 
 - **Tools:** the standard, official tool in each category: uv, ruff, ty, rumdl, pytest with Hypothesis, pydantic and pydantic-settings, and Playwright.
   Add a dependency only when it is high-quality and used well.
-  The exact kernel's Rust uses num-bigint, rustc-hash and smallvec alone, and numpy serves the numeric solvers that shape paper in space.
+  The exact kernel's Rust uses num-bigint, rayon, rustc-hash and smallvec alone, and numpy serves the numeric solvers that shape paper in space.
 - **Format and lint:** [maxencefaldor/toolchain](https://github.com/maxencefaldor/toolchain): ruff's default format, every ruff rule, every ty rule as an error, and Markdown one sentence per line.
   A rule is switched off only in `pyproject.toml`, as narrowly as it can be, with its reason beside it.
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
@@ -113,6 +113,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 - **Derivatives:** every energy has an exact gradient and Hessian.
   Hard ones are generated from SymPy expressions by `codegen/generate.py`, and CI checks the generated code is current.
 - **Determinism:** derived tables come out sorted, never in hash order, and parallel work sums in a fixed order.
+  The kernel's parallel work keeps its items' order, and its choices match one core's.
 - **Bindings stay thin:** they convert arrays and parameter models, call the core and convert back.
   Their doc comments are the Python docstrings, in Google style.
   A core error is a typed value naming the element at fault, and Python sees it as a `ValueError` with the same message.
