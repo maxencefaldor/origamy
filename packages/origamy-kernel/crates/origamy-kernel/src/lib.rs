@@ -17,4 +17,5 @@ pub mod int;
 pub mod lattice;
 pub mod lines;
 pub mod overlay;
+pub mod snap;
 pub mod stacking;

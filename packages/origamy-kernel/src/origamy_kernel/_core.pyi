@@ -49,6 +49,12 @@ class State:
         list[Pair],
     ]: ...
 
-def relations(
-    value: float, root: int, scale: int, size: int
-) -> list[tuple[int, int, int]]: ...
+def explain(
+    value: float,
+    tolerance: float,
+    sure: float,
+    denominator: int,
+    roots: list[int],
+    scale: int,
+    size: int,
+) -> tuple[float, tuple[int, int], tuple[int, int], int] | None: ...

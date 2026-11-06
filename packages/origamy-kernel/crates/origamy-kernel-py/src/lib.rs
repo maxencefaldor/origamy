@@ -20,8 +20,8 @@ use origamy_kernel::field::{Number, Tower};
 use origamy_kernel::folded::{Folded, Pair, creases as creases_of, edges as edges_of};
 use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
-use origamy_kernel::lattice::relations as find_relations;
 use origamy_kernel::lines::{Along, along as creases_along};
+use origamy_kernel::snap::{Bounds, explain as explain_float};
 use origamy_kernel::stacking::{
     Constraint, Problem, StackError, stack as solve, violations as broken,
 };
@@ -175,29 +175,61 @@ fn stack_data(
     }
 }
 
-/// Small integers `(d, p, q)`, with `d` positive and `q` nonzero, that make
-/// `d·value ≈ p + q√root`, by lattice reduction.
+/// The exact number that explains a float best: a fraction, from the continued
+/// fraction, or `(p + q√r) / d` for small integers, from lattice reduction.
 ///
 /// Args:
 ///     value: The float to explain.
-///     root: The integer whose square root may explain it.
+///     tolerance: How far a candidate may lie from the float.
+///     sure: The fit under which a fraction explains the float surely, so that no root
+///         is tried.
+///     denominator: The largest denominator of a fraction.
+///     roots: The integers whose square roots a candidate may hold.
 ///     scale: The weight of a relation's error against its integers.
-///     size: The largest integer kept.
+///     size: The largest integer of a candidate with a root.
 ///
 /// Returns:
-///     The relations the reduced basis holds, in its order.
+///     The best candidate's fit, its rational part and its root's coefficient as
+///     fractions in lowest terms, and the integer under the root, 1 for a fraction; or
+///     `None` when no candidate lies within the tolerance.
 ///
 /// Raises:
-///     ValueError: The root is not positive, or the scale or size is not positive.
+///     ValueError: The value is not finite, or a root, the scale or the size is not
+///         positive.
 #[pyfunction]
-fn relations(value: f64, root: u32, scale: i64, size: i64) -> PyResult<Vec<(i64, i64, i64)>> {
-    if root == 0 || scale <= 0 || size <= 0 || !value.is_finite() {
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each bound is a documented input"
+)]
+fn explain(
+    value: f64,
+    tolerance: f64,
+    sure: f64,
+    denominator: u64,
+    roots: Vec<u32>,
+    scale: i64,
+    size: i64,
+) -> PyResult<Option<Explained>> {
+    if !value.is_finite() || roots.contains(&0) || scale <= 0 || size <= 0 {
         return Err(PyValueError::new_err(
-            "relations need a finite value, and a positive root, scale and size",
+            "explaining needs a finite value, and positive roots, scale and size",
         ));
     }
-    Ok(find_relations(value, root, scale, size))
+    let bounds = Bounds {
+        tolerance,
+        sure,
+        denominator,
+        roots,
+        scale,
+        size,
+    };
+    Ok(explain_float(value, &bounds)
+        .map(|found| (found.fit, found.rational, found.surd, found.root)))
 }
+
+/// What explains a float: its fit, its rational part and its root's coefficient, and
+/// the integer under the root.
+type Explained = (f64, (BigInt, BigInt), (BigInt, BigInt), u32);
 
 /// What a stacking came to: an outcome's name, the stacking, and the facts of a
 /// refusal.
@@ -583,6 +615,6 @@ impl State {
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<State>()?;
-    module.add_function(wrap_pyfunction!(relations, module)?)?;
+    module.add_function(wrap_pyfunction!(explain, module)?)?;
     Ok(())
 }

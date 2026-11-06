@@ -138,18 +138,24 @@ impl Line {
     pub fn through(p: &Point, q: &Point, tower: &Tower) -> Line {
         assert!(p != q, "a line needs two distinct points");
         let (nx, ny) = (p.y.minus(&q.y), q.x.minus(&p.x));
-        let offset = nx.times(&p.x, tower).plus(&ny.times(&p.y, tower));
-        let scale = if nx.is_zero() { ny.clone() } else { nx.clone() };
-        if scale == Number::one() {
+        // The normal scales to a first coordinate of 1, or to (0, 1) for a level line.
+        if nx.is_zero() {
             return Line {
-                normal: (nx, ny),
-                offset,
+                normal: (Number::zero(), Number::one()),
+                offset: p.y.clone(),
             };
         }
-        let inverse = scale.inverse(tower);
+        if ny.is_zero() {
+            return Line {
+                normal: (Number::one(), Number::zero()),
+                offset: p.x.clone(),
+            };
+        }
+        let slope = ny.over(&nx, tower);
+        let offset = p.x.plus(&slope.times(&p.y, tower));
         Line {
-            normal: (nx.times(&inverse, tower), ny.times(&inverse, tower)),
-            offset: offset.times(&inverse, tower),
+            normal: (Number::one(), slope),
+            offset,
         }
     }
 

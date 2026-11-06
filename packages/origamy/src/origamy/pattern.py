@@ -19,7 +19,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cmp_to_key
-from math import floor, hypot, inf, sqrt
+from math import hypot, inf
 from pathlib import Path
 from typing import Final, NoReturn
 
@@ -127,13 +127,14 @@ class CreasePattern:
         def scaled(point: tuple[float, float]) -> _Float:
             return ((point[0] - left) / size, (point[1] - bottom) / size)
 
-        segments = [(kind, scaled(p), scaled(q)) for kind, p, q in lines]
-        exact = _exact([(p, q) for _, p, q in segments], tolerance)
+        segments = [(scaled(p), scaled(q)) for _, p, q in lines]
+        keys = [(_key(p), _key(q)) for p, q in segments]
+        exact = _exact(segments, keys, tolerance)
         width = snap((max(xs) - left) / size, tolerance)
         height = snap((max(ys) - bottom) / size, tolerance)
         kinds: dict[str, list[Segment]] = {"B": [], "V": [], "M": [], "F": []}
-        for kind, p, q in segments:
-            kinds[kind].append((exact[_key(p)], exact[_key(q)]))
+        for (kind, _, _), (p, q) in zip(lines, keys, strict=True):
+            kinds[kind].append((exact[p], exact[q]))
         corners = {end for edge in kinds["B"] for end in edge} or {
             Point(x, y) for x in (ZERO, width) for y in (ZERO, height)
         }
@@ -173,9 +174,11 @@ def _key(point: _Float) -> _Float:
 
 
 def _exact(
-    segments: list[tuple[_Float, _Float]], tolerance: float
+    segments: list[tuple[_Float, _Float]],
+    keys: list[tuple[_Float, _Float]],
+    tolerance: float,
 ) -> dict[_Float, Point]:
-    """The exact point of each segment's ends, keyed by `_key`.
+    """The exact point of each segment's ends, keyed by `_key`, as `keys` gives them.
 
     A corner whose coordinates both snap surely, within `SURE`, takes them. Any other
     corner lies where two lines of creases cross, each through exact corners; corners
@@ -196,11 +199,11 @@ def _exact(
 
     near: dict[_Float, set[_Float]] = defaultdict(set)
     floats: dict[_Float, _Float] = {}
-    for p, q in segments:
-        near[_key(p)].add(_key(q))
-        near[_key(q)].add(_key(p))
-        floats.setdefault(_key(p), p)
-        floats.setdefault(_key(q), q)
+    for (p, q), (kp, kq) in zip(segments, keys, strict=True):
+        near[kp].add(kq)
+        near[kq].add(kp)
+        floats.setdefault(kp, p)
+        floats.setdefault(kq, q)
     exact: dict[_Float, Point] = {}
     fit = SURE
     while left := sorted(floats.keys() - exact.keys()):
@@ -345,68 +348,22 @@ def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number
     return found[1]
 
 
-type _Candidate = tuple[float, int, Fraction, Fraction, int]
-"""A candidate ``a + b√r``: its fit, its size, a, b and r, with r 1 for a fraction."""
-
-
 def _explanation(value: float, tolerance: float) -> tuple[float, Number] | None:
     """The candidate that explains a float best, and its fit, within a tolerance.
 
-    Only the best candidate becomes a number, so the tower gains a level only for a
-    root that some coordinate needs.
+    The kernel weighs the candidates. Only the best becomes a number, so the tower
+    gains a level only for a root that some coordinate needs.
     """
-    found: list[_Candidate] = []
-    for fraction in _convergents(Fraction(value)):
-        error = abs(value - float(fraction))
-        if error <= tolerance:
-            fit = error * fraction.denominator**2
-            found.append((fit, fraction.denominator, fraction, Fraction(0), 1))
-    if not any(fit <= SURE for fit, *_ in found):
-        for root in _ROOTS:
-            surd = sqrt(root)
-            for d, p, q in _relations(value, root):
-                if abs(value - (p + q * surd) / d) <= tolerance:
-                    size = max(d, abs(p), abs(q))
-                    fit = abs(d * value - p - q * surd) * size**2
-                    found.append((fit, size, Fraction(p, d), Fraction(q, d), root))
-    if not found:
+    found = origamy_kernel.explain(
+        value, tolerance, SURE, _DENOMINATOR, list(_ROOTS), _SCALE, _SIZE
+    )
+    if found is None:
         return None
-    fit, _, rational, surd, root = min(found, key=lambda candidate: candidate[:2])
-    number = Number.of(rational)
-    if surd:
-        number += Number.of(surd) * Number.of(root).sqrt()
+    fit, rational, surd, root = found
+    number = Number.of(Fraction(*rational))
+    if surd[0]:
+        number += Number.of(Fraction(*surd)) * Number.of(root).sqrt()
     return fit, number
-
-
-def _convergents(value: Fraction) -> Iterator[Fraction]:
-    """The continued fraction's convergents, while their denominators stay small."""
-    previous, current = (0, 1), (1, 0)
-    rest = value
-    while True:
-        whole = floor(rest)
-        previous, current = (
-            current,
-            (
-                whole * current[0] + previous[0],
-                whole * current[1] + previous[1],
-            ),
-        )
-        if current[1] > _DENOMINATOR:
-            return
-        yield Fraction(*current)
-        if rest == whole:
-            return
-        rest = 1 / (rest - whole)
-
-
-def _relations(value: float, root: int) -> list[tuple[int, int, int]]:
-    """Small integers ``(d, p, q)``, with q nonzero, that make ``d·value ≈ p + q√root``.
-
-    Lattice reduction of the integer combinations of ``value``, 1 and ``√root`` leaves
-    short vectors: those with small integers and a small error. The kernel reduces
-    the lattice exactly, by Cohen's integral LLL.
-    """
-    return origamy_kernel.relations(value, root, _SCALE, _SIZE)
 
 
 def crease(state: State, segments: Iterable[Segment]) -> State:

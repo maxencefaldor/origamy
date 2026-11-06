@@ -13,7 +13,7 @@
 
 use std::cmp::Ordering;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::field::{Number, Tower};
 use crate::geometry::{Line, Point, float_box, left_of, orientation};
@@ -112,60 +112,70 @@ impl Stretches {
     /// When a segment's ends are equal.
     #[must_use]
     pub fn new(segments: &[Segment], tower: &Tower) -> Stretches {
-        let (distinct, copies) = distinct(segments, tower);
+        // Every end and crossing once, by an id in the order first met.
+        let mut seen = Seen::default();
+        let ends: Vec<[u32; 2]> = segments
+            .iter()
+            .map(|s| [seen.id(&s.start), seen.id(&s.end)])
+            .collect();
+        let (distinct, copies) = distinct(&ends, &seen.points, tower);
         let mut lines: Vec<Line> = vec![];
         let mut line_index: FxHashMap<Line, u32> = FxHashMap::default();
         let line_of: Vec<u32> = distinct
             .iter()
-            .map(|(a, b)| {
-                let line = Line::through(a, b, tower);
+            .map(|&[a, b]| {
+                let line = Line::through(&seen.points[a as usize], &seen.points[b as usize], tower);
                 *line_index.entry(line.clone()).or_insert_with(|| {
                     lines.push(line);
                     u32::try_from(lines.len() - 1).expect("lines fit in 32 bits")
                 })
             })
             .collect();
-        let mut on_line: Vec<FxHashSet<Point>> = vec![FxHashSet::default(); lines.len()];
-        for ((a, b), &l) in distinct.iter().zip(&line_of) {
-            on_line[l as usize].insert(a.clone());
-            on_line[l as usize].insert(b.clone());
+        let mut on_line: Vec<Vec<u32>> = vec![vec![]; lines.len()];
+        for (&[a, b], &l) in distinct.iter().zip(&line_of) {
+            on_line[l as usize].extend([a, b]);
         }
-        for (i, j, point) in crossings(&distinct, &line_of, &lines, tower) {
-            on_line[line_of[i] as usize].insert(point.clone());
-            on_line[line_of[j] as usize].insert(point);
+        for (i, j, point) in crossings(&distinct, &seen.points, &line_of, &lines, tower) {
+            let id = seen.id(&point);
+            on_line[line_of[i] as usize].push(id);
+            on_line[line_of[j] as usize].push(id);
         }
         let mut by_line: Vec<Vec<u32>> = vec![vec![]; lines.len()];
         for (s, &l) in line_of.iter().enumerate() {
             by_line[l as usize].push(u32::try_from(s).expect("segments fit in 32 bits"));
         }
-        let mut points: Vec<Point> = vec![];
-        let mut point_index: FxHashMap<Point, u32> = FxHashMap::default();
-        let mut vertex = |p: &Point| -> u32 {
-            *point_index.entry(p.clone()).or_insert_with(|| {
-                points.push(p.clone());
-                u32::try_from(points.len() - 1).expect("points fit in 32 bits")
-            })
+        let points = &seen.points;
+        // The arrangement numbers its vertices as its edges first meet them.
+        let mut number = vec![u32::MAX; points.len()];
+        let mut numbered: Vec<Point> = vec![];
+        let mut vertex = |id: u32| -> u32 {
+            let slot = &mut number[id as usize];
+            if *slot == u32::MAX {
+                *slot = u32::try_from(numbered.len()).expect("points fit in 32 bits");
+                numbered.push(points[id as usize].clone());
+            }
+            *slot
         };
+        let mut position = vec![0usize; points.len()];
         let mut edges = vec![];
         for (l, line) in lines.iter().enumerate() {
-            let along = |p: &Point| {
-                if line.normal.1.is_zero() {
-                    p.y.clone()
-                } else {
-                    p.x.clone()
-                }
+            let along = |id: &u32| {
+                let p = &points[*id as usize];
+                if line.normal.1.is_zero() { &p.y } else { &p.x }
             };
-            let mut stops: Vec<(Number, Point)> =
-                on_line[l].iter().map(|p| (along(p), p.clone())).collect();
-            stops.sort_by(|(a, _), (b, _)| a.compare(b, tower));
-            let position: FxHashMap<&Point, usize> =
-                stops.iter().enumerate().map(|(k, (_, p))| (p, k)).collect();
+            let stops = &mut on_line[l];
+            stops.sort_unstable();
+            stops.dedup();
+            stops.sort_by(|a, b| along(a).compare(along(b), tower));
+            for (k, &id) in stops.iter().enumerate() {
+                position[id as usize] = k;
+            }
             // Each segment covers the stretches from its first stop to its last.
             let mut starting: Vec<Vec<u32>> = vec![vec![]; stops.len()];
             let mut ending: Vec<Vec<u32>> = vec![vec![]; stops.len()];
             for &s in &by_line[l] {
-                let (a, b) = &distinct[s as usize];
-                let (a, b) = (position[a], position[b]);
+                let [a, b] = distinct[s as usize];
+                let (a, b) = (position[a as usize], position[b as usize]);
                 starting[a.min(b)].push(s);
                 ending[a.max(b)].push(s);
             }
@@ -179,11 +189,12 @@ impl Stretches {
                         .flat_map(|&s| copies[s as usize].iter().copied())
                         .collect();
                     covering.sort_unstable();
+                    let (from, to) = (stops[k], stops[k + 1]);
                     edges.push(Edge {
-                        ends: [vertex(&stops[k].1), vertex(&stops[k + 1].1)],
+                        ends: [vertex(from), vertex(to)],
                         line: u32::try_from(l).expect("lines fit in 32 bits"),
                         segments: covering,
-                        left: left_of(&stops[k].1, &stops[k + 1].1, tower),
+                        left: left_of(&points[from as usize], &points[to as usize], tower),
                     });
                 }
             }
@@ -195,11 +206,31 @@ impl Stretches {
             }
         }
         Stretches {
-            points,
+            points: numbered,
             lines,
             segment_lines,
             edges,
         }
+    }
+}
+
+/// Points met so far, each once, by id.
+#[derive(Default)]
+struct Seen {
+    points: Vec<Point>,
+    ids: FxHashMap<Point, u32>,
+}
+
+impl Seen {
+    /// A point's id, new if it is.
+    fn id(&mut self, point: &Point) -> u32 {
+        if let Some(&id) = self.ids.get(point) {
+            return id;
+        }
+        let id = u32::try_from(self.points.len()).expect("points fit in 32 bits");
+        self.points.push(point.clone());
+        self.ids.insert(point.clone(), id);
+        id
     }
 }
 
@@ -227,14 +258,21 @@ impl Arrangement {
 
 /// Each pair of segments on different lines that meet, and the point where they do.
 fn crossings(
-    segments: &[(Point, Point)],
+    segments: &[[u32; 2]],
+    points: &[Point],
     line_of: &[u32],
     lines: &[Line],
     tower: &Tower,
 ) -> Vec<(usize, usize, Point)> {
-    let boxes: Vec<[f64; 4]> = segments
-        .iter()
-        .map(|(a, b)| float_box(&[a.clone(), b.clone()]))
+    let ends = |s: usize| {
+        let [a, b] = segments[s];
+        (&points[a as usize], &points[b as usize])
+    };
+    let boxes: Vec<[f64; 4]> = (0..segments.len())
+        .map(|s| {
+            let (a, b) = ends(s);
+            float_box(&[a.clone(), b.clone()])
+        })
         .collect();
     let all = boxes.iter().fold(
         [
@@ -304,7 +342,7 @@ fn crossings(
                     continue;
                 }
                 let lines = (&lines[line_of[i] as usize], &lines[line_of[j] as usize]);
-                if let Some(point) = meet(&segments[i], &segments[j], lines, tower) {
+                if let Some(point) = meet(ends(i), ends(j), lines, tower) {
                     found.push((i, j, point));
                 }
             }
@@ -316,8 +354,8 @@ fn crossings(
 /// Where two segments on crossing lines meet, if they do inside one of them: a meeting
 /// at both their ends is no news.
 fn meet(
-    first: &(Point, Point),
-    second: &(Point, Point),
+    first: (&Point, &Point),
+    second: (&Point, &Point),
     (l, m): (&Line, &Line),
     tower: &Tower,
 ) -> Option<Point> {
@@ -349,22 +387,20 @@ fn meet(
     })
 }
 
-/// The distinct segments, each with its ends in order, and the copies of each: segments
-/// with the same ends are one stretch of paper's edge, met once.
-fn distinct(segments: &[Segment], tower: &Tower) -> (Vec<(Point, Point)>, Vec<Vec<u32>>) {
-    let mut distinct: Vec<(Point, Point)> = vec![];
+/// The distinct segments, each with its ends' ids in order, and the copies of each:
+/// segments with the same ends are one stretch of paper's edge, met once.
+fn distinct(ends: &[[u32; 2]], points: &[Point], tower: &Tower) -> (Vec<[u32; 2]>, Vec<Vec<u32>>) {
+    let mut distinct: Vec<[u32; 2]> = vec![];
     let mut copies: Vec<Vec<u32>> = vec![];
-    let mut index: FxHashMap<(Point, Point), u32> = FxHashMap::default();
-    for (s, segment) in segments.iter().enumerate() {
-        let (a, b) = (&segment.start, &segment.end);
-        let key = if before(a, b, tower) {
-            (a.clone(), b.clone())
-        } else {
-            (b.clone(), a.clone())
-        };
+    let mut index: FxHashMap<[u32; 2], u32> = FxHashMap::default();
+    for (s, &[a, b]) in ends.iter().enumerate() {
         let next = u32::try_from(distinct.len()).expect("segments fit in 32 bits");
-        let k = *index.entry(key.clone()).or_insert_with(|| {
-            distinct.push(key);
+        let k = *index.entry([a.min(b), a.max(b)]).or_insert_with(|| {
+            distinct.push(if before(&points[a as usize], &points[b as usize], tower) {
+                [a, b]
+            } else {
+                [b, a]
+            });
             copies.push(vec![]);
             next
         });

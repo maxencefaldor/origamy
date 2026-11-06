@@ -239,6 +239,7 @@ impl<'a> Problem<'a> {
     }
 
     fn add(&mut self, origin: Origin, literals: &[i32]) {
+        assert!(literals.len() <= 4, "a rule holds at most four literals");
         self.constraints.push(origin);
         self.rule_literals.extend_from_slice(literals);
         self.rule_starts
@@ -438,9 +439,10 @@ struct Solver<'p, 'a> {
     values: Vec<i8>,
     reasons: Vec<Reason>,
     trail: Vec<i32>,
-    /// Where each variable's rules start in `containing`.
-    containing_starts: Vec<u32>,
-    containing: Vec<u32>,
+    /// Where each variable's watches start in `watches`.
+    watch_starts: Vec<u32>,
+    /// The rules each variable appears in, variable by variable, in the rules' order.
+    watches: Vec<Watch>,
     orders: Vec<Orders>,
     /// The regions with orders known but not closed yet, and whether each region is.
     dirty: Vec<u32>,
@@ -448,6 +450,15 @@ struct Solver<'p, 'a> {
     scratch: Vec<(u32, u32, u32)>,
     lowers: Vec<u64>,
     raised: Vec<u64>,
+}
+
+/// A rule as a variable in it watches it: its index, and its other literals, then 0s.
+/// The first takes the variable's sign, so that an even number of them and of the
+/// variable's positive literal hold.
+#[derive(Clone, Copy)]
+struct Watch {
+    index: u32,
+    others: [i32; 3],
 }
 
 /// The orders among a region's faces, as bits. Row `x` of `known` holds the faces below
@@ -530,11 +541,26 @@ impl<'p, 'a> Solver<'p, 'a> {
             starts[v + 1] += starts[v];
         }
         let mut fill = starts.clone();
-        let mut containing = vec![0u32; problem.rule_literals.len()];
+        let mut watches = vec![
+            Watch {
+                index: 0,
+                others: [0; 3]
+            };
+            problem.rule_literals.len()
+        ];
         for index in 0..u32::try_from(problem.constraints.len()).expect("rules fit in 32 bits") {
-            for &literal in problem.rule(index) {
+            let rule = problem.rule(index);
+            for (k, &literal) in rule.iter().enumerate() {
+                let mut others = [0; 3];
+                let rest = rule[..k].iter().chain(&rule[k + 1..]);
+                for (slot, &other) in others.iter_mut().zip(rest) {
+                    *slot = other;
+                }
+                // The first other literal takes the variable's sign, so that the variable's
+                // positive literal stands in its place.
+                others[0] *= literal.signum();
                 let v = literal.unsigned_abs() as usize;
-                containing[fill[v] as usize] = index;
+                watches[fill[v] as usize] = Watch { index, others };
                 fill[v] += 1;
             }
         }
@@ -543,8 +569,8 @@ impl<'p, 'a> Solver<'p, 'a> {
             values: vec![0; variables],
             reasons: vec![Reason::Given; variables],
             trail: vec![],
-            containing_starts: starts,
-            containing,
+            watch_starts: starts,
+            watches,
             orders: problem
                 .regions
                 .iter()
@@ -619,12 +645,17 @@ impl<'p, 'a> Solver<'p, 'a> {
     /// Propagation through the rules that a variable just assigned appears in: a rule
     /// with one literal open sets it to make the parity even.
     fn rules(&mut self, variable: usize) -> Option<Reason> {
-        for k in self.containing_starts[variable]..self.containing_starts[variable + 1] {
-            let index = self.containing[k as usize];
+        let own = self.values[variable] > 0;
+        let (from, to) = (
+            self.watch_starts[variable] as usize,
+            self.watch_starts[variable + 1] as usize,
+        );
+        for k in from..to {
+            let Watch { index, others } = self.watches[k];
             let mut open = None;
-            let mut odd = false;
+            let mut odd = own;
             let mut several = false;
-            for &literal in self.problem.rule(index) {
+            for &literal in others.iter().take_while(|&&l| l != 0) {
                 match self.value(literal) {
                     0 => {
                         several = open.is_some();
