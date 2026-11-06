@@ -39,7 +39,7 @@ from origamy.layers import (
 from origamy.rules import RefusalError
 from origamy.space import Form, Turn
 from origamy.state import Edge, Face, Pair, State, sides_of
-from origamy_kernel.data import ConstraintData, PointData
+from origamy_kernel.data import ConstraintData
 
 
 class Sense(StrEnum):
@@ -129,13 +129,18 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
     face lies where the creases between it and ``fixed`` put it. The faces that move
     land as near their old order as a valid stacking allows.
     """
-    target = {edge: changes.get(edge, state.assignment(edge)) for edge in state.creases}
+    kinds = list(state.kernel.assignments())
+    places = state.crease_index
+    for edge, kind in changes.items():
+        if (place := places.get(edge)) is not None:
+            kinds[place] = kind
     outcome, hold, moved, facts, found, conflict = state.kernel.collapse(
-        sorted(state.above), "".join(target.values()), fixed, BUDGET
+        "".join(kinds), fixed, BUDGET
     )
     if hold is None:
+        target = dict(zip(state.creases, kinds, strict=True))
         _refuse_collapse(state, target, outcome, (facts, found, conflict))
-    after = State.held(hold, vertices=state.vertices)
+    after = State.held(hold, vertices=vars(state).get("vertices"))
     return Outcome(after, frozenset(moved))
 
 
@@ -218,16 +223,14 @@ def along(
     state: State, creases: Iterable[Line | tuple[Point, Point]]
 ) -> list[list[Edge]]:
     """The creases inside the paper along each line or segment of the crease pattern."""
-    index = state.index
-
-    def end(p: Point) -> int | PointData:
-        found = index.get(p)
-        return kernel.point(p) if found is None else found
-
     queries = [
-        (end(crease.point), end(crease.point + crease.direction), False)
+        (
+            kernel.point(crease.point),
+            kernel.point(crease.point + crease.direction),
+            False,
+        )
         if isinstance(crease, Line)
-        else (end(crease[0]), end(crease[1]), True)
+        else (kernel.point(crease[0]), kernel.point(crease[1]), True)
         for crease in creases
     ]
     edges = list(state.creases)

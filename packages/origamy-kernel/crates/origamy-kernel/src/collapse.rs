@@ -154,6 +154,32 @@ pub fn collapse(
     })
 }
 
+/// Each crease's kind now, as seen from the paper's front: a crease whose faces share a
+/// place lies flat, and a fold is a valley when the face under it shows the front.
+#[must_use]
+pub fn kinds(
+    tower: &Tower,
+    places: &[Isometry],
+    creases: &[([u32; 2], [u32; 2])],
+    above: &[Pair],
+) -> Vec<Kind> {
+    let above: FxHashSet<Pair> = above.iter().copied().collect();
+    creases
+        .iter()
+        .map(|&(_, [f, g])| {
+            if places[f as usize] == places[g as usize] {
+                return Kind::Flat;
+            }
+            let lower = if above.contains(&(f, g)) { g } else { f };
+            if places[lower as usize].flips(tower) {
+                Kind::Mountain
+            } else {
+                Kind::Valley
+            }
+        })
+        .collect()
+}
+
 /// The face of largest area on the crease pattern, the first of them when several tie.
 ///
 /// # Panics

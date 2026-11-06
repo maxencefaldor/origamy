@@ -91,8 +91,7 @@ class State:
     @cached_property
     def above(self) -> frozenset[Pair]:
         """For each pair of faces that overlap once folded, which one is above."""
-        stacking: list[Pair] = self.kernel.stacking() or []
-        return frozenset(stacking)
+        return frozenset(self.kernel.stacking())
 
     @override
     def __eq__(self, other: object) -> bool:
@@ -122,11 +121,6 @@ class State:
         return cls(vertices, (Face(tuple(range(len(vertices))), IDENTITY),))
 
     @cached_property
-    def index(self) -> Mapping[Point, int]:
-        """Each vertex's id, by where it is on the crease pattern."""
-        return {p: v for v, p in enumerate(self.vertices)}
-
-    @cached_property
     def patterns(self) -> tuple[Polygon, ...]:
         """Each face's corners on the crease pattern."""
         return tuple(tuple(self.vertices[i] for i in f.corners) for f in self.faces)
@@ -141,7 +135,13 @@ class State:
 
     @cached_property
     def edges(self) -> Mapping[Edge, tuple[int, ...]]:
-        """The faces on each edge: two along a crease, one along the paper's edge."""
+        """The faces on each edge: two along a crease, one along the paper's edge.
+
+        The edges come in the order the faces first meet them, each face's sides in
+        turn, as the kernel gives them when it holds the state.
+        """
+        if "kernel" in vars(self):
+            return {edge: tuple(faces) for edge, faces in self.kernel.edges()}
         sides: dict[Edge, list[int]] = defaultdict(list)
         for index, face in enumerate(self.faces):
             for edge in sides_of(face.corners):
@@ -151,11 +151,18 @@ class State:
     @cached_property
     def creases(self) -> Mapping[Edge, tuple[int, int]]:
         """The edges inside the paper, each with its two faces."""
+        if "kernel" in vars(self):
+            return dict(self.kernel.creases())
         return {
             edge: (faces[0], faces[1])
             for edge, faces in self.edges.items()
             if len(faces) > 1
         }
+
+    @cached_property
+    def crease_index(self) -> Mapping[Edge, int]:
+        """Each crease's place among the creases."""
+        return {edge: k for k, edge in enumerate(self.creases)}
 
     @cached_property
     def lines(self) -> Mapping[Line, tuple[Edge, ...]]:
@@ -181,6 +188,7 @@ class State:
             [kernel.point(p) for p in self.vertices],
             [list(face.corners) for face in self.faces],
             [kernel.place(face.place) for face in self.faces],
+            sorted(self.above),
         )
 
     @cached_property

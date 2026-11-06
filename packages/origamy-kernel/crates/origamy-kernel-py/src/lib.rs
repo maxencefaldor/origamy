@@ -13,7 +13,8 @@ use std::sync::OnceLock;
 
 use num_bigint::BigInt;
 use origamy_kernel::collapse::{
-    CollapseError, Collapsed, Kind, Paper, collapse as collapse_paper, largest as largest_face,
+    CollapseError, Collapsed, Kind, Paper, collapse as collapse_paper, kinds as kinds_of,
+    largest as largest_face,
 };
 use origamy_kernel::crease::{CreaseError, crease as crease_paper};
 use origamy_kernel::field::{Number, Tower};
@@ -61,23 +62,6 @@ type NumberData = (Vec<Integer>, Integer);
 
 /// A point as two numbers.
 type PointData = (NumberData, NumberData);
-
-/// An end of a line or segment: a vertex of the crease pattern by its index, or a point.
-enum End {
-    Vertex(u32),
-    Point(PointData),
-}
-
-impl<'py> FromPyObject<'_, 'py> for End {
-    type Error = PyErr;
-
-    fn extract(object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-        if let Ok(vertex) = object.extract::<u32>() {
-            return Ok(End::Vertex(vertex));
-        }
-        Ok(End::Point(object.extract()?))
-    }
-}
 
 /// A constraint as Python reads it: its kind, its faces, and its crease if any.
 type ConstraintData = (String, Vec<u32>, Option<u32>);
@@ -246,20 +230,14 @@ type CollapseData = (
     Vec<Pair>,
 );
 
-/// What creasing came to: an outcome's name, the paper after, its new vertices and
-/// faces, and the segment that runs off the paper, if one does.
-type CreaseData = (
-    String,
-    Option<State>,
-    Vec<PointData>,
-    Vec<Vec<u32>>,
-    Option<usize>,
-);
+/// What creasing came to: an outcome's name, the paper after, and the segment that runs
+/// off the paper, if one does.
+type CreaseData = (String, Option<State>, Option<usize>);
 
 /// A state of the paper as the kernel holds it: its crease pattern, each face's place,
-/// and the stacking when the kernel found it.
+/// and its stacking.
 ///
-/// The creases come in the order `origamy.state.State.creases` gives them. The kernel
+/// The edges and creases come in the order `origamy.state.State` gives them. The kernel
 /// folds the faces the first time a question needs them, and keeps them.
 ///
 /// Args:
@@ -267,6 +245,7 @@ type CreaseData = (
 ///     vertices: The crease pattern's vertices.
 ///     corners: Each face's vertices, counterclockwise on the crease pattern.
 ///     places: Each face's place.
+///     stacking: Which face is above wherever two overlap, as `(upper, lower)`.
 ///
 /// Raises:
 ///     ValueError: A number or a face is malformed, or there is no face.
@@ -277,7 +256,7 @@ struct State {
     corners: Vec<Vec<u32>>,
     places: Vec<Isometry>,
     creases: Vec<([u32; 2], [u32; 2])>,
-    above: Option<Vec<Pair>>,
+    above: Vec<Pair>,
     folded: OnceLock<Folded>,
 }
 
@@ -303,7 +282,7 @@ impl State {
             corners: folded.corners.clone(),
             places: folded.places.clone(),
             creases: folded.creases.clone(),
-            above: Some(above),
+            above,
             folded: OnceLock::from(folded),
         }
     }
@@ -330,6 +309,7 @@ impl State {
         vertices: Vec<PointData>,
         corners: Vec<Vec<u32>>,
         places: Vec<[NumberData; 6]>,
+        stacking: Vec<Pair>,
     ) -> PyResult<State> {
         let tower = tower(radicands)?;
         let vertices = points(vertices, &tower)?;
@@ -342,7 +322,7 @@ impl State {
             corners,
             places,
             creases,
-            above: None,
+            above: stacking,
             folded: OnceLock::new(),
         })
     }
@@ -370,9 +350,35 @@ impl State {
             .collect()
     }
 
-    /// The stacking the kernel found, as `(upper, lower)`, if it found one.
-    fn stacking(&self) -> Option<Vec<Pair>> {
+    /// Each edge's two vertices, the lesser first, and the faces it borders: two along a
+    /// crease, one along the paper's edge.
+    fn edges(&self) -> Vec<(Pair, Vec<u32>)> {
+        edges_of(&self.corners)
+            .into_iter()
+            .map(|([u, v], faces)| ((u, v), faces))
+            .collect()
+    }
+
+    /// The stacking, as `(upper, lower)`.
+    fn stacking(&self) -> Vec<Pair> {
         self.above.clone()
+    }
+
+    /// Each crease's kind now, as seen from the paper's front: `M` or `V` folded, `F`
+    /// flat.
+    ///
+    /// A fold is a valley when the face under it shows the paper's front.
+    fn assignments(&self, py: Python<'_>) -> String {
+        py.detach(|| {
+            kinds_of(&self.tower, &self.places, &self.creases, &self.above)
+                .into_iter()
+                .map(|kind| match kind {
+                    Kind::Mountain => 'M',
+                    Kind::Valley => 'V',
+                    Kind::Flat => 'F',
+                })
+                .collect()
+        })
     }
 
     /// Crease the open paper along segments, folding nothing.
@@ -385,10 +391,10 @@ impl State {
     ///     segments: The creases to add, each as two points.
     ///
     /// Returns:
-    ///     `("creased", state, added, faces, None)`, with the vertices added after the
-    ///     paper's, or `("off-paper", None, [], [], k)` when segment k runs off the
-    ///     paper, `("loose", None, [], [], None)` when a face borders a crease twice,
-    ///     or `("concave", None, [], [], None)` when a face is not convex.
+    ///     `("creased", state, None)`, its vertices the paper's then those added, or
+    ///     `("off-paper", None, k)` when segment k runs off the paper, `("loose", None,
+    ///     None)` when a face borders a crease twice, or `("concave", None, None)` when a
+    ///     face is not convex.
     ///
     /// Raises:
     ///     ValueError: A number is malformed.
@@ -409,23 +415,20 @@ impl State {
         Ok(py.detach(
             || match crease_paper(tower, &self.vertices, &edges, &outline, &segments) {
                 Ok((all, faces)) => {
-                    let added = all[self.vertices.len()..].iter().map(point_data).collect();
                     let state = State {
                         tower: tower.clone(),
                         vertices: all,
-                        corners: faces.clone(),
                         places: vec![self.places[0].clone(); faces.len()],
                         creases: creases_of(&faces),
-                        above: Some(vec![]),
+                        corners: faces,
+                        above: vec![],
                         folded: OnceLock::new(),
                     };
-                    ("creased".to_owned(), Some(state), added, faces, None)
+                    ("creased".to_owned(), Some(state), None)
                 }
-                Err(CreaseError::OffPaper(k)) => {
-                    ("off-paper".to_owned(), None, vec![], vec![], Some(k))
-                }
-                Err(CreaseError::Loose) => ("loose".to_owned(), None, vec![], vec![], None),
-                Err(CreaseError::Concave) => ("concave".to_owned(), None, vec![], vec![], None),
+                Err(CreaseError::OffPaper(k)) => ("off-paper".to_owned(), None, Some(k)),
+                Err(CreaseError::Loose) => ("loose".to_owned(), None, None),
+                Err(CreaseError::Concave) => ("concave".to_owned(), None, None),
             },
         ))
     }
@@ -433,31 +436,28 @@ impl State {
     /// The creases along each line or segment of the crease pattern.
     ///
     /// Args:
-    ///     queries: Each line or segment as two ends, and whether it is a segment. An
-    ///         end is a vertex's index, or a point.
+    ///     queries: Each line as two of its points, or segment as its two ends, and
+    ///         whether it is a segment.
     ///
     /// Returns:
     ///     The creases along each, by their places among the creases, in order.
     ///
     /// Raises:
-    ///     ValueError: A number is malformed, or an index names no vertex.
+    ///     ValueError: A number is malformed.
     #[allow(clippy::needless_pass_by_value)]
-    fn along(&self, py: Python<'_>, queries: Vec<(End, End, bool)>) -> PyResult<Vec<Vec<u32>>> {
+    fn along(
+        &self,
+        py: Python<'_>,
+        queries: Vec<(PointData, PointData, bool)>,
+    ) -> PyResult<Vec<Vec<u32>>> {
         let tower = &self.tower;
-        let end = |end: End| -> PyResult<Point> {
-            match end {
-                End::Vertex(v) => self
-                    .vertices
-                    .get(v as usize)
-                    .cloned()
-                    .ok_or_else(|| PyValueError::new_err(format!("no vertex {v}"))),
-                End::Point((x, y)) => Ok(Point::new(number(x)?, number(y)?, tower)),
-            }
+        let point = |(x, y): PointData| -> PyResult<Point> {
+            Ok(Point::new(number(x)?, number(y)?, tower))
         };
         let queries = queries
             .into_iter()
             .map(|(a, b, segment)| {
-                let (p, q) = (end(a)?, end(b)?);
+                let (p, q) = (point(a)?, point(b)?);
                 Ok(if segment {
                     Along::Segment(p, q)
                 } else {
@@ -524,7 +524,6 @@ impl State {
     /// Set creases to mountain, valley or flat at once, and fold the paper to match.
     ///
     /// Args:
-    ///     above: The paper's stacking, as `(upper, lower)`.
     ///     target: Each crease's kind after: `M`, `V` or `F`.
     ///     fixed: The face that stays.
     ///     budget: The dead ends the layer solver may meet before it gives up.
@@ -543,7 +542,6 @@ impl State {
     fn collapse(
         &self,
         py: Python<'_>,
-        above: Vec<Pair>,
         target: String,
         fixed: u32,
         budget: i64,
@@ -576,7 +574,7 @@ impl State {
             places: self.places.clone(),
             creases: self.creases.clone(),
             border,
-            above,
+            above: self.above.clone(),
         };
         let refused = |name: &str, facts| (name.to_owned(), None, vec![], facts, vec![], vec![]);
         Ok(

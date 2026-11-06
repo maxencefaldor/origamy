@@ -28,7 +28,7 @@ from origamy import kernel
 from origamy.field import ONE, ZERO, Number
 from origamy.geometry import Line, Point, orientation
 from origamy.rules import RefusalError
-from origamy.state import Face, State
+from origamy.state import State
 
 type Segment = tuple[Point, Point]
 """A crease of the unfolded paper, from one end to the other."""
@@ -373,21 +373,17 @@ def crease(state: State, segments: Iterable[Segment]) -> State:
     creases so far divide it into faces, which keep the paper's place. Every crease
     must end on the paper's edge or on another crease, and every face must be convex.
     """
-    places = {face.place for face in state.faces}
-    if len(places) > 1:
+    if len({face.place for face in state.faces}) > 1:
         msg = "a crease pattern creases paper that lies open in one layer"
         raise RefusalError(msg, rule="paper-folded", state=state)
-    (place,) = places
     segments = list(segments)
-    outcome, hold, added, faces, index = state.kernel.crease(
+    outcome, hold, index = state.kernel.crease(
         [kernel.point(p) for p in _outline(state)],
         [(kernel.point(p), kernel.point(q)) for p, q in segments],
     )
     if hold is None:
         _refuse_crease(state, outcome, segments, index)
-    vertices = (*state.vertices, *(kernel.from_point(p) for p in added))
-    corners = tuple(Face(tuple(c), place) for c in faces)
-    return State.held(hold, vertices=vertices, faces=corners)
+    return State.held(hold)
 
 
 def _refuse_crease(
