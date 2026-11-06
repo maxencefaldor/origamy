@@ -123,6 +123,29 @@ RULES = {
             refusal=True,
         ),
         Rule(
+            "paper-folded",
+            Level.ERROR,
+            "A crease pattern creases paper that lies folded.",
+            "Creasing along segments of the crease pattern needs the paper open in "
+            "one layer, and some faces lie in different places.",
+            refusal=True,
+        ),
+        Rule(
+            "crease-off-paper",
+            Level.ERROR,
+            "A crease of a crease pattern runs off the paper.",
+            "An end of a segment to crease lies outside the open paper.",
+            refusal=True,
+        ),
+        Rule(
+            "loose-crease",
+            Level.ERROR,
+            "A crease ends inside a face, or creases leave a face that is not convex.",
+            "The segments to crease, the paper's edges and its creases leave a crease "
+            "with the same face on both sides, or a face that is not convex.",
+            refusal=True,
+        ),
+        Rule(
             "mountain-valley-count",
             Level.ERROR,
             "Mountains and valleys at a vertex do not differ by two.",

@@ -10,8 +10,10 @@ from origamy.errors import OrigamyError
 from origamy.field import Number
 from origamy.geometry import Line, Point
 from origamy.paper import Paper, RefusedError
+from origamy.pattern import CreasePattern
 
 __all__ = [
+    "CreasePattern",
     "Line",
     "Number",
     "OrigamyError",

@@ -16,6 +16,9 @@ A refusal rule is always an error, and the other rules state a fact about a step
 | [`no-spine`](#no-spine) | `error` | yes | The paper to reverse has no spine to turn inside out. |
 | [`several-spines`](#several-spines) | `error` | yes | The paper to reverse could turn inside out about more than one spine. |
 | [`no-side`](#no-side) | `error` | yes | The layer a petal or squash fold lifts has no folded side to open. |
+| [`paper-folded`](#paper-folded) | `error` | yes | A crease pattern creases paper that lies folded. |
+| [`crease-off-paper`](#crease-off-paper) | `error` | yes | A crease of a crease pattern runs off the paper. |
+| [`loose-crease`](#loose-crease) | `error` | yes | A crease ends inside a face, or creases leave a face that is not convex. |
 | [`mountain-valley-count`](#mountain-valley-count) | `error` | yes | Mountains and valleys at a vertex do not differ by two. |
 | [`unbalanced-angles`](#unbalanced-angles) | `error` | yes | The angles between folds at a vertex do not alternate to 180°. |
 | [`layer-crossing`](#layer-crossing) | `error` | yes | No stacking of the faces keeps paper from passing through paper. |
@@ -88,6 +91,24 @@ The layer a petal or squash fold lifts has no folded side to open.
 
 A petal fold lifts a layer whose creases along its line end at no folded side of the layer, so no side opens flat as the layer lifts.
 A squash fold swings a top layer with no folded side off its line.
+
+## paper-folded
+
+A crease pattern creases paper that lies folded.
+
+Creasing along segments of the crease pattern needs the paper open in one layer, and some faces lie in different places.
+
+## crease-off-paper
+
+A crease of a crease pattern runs off the paper.
+
+An end of a segment to crease lies outside the open paper.
+
+## loose-crease
+
+A crease ends inside a face, or creases leave a face that is not convex.
+
+The segments to crease, the paper's edges and its creases leave a crease with the same face on both sides, or a face that is not convex.
 
 ## mountain-valley-count
 

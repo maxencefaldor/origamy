@@ -67,6 +67,8 @@ A refusal rule stops the action it states, so it is always an error:
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
 | `no-spine`, `several-spines` | error | A reverse fold's tip opens into two halves in no way, or in several equally even ways |
 | `no-side` | error | The layer a petal or squash fold lifts has no folded side to open |
+| `paper-folded`, `crease-off-paper` | error | Creasing a crease pattern meets folded paper, or a crease off the paper |
+| `loose-crease` | error | A crease ends inside a face, or creases leave a face that is not convex |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
 | `layer-crossing` | error | No stacking of the faces keeps paper from passing through paper |

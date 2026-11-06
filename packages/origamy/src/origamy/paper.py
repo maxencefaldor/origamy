@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from math import radians
 
-from origamy import actions, moves
+from origamy import actions, moves, pattern
 from origamy import flex as flexing
 from origamy import shape as shaping
 from origamy.actions import Outcome, Sense
@@ -235,6 +235,20 @@ class Paper:
             _flat(lambda state: moves.petal(state, line, point)),
             line,
             point,
+        )
+
+    def crease(self, creases: Iterable[tuple[PointLike, PointLike]]) -> None:
+        """Crease the open paper along segments of the crease pattern, folding nothing.
+
+        Each crease is a segment, as its two ends. The paper must lie open in one
+        layer. Every crease must end on the paper's edge or on another crease, and
+        every face the creases leave must be convex. A `collapse` then folds them.
+        """
+        segments = [(Point.of(start), Point.of(end)) for start, end in creases]
+        self._act(
+            "crease",
+            f"crease the paper along {len(segments)} segments",
+            _flat(lambda state: Outcome(pattern.crease(state, segments), frozenset())),
         )
 
     def squash(self, line: Line, flap: PointLike) -> None:

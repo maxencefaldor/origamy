@@ -191,3 +191,50 @@ flap = midpoint(side, midpoint(center, tip))
 paper.precrease(bisect(side, center, tip), flap=flap, layers=2)
 paper.squash(Line.through(center, tip), flap=flap)
 ```
+
+## Crease patterns
+
+The action `crease(creases)` creases the open paper along segments of the crease pattern and folds none of them.
+Each crease is a segment, given by its two ends.
+A collapse then folds every crease at once, as a folder collapses a precreased pattern.
+
+The paper refuses creasing while it lies folded (`paper-folded`), or a crease with an end off the paper (`crease-off-paper`).
+Every crease must end on the paper's edge or on another crease, and every face the creases leave must be convex.
+The paper refuses creases that break either condition (`loose-crease`).
+
+The [frog base](https://github.com/maxencefaldor/origamy/blob/main/examples/frog_base.py) creases its pattern on the open square, then collapses it:
+
+```python
+paper = Paper.square()
+paper.crease([*valleys, *mountains, *flats])
+paper.collapse(valleys=valleys, mountains=mountains)
+```
+
+![The frog base collapsed from its crease pattern: the crease pattern, the folded paper and an x-ray](../images/frog-base.png)
+
+The [Miura-ori](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py) creases and collapses 112 segments the same way, then opens its columns in a [flex](shaping.md).
+
+### Files
+
+`CreasePattern.read(path)` reads a crease pattern from a FOLD file or an ORIPA `.cp` file:
+
+```python
+from origamy import CreasePattern, Paper
+
+
+def fold() -> Paper:
+    pattern = CreasePattern.read("models/frog_base.cp")
+    paper = Paper(pattern.width, pattern.height)
+    paper.crease(pattern.creases)
+    paper.collapse(valleys=pattern.valleys, mountains=pattern.mountains)
+    return paper
+```
+
+The paper's lower left corner goes to (0, 0), and its longer side to length 1.
+A file gives its coordinates as floats, and reading snaps each one to the simplest exact number within `tolerance`.
+The candidates are fractions, then fractions plus a fraction of √2 or √3.
+Patterns on grids, on 22.5° angles and on 30° angles all snap.
+Reading refuses a coordinate no candidate matches, with a `ValueError`.
+
+A FOLD file's unassigned creases read as flat creases, and an assignment origamy cannot fold is refused.
+An ORIPA file's aid lines are ignored.

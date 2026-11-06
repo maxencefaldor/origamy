@@ -91,6 +91,32 @@ The bases most traditional models start from, each a collapse or a petal fold.
 
 </div>
 
+## Crease patterns
+
+Models creased on the open paper from their crease pattern, then collapsed in one step.
+
+<div class="grid cards origamy-cards origamy-gallery" markdown>
+
+-   ![The frog base example](images/gallery-frog-base.png)
+
+    **[Frog base](gallery/frog-base.html)** · 2 steps
+
+    A preliminary base with all four flaps squashed and petal folded, collapsed from its pattern at once.
+    Its kites fold at 22.5°, and sixteen layers meet in its thickest point.
+
+    [Open in 3D](gallery/frog-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/frog_base.py)
+
+-   ![The Miura-ori example](images/gallery-miura-ori.png)
+
+    **[Miura-ori](gallery/miura-ori.html)** · 3 steps
+
+    A grid of parallelograms: zigzags alternate mountain and valley, and each column alternates along its length.
+    Its 112 creases collapse into one flat stack, then open as rigid origami, the zigzags following the columns.
+
+    [Open in 3D](gallery/miura-ori.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py)
+
+</div>
+
 ## Originals
 
 Models designed with origamy, each a short composition of the same exact actions.

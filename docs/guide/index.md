@@ -18,7 +18,7 @@ The guide covers one concept per page, in the order a build meets them.
 
 -   🪁 **[Collapses](collapses.md)**
 
-    Many creases folded at once, and the named moves: reverse, petal and squash folds.
+    Many creases folded at once, the named moves, and crease patterns read from FOLD and ORIPA files.
 
 -   🕊️ **[Shaping](shaping.md)**
 

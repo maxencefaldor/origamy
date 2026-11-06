@@ -78,6 +78,10 @@ paper.collapse(valleys=[upright, level], mountains=[falling])
 Two queries find the creases to name.
 `paper.creases(line)` gives the creases lying along a line now, as crease pattern segments.
 `paper.origin(point)` gives where a point of the top layer lies on the unfolded paper.
+
+A script can also start from a crease pattern, as published designs give them.
+`CreasePattern.read(path)` reads a FOLD or ORIPA file, and `paper.crease(pattern.creases)` creases the open paper along it.
+One collapse of its valleys and mountains then folds the whole pattern, as the [frog base](examples/frog_base.py) and [Miura-ori](examples/miura_ori.py) do.
 Before folding, a collapse checks every vertex with Maekawa's and Kawasaki's theorems, and the layer solver checks every stacking.
 
 ## Named moves
@@ -143,6 +147,8 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 | `already-folded`, `not-folded` | error | A fold turns a crease already folded that way, or an unfold turns flat paper |
 | `no-crease` | error | A collapse names a line with no crease of the paper along it |
 | `no-side` | error | The layer a petal or squash fold lifts has no folded side to open |
+| `paper-folded`, `crease-off-paper` | error | Creasing a crease pattern meets folded paper, or a crease off the paper |
+| `loose-crease` | error | A crease ends inside a face, or creases leave a face that is not convex |
 | `no-spine`, `several-spines` | error | A reverse fold's tip opens into two halves in no way, or in several equally even ways |
 | `mountain-valley-count` | error | Mountains and valleys at a vertex do not differ by two |
 | `unbalanced-angles` | error | The angles between folds at a vertex do not alternate to 180° |
@@ -170,10 +176,10 @@ When no stacking exists, origamy names the constraints that conflict.
 ## Status
 
 The project is in its first phase.
-The phase covers exact folds, unfolds, precreases, collapses, reverse, petal and squash folds, and shaping.
+The phase covers exact folds, unfolds, precreases, collapses, reverse, petal and squash folds, crease patterns, and shaping.
 The layer solver, pictures, a 3D viewer, an MCP server and FOLD export complete it.
 The [crane](examples/crane.py) folds end to end, from the square to its wings spread in space.
-Squash and sink folds, and shaping that bends paper as well as folding it, come next.
+Sink folds, and shaping that bends paper as well as folding it, come next.
 
 ## License
 
