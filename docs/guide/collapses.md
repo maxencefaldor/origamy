@@ -253,3 +253,21 @@ Reading refuses a corner left over, with a `ValueError`.
 
 A FOLD file's unassigned creases read as flat creases, and an assignment origamy cannot fold is refused.
 An ORIPA file's aid lines are ignored.
+
+### Published patterns
+
+The script `docs/patterns.py` folds every pattern in a folder: it reads each one, creases its paper, and collapses it.
+[Flat-Folder](https://github.com/origamimagiro/flat-folder)'s examples hold 755 patterns published by origami designers, from a sailboat to box-pleated insects.
+Of the 748 that assign folds, origamy collapses 628 exactly:
+
+| Outcome | Patterns |
+| --- | --- |
+| Collapsed | 628 |
+| Refused, `layer-crossing` | 9, all among the 12 Flat-Folder lists as unsatisfiable |
+| Refused, `loose-crease` | 3, with a crease that ends inside a face |
+| Refused, `unbalanced-angles` | 1 |
+| Unread | 107, with arbitrary angles or the nested roots of 11.25° creases |
+
+None of the 12 unsatisfiable patterns collapses: origamy refuses 9 and reads 3 in no exact numbers.
+The largest, a Menger sponge of 13,974 folds and 8,701 faces, collapses in four and a half minutes on one core.
+Kamiya's Ryujin 2.1, with 10,842 folds, collapses in five minutes, and a lobster of 9,771 folds stacks 560 layers deep.
