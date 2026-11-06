@@ -25,7 +25,7 @@ from typing import Final, NoReturn
 
 import origamy_kernel
 from origamy import kernel
-from origamy.field import ONE, ZERO, Number
+from origamy.field import ONE, ZERO, Number, remembered
 from origamy.geometry import Line, Point, orientation
 from origamy.rules import RefusalError
 from origamy.state import State
@@ -189,11 +189,12 @@ def _exact(
         ValueError: A corner snaps to no exact point, and no two lines of creases
             through exact corners cross there.
     """
+    candidates = _explanations((x for p, q in segments for x in (*p, *q)), tolerance)
     explanations: dict[float, tuple[float, Number] | None] = {}
 
     def snapped(value: float, fit: float) -> Number | None:
         if value not in explanations:
-            explanations[value] = _explanation(value, tolerance)
+            explanations[value] = _number(candidates[value])
         found = explanations[value]
         return found[1] if found is not None and found[0] <= fit else None
 
@@ -348,22 +349,44 @@ def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number
     return found[1]
 
 
-def _explanation(value: float, tolerance: float) -> tuple[float, Number] | None:
-    """The candidate that explains a float best, and its fit, within a tolerance.
+type _Explained = tuple[float, tuple[int, int], tuple[int, int], int] | None
+"""A float's best candidate as the kernel gives it: its fit, its rational part and its
+root's coefficient as fractions, and the integer under the root; or none."""
 
-    The kernel weighs the candidates. Only the best becomes a number, so the tower
-    gains a level only for a root that some coordinate needs.
-    """
+
+def _explanations(values: Iterable[float], tolerance: float) -> dict[float, _Explained]:
+    """The candidate that explains each float best, as the kernel weighs them."""
+    values = sorted(set(values))
     found = origamy_kernel.explain(
-        value, tolerance, SURE, _DENOMINATOR, list(_ROOTS), _SCALE, _SIZE
+        values, tolerance, SURE, _DENOMINATOR, list(_ROOTS), _SCALE, _SIZE
     )
+    return dict(zip(values, found, strict=True))
+
+
+def _explanation(value: float, tolerance: float) -> tuple[float, Number] | None:
+    """The candidate that explains a float best, and its fit, within a tolerance."""
+    return _number(_explanations([value], tolerance)[value])
+
+
+def _number(found: _Explained) -> tuple[float, Number] | None:
+    """A candidate's fit and number.
+
+    Only a best candidate becomes a number, so the tower gains a level only for a root
+    that some coordinate needs.
+    """
     if found is None:
         return None
     fit, rational, surd, root = found
     number = Number.of(Fraction(*rational))
     if surd[0]:
-        number += Number.of(Fraction(*surd)) * Number.of(root).sqrt()
+        number += Number.of(Fraction(*surd)) * _root(root)
     return fit, number
+
+
+@remembered
+def _root(n: int) -> Number:
+    """The square root of an integer, in the current tower."""
+    return Number.of(n).sqrt()
 
 
 def crease(state: State, segments: Iterable[Segment]) -> State:

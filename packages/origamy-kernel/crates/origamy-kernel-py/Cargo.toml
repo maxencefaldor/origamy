@@ -19,6 +19,7 @@ doctest = false
 [dependencies]
 num-bigint.workspace = true
 origamy-kernel.workspace = true
+rayon.workspace = true
 pyo3 = { workspace = true, features = ["num-bigint"] }
 
 [lints]

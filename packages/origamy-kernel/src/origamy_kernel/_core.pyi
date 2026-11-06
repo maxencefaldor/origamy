@@ -53,11 +53,11 @@ class State:
     ]: ...
 
 def explain(
-    value: float,
+    values: list[float],
     tolerance: float,
     sure: float,
     denominator: int,
     roots: list[int],
     scale: int,
     size: int,
-) -> tuple[float, tuple[int, int], tuple[int, int], int] | None: ...
+) -> list[tuple[float, tuple[int, int], tuple[int, int], int] | None]: ...

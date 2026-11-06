@@ -269,5 +269,5 @@ Of the 748 that assign folds, origamy collapses 628 exactly:
 | Unread | 107, with arbitrary angles or the nested roots of 11.25° creases |
 
 None of the 12 unsatisfiable patterns collapses: origamy refuses 9 and reads 3 in no exact numbers.
-The largest, a Menger sponge of 13,974 folds and 8,701 faces, reads, creases and collapses in under two seconds on one core.
-Kamiya's Ryujin 2.1, with 10,842 folds, takes under two seconds, and a lobster of 9,771 folds stacks 560 layers deep in under four.
+The largest, a Menger sponge of 13,974 folds and 8,701 faces, reads, creases and collapses in 0.6 seconds on two cores.
+Kamiya's Ryujin 2.1, with 10,842 folds, takes 0.7 seconds, and a lobster of 9,771 folds stacks 560 layers deep in 1.3.

@@ -1102,6 +1102,7 @@ dependencies = [
  "num-bigint",
  "origamy-kernel",
  "pyo3",
+ "rayon",
 ]
 
 [[package]]

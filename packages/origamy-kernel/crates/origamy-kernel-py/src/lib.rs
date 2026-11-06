@@ -28,6 +28,7 @@ use origamy_kernel::stacking::{
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use rayon::prelude::*;
 
 /// An integer as Python gives it or takes it: 64 bits wide when it fits, which
 /// crosses fastest, and of any size otherwise.
@@ -159,13 +160,14 @@ fn stack_data(
     }
 }
 
-/// The exact number that explains a float best: a fraction, from the continued
-/// fraction, or `(p + q√r) / d` for small integers, from lattice reduction.
+/// The exact number that explains each float best: a fraction, from the continued
+/// fraction, or `(p + q√r) / d` for small integers, from lattice reduction. The floats
+/// find theirs on every core.
 ///
 /// Args:
-///     value: The float to explain.
-///     tolerance: How far a candidate may lie from the float.
-///     sure: The fit under which a fraction explains the float surely, so that no root
+///     values: The floats to explain.
+///     tolerance: How far a candidate may lie from its float.
+///     sure: The fit under which a fraction explains a float surely, so that no root
 ///         is tried.
 ///     denominator: The largest denominator of a fraction.
 ///     roots: The integers whose square roots a candidate may hold.
@@ -173,30 +175,32 @@ fn stack_data(
 ///     size: The largest integer of a candidate with a root.
 ///
 /// Returns:
-///     The best candidate's fit, its rational part and its root's coefficient as
-///     fractions in lowest terms, and the integer under the root, 1 for a fraction; or
-///     `None` when no candidate lies within the tolerance.
+///     For each float, the best candidate's fit, its rational part and its root's
+///     coefficient as fractions in lowest terms, and the integer under the root, 1 for
+///     a fraction; or `None` when no candidate lies within the tolerance.
 ///
 /// Raises:
-///     ValueError: The value is not finite, or a root, the scale or the size is not
+///     ValueError: A value is not finite, or a root, the scale or the size is not
 ///         positive.
 #[pyfunction]
 #[allow(
     clippy::too_many_arguments,
     reason = "each bound is a documented input"
 )]
+#[allow(clippy::needless_pass_by_value)]
 fn explain(
-    value: f64,
+    py: Python<'_>,
+    values: Vec<f64>,
     tolerance: f64,
     sure: f64,
     denominator: u64,
     roots: Vec<u32>,
     scale: i64,
     size: i64,
-) -> PyResult<Option<Explained>> {
-    if !value.is_finite() || roots.contains(&0) || scale <= 0 || size <= 0 {
+) -> PyResult<Vec<Option<Explained>>> {
+    if values.iter().any(|v| !v.is_finite()) || roots.contains(&0) || scale <= 0 || size <= 0 {
         return Err(PyValueError::new_err(
-            "explaining needs a finite value, and positive roots, scale and size",
+            "explaining needs finite values, and positive roots, scale and size",
         ));
     }
     let bounds = Bounds {
@@ -207,8 +211,15 @@ fn explain(
         scale,
         size,
     };
-    Ok(explain_float(value, &bounds)
-        .map(|found| (found.fit, found.rational, found.surd, found.root)))
+    Ok(py.detach(|| {
+        values
+            .par_iter()
+            .map(|&value| {
+                explain_float(value, &bounds)
+                    .map(|found| (found.fit, found.rational, found.surd, found.root))
+            })
+            .collect()
+    }))
 }
 
 /// What explains a float: its fit, its rational part and its root's coefficient, and

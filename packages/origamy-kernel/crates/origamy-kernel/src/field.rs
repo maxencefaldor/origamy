@@ -210,6 +210,13 @@ impl Number {
         }) {
             return sum;
         }
+        if let Some(sum) = self
+            .small()
+            .zip(other.small())
+            .and_then(|(x, y)| level_one_sum(x, y, 1))
+        {
+            return sum;
+        }
         if self.denominator == other.denominator {
             return Number::new(
                 plus(&self.numerators, &other.numerators),
@@ -231,6 +238,13 @@ impl Number {
                 i128::from(b) * i128::from(d),
             )
         }) {
+            return difference;
+        }
+        if let Some(difference) = self
+            .small()
+            .zip(other.small())
+            .and_then(|(x, y)| level_one_sum(x, y, -1))
+        {
             return difference;
         }
         if self.denominator == other.denominator {
@@ -259,6 +273,12 @@ impl Number {
     pub fn times(&self, other: &Number, tower: &Tower) -> Number {
         if let Some(product) = self.small_pair(other).and_then(|((a, b), (c, d))| {
             rational(i128::from(a) * i128::from(c), i128::from(b) * i128::from(d))
+        }) {
+            return product;
+        }
+        if let Some(product) = tower.first.and_then(|d| {
+            let (x, y) = self.small().zip(other.small())?;
+            level_one_product(x, y, d)
         }) {
             return product;
         }
@@ -294,6 +314,16 @@ impl Number {
                 smallvec![self.denominator.clone()],
                 self.numerators[0].clone(),
             );
+        }
+        if let Some(inverse) = tower.first.and_then(|d| {
+            let (a, b, p) = self.small()?;
+            let (a, b, p) = (i128::from(a), i128::from(b), i128::from(p));
+            let norm = a
+                .checked_mul(a)?
+                .checked_sub(b.checked_mul(b)?.checked_mul(i128::from(d))?)?;
+            level_one(p.checked_mul(a)?, p.checked_mul(-b)?, norm)
+        }) {
+            return inverse;
         }
         let (a, b) = self.halves();
         let d = &tower.radicands[self.level() - 1];
@@ -347,6 +377,19 @@ impl Number {
     }
 
     /// Both numbers as fractions of small integers, when both are rational and small.
+    /// A rational or a number of level 1 whose integers fit in 64 bits: `(a, b, p)` for
+    /// `(a + b√d) / p`.
+    fn small(&self) -> Option<(i64, i64, i64)> {
+        let Int::Small(p) = self.denominator else {
+            return None;
+        };
+        match self.numerators[..] {
+            [Int::Small(a)] => Some((a, 0, p)),
+            [Int::Small(a), Int::Small(b)] => Some((a, b, p)),
+            _ => None,
+        }
+    }
+
     fn small_pair(&self, other: &Number) -> Option<((i64, i64), (i64, i64))> {
         match (
             &self.numerators[..],
@@ -381,6 +424,8 @@ impl Number {
 #[derive(Clone, Debug, Default)]
 pub struct Tower {
     radicands: Vec<Number>,
+    /// The first level's radicand, when it is an integer that fits in 64 bits.
+    first: Option<i64>,
     /// Each level's radicand as integer coefficients, as long as half that level.
     vectors: Vec<Coefficients>,
     roots: Vec<(f64, f64)>,
@@ -401,6 +446,7 @@ impl Tower {
     pub fn new(radicands: Vec<Number>) -> Tower {
         let mut tower = Tower {
             radicands: vec![],
+            first: None,
             vectors: vec![smallvec![]],
             roots: vec![],
             basis: vec![(1.0, 0.0)],
@@ -429,6 +475,9 @@ impl Tower {
             "a radicand lies below its own level"
         );
         self.vectors.push(padded(&radicand.numerators, 1 << level));
+        if let ([Int::Small(d)], 0) = (&radicand.numerators[..], level) {
+            self.first = Some(*d);
+        }
         let integer = radicand
             .is_rational()
             .then(|| radicand.numerators[0].clone());
@@ -538,6 +587,76 @@ fn product(x: &[Int], y: &[Int], vectors: &[Coefficients]) -> Coefficients {
     let mut out = plus(&ac, &product(&be, radicand, vectors));
     out.extend(minus(&minus(&mixed, &ac), &be));
     out
+}
+
+/// The sum of `(a + b√d) / p` and `sign` times `(c + e√d) / q`, when its integers fit.
+fn level_one_sum(
+    (a, b, p): (i64, i64, i64),
+    (c, e, q): (i64, i64, i64),
+    sign: i128,
+) -> Option<Number> {
+    let (a, b, p, c, e, q) = (
+        i128::from(a),
+        i128::from(b),
+        i128::from(p),
+        sign * i128::from(c),
+        sign * i128::from(e),
+        i128::from(q),
+    );
+    if p == q {
+        return level_one(a + c, b + e, p);
+    }
+    let first = a.checked_mul(q)?.checked_add(c.checked_mul(p)?)?;
+    let second = b.checked_mul(q)?.checked_add(e.checked_mul(p)?)?;
+    level_one(first, second, p.checked_mul(q)?)
+}
+
+/// The product of `(a + b√d) / p` and `(c + e√d) / q`, when its integers fit.
+fn level_one_product(
+    (a, b, p): (i64, i64, i64),
+    (c, e, q): (i64, i64, i64),
+    d: i64,
+) -> Option<Number> {
+    let (a, b, p, c, e, q) = (
+        i128::from(a),
+        i128::from(b),
+        i128::from(p),
+        i128::from(c),
+        i128::from(e),
+        i128::from(q),
+    );
+    let first = a
+        .checked_mul(c)?
+        .checked_add(b.checked_mul(e)?.checked_mul(i128::from(d))?)?;
+    let second = a.checked_mul(e)?.checked_add(b.checked_mul(c)?)?;
+    level_one(first, second, p.checked_mul(q)?)
+}
+
+/// The number `(a + b√d) / p` of level 1, or a rational, in its one form, when its
+/// integers fit in 64 bits once reduced. The denominator is never zero.
+fn level_one(a: i128, b: i128, p: i128) -> Option<Number> {
+    if b == 0 {
+        return rational(a, p.checked_abs()?).map(|n| if p < 0 { n.negated() } else { n });
+    }
+    let mut common = gcd_i128(b, p);
+    if a != 0 && common != 1 {
+        common = gcd_i128(common, a);
+    }
+    if p < 0 {
+        common = -common;
+    }
+    let (a, b, p) = if common == 1 {
+        (a, b, p)
+    } else {
+        (a / common, b / common, p / common)
+    };
+    Some(Number {
+        numerators: smallvec![
+            Int::Small(i64::try_from(a).ok()?),
+            Int::Small(i64::try_from(b).ok()?),
+        ],
+        denominator: Int::Small(i64::try_from(p).ok()?),
+    })
 }
 
 /// The fraction `numerator / denominator` in lowest terms, its denominator positive, when
@@ -680,6 +799,38 @@ mod tests {
                 proptest::prop_assert_eq!(x.exact_sign(&tower), if estimate.value > 0.0 { 1 } else { -1 });
             }
             proptest::prop_assert_eq!(x.sign(&tower), x.exact_sign(&tower));
+        }
+    }
+
+    /// Numbers of level 1, with integers small or near the limits of 64 bits.
+    fn level_ones() -> impl proptest::strategy::Strategy<Value = Number> {
+        use proptest::prelude::*;
+        let integer = prop_oneof![-50i128..50, -(1i128 << 62)..(1i128 << 62)];
+        (
+            proptest::collection::vec(integer.clone(), 2),
+            integer.prop_filter("nonzero", |&d| d != 0),
+        )
+            .prop_map(|(coefficients, denominator)| {
+                Number::new(
+                    coefficients.into_iter().map(Int::from).collect(),
+                    Int::from(denominator),
+                )
+            })
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn level_one_arithmetic_matches_the_general_arithmetic(x in level_ones(), y in level_ones()) {
+            let tower = Tower::new(vec![Number::integer(2)]);
+            let (dx, dy) = (&x.denominator, &y.denominator);
+            let (sx, sy) = (scaled(&x.numerators, dy), scaled(&y.numerators, dx));
+            proptest::prop_assert_eq!(x.plus(&y), Number::new(plus(&sx, &sy), dx * dy));
+            proptest::prop_assert_eq!(x.minus(&y), Number::new(difference(&sx, &sy), dx * dy));
+            let general = product(&padded(&x.numerators, 2), &padded(&y.numerators, 2), &tower.vectors);
+            proptest::prop_assert_eq!(x.times(&y, &tower), Number::new(general, dx * dy));
+            if !x.is_zero() {
+                proptest::prop_assert_eq!(x.times(&x.inverse(&tower), &tower), Number::one());
+            }
         }
     }
 
