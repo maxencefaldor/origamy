@@ -20,7 +20,9 @@ from array import array
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from itertools import combinations, product
+from typing import Final
 
 from origamy.errors import OrigamyError
 from origamy.geometry import (
@@ -34,6 +36,10 @@ from origamy.geometry import (
     through_inside,
 )
 from origamy.state import Pair, State
+
+_CLEAR: Final = 1e-10
+"""The share of the folded paper's squared size above which a float area is surely
+positive: far above what float rounding makes of none."""
 
 type Clause = tuple[int, ...]
 """Literals: ``+v`` puts the lesser face of pair ``v`` above, and ``-v`` below."""
@@ -93,10 +99,10 @@ class Problem:
         self.variables = {pair: index + 1 for index, pair in enumerate(self.pairs)}
         self.clauses: list[Clause] = []
         self.origins: list[Constraint] = []
-        self.cycles = array("l")
+        self.cycles = array("i")
         """Each three faces f < g < h that share area, as the variables of their pairs
         (f, g), (g, h) and (f, h). No stacking orders the three in a cycle."""
-        self.around: list[array[int]] = [array("l") for _ in range(len(self.pairs) + 1)]
+        self.around: list[array[int]] = [array("i") for _ in range(len(self.pairs) + 1)]
         """The cycles each variable takes part in, by their order in ``cycles``."""
         creases = list(_creases(state))
         self._folds_and_flats(creases)
@@ -223,32 +229,62 @@ class Problem:
     def _transitivity(self) -> None:
         # Three faces share area when their footprints do, so each triple of
         # footprints is measured once, however many faces stack on each.
-        shapes, footprint = self.state.footprints, self.state.footprint
-        variables = self.variables
+        footprint, variables = self.state.footprint, self.variables
         neighbors: dict[int, set[int]] = defaultdict(set)
         for f, g in self.pairs:
             neighbors[f].add(g)
             neighbors[g].add(f)
+        later = {f: {h for h in near if h > f} for f, near in neighbors.items()}
         shared: dict[tuple[int, ...], bool] = {}
+        cycles, around = self.cycles, self.around
         for f, g in self.pairs:
-            for h in sorted(neighbors[f] & neighbors[g]):
-                if h <= g:
+            fg, a, b = variables[f, g], footprint[f], footprint[g]
+            # Whether each third footprint shares area with this pair's two.
+            third: dict[int, bool] = {}
+            for h in sorted(neighbors[f] & later[g]):
+                c = footprint[h]
+                if c not in third:
+                    key = tuple(sorted({a, b, c}))
+                    if key not in shared:
+                        shared[key] = self._share(key)
+                    third[c] = shared[key]
+                if not third[c]:
                     continue
-                key = tuple(sorted({footprint[f], footprint[g], footprint[h]}))
-                if key not in shared:
-                    common = shapes[key[0]]
-                    for k in key[1:-1]:
-                        common = intersection(common, shapes[k])
-                    shared[key] = (
-                        overlaps(common, shapes[key[-1]]) if len(key) > 1 else True
-                    )
-                if not shared[key]:
-                    continue
-                cycle = (variables[f, g], variables[g, h], variables[f, h])
-                index = len(self.cycles) // 3
-                self.cycles.extend(cycle)
-                for variable in cycle:
-                    self.around[variable].append(index)
+                gh, fh = variables[g, h], variables[f, h]
+                index = len(cycles) // 3
+                cycles.extend((fg, gh, fh))
+                around[fg].append(index)
+                around[gh].append(index)
+                around[fh].append(index)
+
+    def _share(self, key: tuple[int, ...]) -> bool:
+        """Whether footprints, each overlapping the others, share area all at once.
+
+        Floats decide when their common part clearly has area; exact geometry decides
+        the rest, where it may have none.
+        """
+        if len(key) < 3:  # noqa: PLR2004 - two footprints that overlap share area
+            return True
+        common = self._floats[key[0]]
+        for k in key[1:]:
+            common = _clip_floats(common, self._floats[k])
+        if _float_area(common) > _CLEAR * self._unit:
+            return True
+        shapes = [self.state.footprints[k] for k in key]
+        return overlaps(intersection(shapes[0], shapes[1]), shapes[2])
+
+    @cached_property
+    def _floats(self) -> list[list[tuple[float, float]]]:
+        """Each footprint's corners in floats."""
+        return [[p.floats() for p in shape] for shape in self.state.footprints]
+
+    @cached_property
+    def _unit(self) -> float:
+        """The square of the folded paper's size, which float areas compare with."""
+        left, bottom, right, top = bounds(
+            p for polygon in self.state.footprints for p in polygon
+        )
+        return float(max(right - left, top - bottom)) ** 2
 
 
 def _creases(state: State) -> Iterable[Crease]:
@@ -432,3 +468,38 @@ class _Solver:
             self.values[abs(literal)] = 0
             self.reasons[abs(literal)] = None
         del self.trail[mark:]
+
+
+def _clip_floats(
+    polygon: list[tuple[float, float]], window: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """A convex polygon clipped to a convex window, both counterclockwise, in floats."""
+    result = polygon
+    for (px, py), (qx, qy) in zip(window, [*window[1:], window[0]], strict=True):
+        if not result:
+            break
+        kept: list[tuple[float, float]] = []
+        sides = [(qx - px) * (y - py) - (qy - py) * (x - px) for x, y in result]
+        for i, (x, y) in enumerate(result):
+            j = (i + 1) % len(result)
+            if sides[i] >= 0:
+                kept.append((x, y))
+            if sides[i] * sides[j] < 0:
+                t = sides[i] / (sides[i] - sides[j])
+                u, v = result[j]
+                kept.append((x + t * (u - x), y + t * (v - y)))
+        result = kept
+    return result
+
+
+def _float_area(polygon: list[tuple[float, float]]) -> float:
+    """The area of a counterclockwise polygon, in floats."""
+    return (
+        sum(
+            x * v - y * u
+            for (x, y), (u, v) in zip(
+                polygon, [*polygon[1:], *polygon[:1]], strict=True
+            )
+        )
+        / 2
+    )
