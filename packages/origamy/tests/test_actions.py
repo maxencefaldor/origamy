@@ -43,6 +43,8 @@ def assert_valid(state: State) -> None:
     assert pairs == set(state.overlapping)
     assert len(pairs) == len(state.above)
     assert violations(state) == []
+    # The kernel orders creases as the state does, so constraints name the same ones.
+    assert state.kernel.creases() == list(state.creases.items())
     assert sum(area(polygon) for polygon in state.patterns) == 1
 
 
@@ -100,6 +102,7 @@ def test_a_precrease_passes_through_its_fold(sense: Sense) -> None:
     outcome = precrease(SHEET, MIDDLE, flap, None, sense)
     folded = fold(SHEET, MIDDLE, flap, None, sense).state
     assert outcome.through == folded
+    assert outcome.through is not None
     assert outcome.through.patterns == outcome.state.patterns
 
 

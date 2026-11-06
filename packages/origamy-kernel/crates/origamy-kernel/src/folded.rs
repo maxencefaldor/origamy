@@ -206,6 +206,40 @@ impl Folded {
     }
 }
 
+/// The edges of some faces, each as its two vertices, the lesser first, with the faces
+/// along it: in the order the faces first meet them, each face's sides in turn.
+///
+/// # Panics
+///
+/// When the faces number 2³² or more.
+#[must_use]
+pub fn edges(corners: &[Vec<u32>]) -> Vec<([u32; 2], Vec<u32>)> {
+    let mut index: FxHashMap<[u32; 2], usize> = FxHashMap::default();
+    let mut found: Vec<([u32; 2], Vec<u32>)> = vec![];
+    for (face, corners) in (0u32..).zip(corners) {
+        for (k, &u) in corners.iter().enumerate() {
+            let v = corners[(k + 1) % corners.len()];
+            let edge = [u.min(v), u.max(v)];
+            let at = *index.entry(edge).or_insert_with(|| {
+                found.push((edge, vec![]));
+                found.len() - 1
+            });
+            found[at].1.push(face);
+        }
+    }
+    found
+}
+
+/// The creases of some faces: the edges between two faces, in the order of [`edges`].
+#[must_use]
+pub fn creases(corners: &[Vec<u32>]) -> Vec<([u32; 2], [u32; 2])> {
+    edges(corners)
+        .into_iter()
+        .filter(|(_, faces)| faces.len() > 1)
+        .map(|(edge, faces)| (edge, [faces[0], faces[1]]))
+        .collect()
+}
+
 /// Where each face's corners lie once folded, each image found once.
 ///
 /// Corners that creases join share an image: the two faces along a crease put each of
@@ -326,6 +360,17 @@ mod tests {
 
     fn point(x: i128, y: i128, tower: &Tower) -> Point {
         Point::new(Number::integer(x), Number::integer(y), tower)
+    }
+
+    #[test]
+    fn edges_come_as_the_faces_first_meet_them() {
+        let corners = vec![vec![0, 1, 4, 5], vec![1, 2, 3, 4]];
+        let found: Vec<[u32; 2]> = edges(&corners).into_iter().map(|(edge, _)| edge).collect();
+        assert_eq!(
+            found,
+            vec![[0, 1], [1, 4], [4, 5], [0, 5], [1, 2], [2, 3], [3, 4]]
+        );
+        assert_eq!(creases(&corners), vec![([1, 4], [0, 1])]);
     }
 
     #[test]

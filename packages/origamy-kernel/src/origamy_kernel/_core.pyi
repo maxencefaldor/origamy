@@ -19,8 +19,15 @@ class State:
         vertices: list[PointData],
         corners: list[list[int]],
         places: list[PlaceData],
-        creases: list[CreaseData],
     ) -> Self: ...
+    def vertices(self) -> list[PointData]: ...
+    def corners(self) -> list[list[int]]: ...
+    def places(self) -> list[PlaceData]: ...
+    def creases(self) -> list[CreaseData]: ...
+    def stacking(self) -> list[Pair] | None: ...
+    def crease(
+        self, outline: list[PointData], segments: list[tuple[PointData, PointData]]
+    ) -> tuple[str, State | None, list[PointData], list[list[int]], int | None]: ...
     def along(
         self, queries: list[tuple[PointData, PointData, bool]]
     ) -> list[list[int]]: ...
@@ -32,30 +39,16 @@ class State:
     ) -> tuple[str, list[Pair], list[ConstraintData], list[Pair]]: ...
     def violations(self, above: list[Pair]) -> list[ConstraintData]: ...
     def collapse(
-        self,
-        border: list[tuple[int, int]],
-        above: list[Pair],
-        target: str,
-        fixed: int,
-        budget: int,
+        self, above: list[Pair], target: str, fixed: int, budget: int
     ) -> tuple[
         str,
         State | None,
-        list[PlaceData],
-        list[Pair],
         list[int],
         tuple[int, int, int, float, float] | None,
         list[ConstraintData],
         list[Pair],
     ]: ...
 
-def crease(
-    radicands: list[NumberData],
-    vertices: list[PointData],
-    edges: list[tuple[int, int]],
-    outline: list[PointData],
-    segments: list[tuple[PointData, PointData]],
-) -> tuple[str, list[PointData], list[list[int]], int | None]: ...
 def relations(
     value: float, root: int, scale: int, size: int
 ) -> list[tuple[int, int, int]]: ...

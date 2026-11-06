@@ -130,20 +130,12 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
     land as near their old order as a valid stacking allows.
     """
     target = {edge: changes.get(edge, state.assignment(edge)) for edge in state.creases}
-    outcome, hold, places, above, moved, facts, found, conflict = state.kernel.collapse(
-        sorted(state.border),
-        sorted(state.above),
-        "".join(target.values()),
-        fixed,
-        BUDGET,
+    outcome, hold, moved, facts, found, conflict = state.kernel.collapse(
+        sorted(state.above), "".join(target.values()), fixed, BUDGET
     )
     if hold is None:
         _refuse_collapse(state, target, outcome, (facts, found, conflict))
-    faces = tuple(
-        Face(face.corners, kernel.from_place(place))
-        for face, place in zip(state.faces, places, strict=True)
-    )
-    after = State.held(state.vertices, faces, frozenset(above), hold)
+    after = State.held(hold, vertices=state.vertices)
     return Outcome(after, frozenset(moved))
 
 

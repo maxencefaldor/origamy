@@ -8,8 +8,9 @@ Everything else, such as whether a crease is folded or flat, follows from these 
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
+from typing import override
 
 import origamy_kernel
 from origamy import kernel
@@ -41,15 +42,78 @@ class Face:
     """Where the face lies: the map from the crease pattern to the folded paper."""
 
 
-@dataclass(frozen=True)
 class State:
-    """The paper at one step: crease pattern, faces' places and their stacking."""
+    """The paper at one step: crease pattern, faces' places and their stacking.
 
-    vertices: tuple[Point, ...]
-    """Where each vertex is on the crease pattern."""
-    faces: tuple[Face, ...]
-    above: frozenset[Pair] = field(default=frozenset())
-    """For each pair of faces that overlap once folded, which one is above."""
+    A state the kernel made, as creasing and collapsing make them, keeps its numbers
+    in the kernel. Python reads its faces and stacking back the first time a question
+    asks for them.
+    """
+
+    def __init__(
+        self,
+        vertices: tuple[Point, ...],
+        faces: tuple[Face, ...],
+        above: frozenset[Pair] = frozenset(),
+    ) -> None:
+        """The state of these vertices, faces and stacking."""
+        vars(self).update(vertices=vertices, faces=faces, above=above)
+
+    @classmethod
+    def held(
+        cls,
+        hold: origamy_kernel.State,
+        vertices: tuple[Point, ...] | None = None,
+        faces: tuple[Face, ...] | None = None,
+    ) -> State:
+        """A state the kernel holds, with what Python already knows of it."""
+        state = cls.__new__(cls)
+        known = {"kernel": hold, "vertices": vertices, "faces": faces}
+        vars(state).update(
+            {name: value for name, value in known.items() if value is not None}
+        )
+        return state
+
+    @cached_property
+    def vertices(self) -> tuple[Point, ...]:
+        """Where each vertex is on the crease pattern."""
+        return tuple(kernel.from_point(p) for p in self.kernel.vertices())
+
+    @cached_property
+    def faces(self) -> tuple[Face, ...]:
+        """Each face's corners on the crease pattern, and its place."""
+        corners, places = self.kernel.corners(), self.kernel.places()
+        return tuple(
+            Face(tuple(c), kernel.from_place(p))
+            for c, p in zip(corners, places, strict=True)
+        )
+
+    @cached_property
+    def above(self) -> frozenset[Pair]:
+        """For each pair of faces that overlap once folded, which one is above."""
+        stacking: list[Pair] = self.kernel.stacking() or []
+        return frozenset(stacking)
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        """Whether two states have the same vertices, faces and stacking."""
+        if not isinstance(other, State):
+            return NotImplemented
+        return (self.vertices, self.faces, self.above) == (
+            other.vertices,
+            other.faces,
+            other.above,
+        )
+
+    @override
+    def __hash__(self) -> int:
+        """A hash of the vertices, faces and stacking."""
+        return hash((self.vertices, self.faces, self.above))
+
+    @override
+    def __repr__(self) -> str:
+        """The state's vertices, faces and stacking, as code would build it."""
+        return f"State({self.vertices!r}, {self.faces!r}, {self.above!r})"
 
     @classmethod
     def sheet(cls, corners: Iterable[Point]) -> State:
@@ -112,21 +176,7 @@ class State:
             [kernel.point(p) for p in self.vertices],
             [list(face.corners) for face in self.faces],
             [kernel.place(face.place) for face in self.faces],
-            list(self.creases.items()),
         )
-
-    @classmethod
-    def held(
-        cls,
-        vertices: tuple[Point, ...],
-        faces: tuple[Face, ...],
-        above: frozenset[Pair],
-        hold: origamy_kernel.State,
-    ) -> State:
-        """A state the kernel already holds, as a collapse leaves the paper."""
-        state = cls(vertices, faces, above)
-        vars(state)["kernel"] = hold
-        return state
 
     @cached_property
     def overlapping(self) -> frozenset[Pair]:

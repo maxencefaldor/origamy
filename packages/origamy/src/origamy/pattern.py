@@ -21,7 +21,7 @@ from fractions import Fraction
 from functools import cmp_to_key
 from math import floor, hypot, inf, sqrt
 from pathlib import Path
-from typing import Final
+from typing import Final, NoReturn
 
 import origamy_kernel
 from origamy import kernel
@@ -422,26 +422,36 @@ def crease(state: State, segments: Iterable[Segment]) -> State:
         raise RefusalError(msg, rule="paper-folded", state=state)
     (place,) = places
     segments = list(segments)
-    outcome, added, faces, index = origamy_kernel.crease(
-        kernel.tower(),
-        [kernel.point(p) for p in state.vertices],
-        list(state.edges),
+    outcome, hold, added, faces, index = state.kernel.crease(
         [kernel.point(p) for p in _outline(state)],
         [(kernel.point(p), kernel.point(q)) for p, q in segments],
     )
-    match outcome, index:
-        case "off-paper", int():
-            p, q = segments[index]
-            msg = f"the crease from {p} to {q} runs off the paper"
-            raise RefusalError(msg, rule="crease-off-paper", state=state)
-        case "loose", _:
-            msg = "a crease ends inside the paper, meeting no other crease"
-            raise RefusalError(msg, rule="loose-crease", state=state)
-        case "concave", _:
-            msg = "a crease ends inside the paper, leaving a face that is not convex"
-            raise RefusalError(msg, rule="loose-crease", state=state)
+    if hold is None:
+        _refuse_crease(state, outcome, segments, index)
     vertices = (*state.vertices, *(kernel.from_point(p) for p in added))
-    return State(vertices, tuple(Face(tuple(corners), place) for corners in faces))
+    corners = tuple(Face(tuple(c), place) for c in faces)
+    return State.held(hold, vertices=vertices, faces=corners)
+
+
+def _refuse_crease(
+    state: State, outcome: str, segments: list[Segment], index: int | None
+) -> NoReturn:
+    """Refuse creasing the kernel refused, with the facts it found.
+
+    Raises:
+        RefusalError: Always.
+    """
+    if outcome == "off-paper" and index is not None:
+        p, q = segments[index]
+        msg = f"the crease from {p} to {q} runs off the paper"
+        raise RefusalError(msg, rule="crease-off-paper", state=state)
+    side = (
+        "meeting no other crease"
+        if outcome == "loose"
+        else "leaving a face that is not convex"
+    )
+    msg = f"a crease ends inside the paper, {side}"
+    raise RefusalError(msg, rule="loose-crease", state=state)
 
 
 def _outline(state: State) -> tuple[Point, ...]:

@@ -41,55 +41,56 @@ def test_the_stub_types_everything_the_compiled_core_defines() -> None:
     assert sorted(origamy_kernel.__all__) == sorted(defined)
 
 
+FLAT = (ONE, ZERO, ZERO, ONE, ZERO, ZERO)
+SQUARE = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
+
+
 def test_a_diagonal_creases_a_square_into_two_triangles() -> None:
-    square = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
-    edges = [(0, 1), (1, 2), (2, 3), (0, 3)]
-    outcome, added, faces, index = origamy_kernel.crease(
-        [], square, edges, square, [(point(0, 0), point(1, 1))]
+    paper = origamy_kernel.State([], SQUARE, [[0, 1, 2, 3]], [FLAT])
+    outcome, creased, added, faces, index = paper.crease(
+        SQUARE, [(point(0, 0), point(1, 1))]
     )
     assert (outcome, added, index) == ("creased", [], None)
     assert sorted(sorted(face) for face in faces) == [[0, 1, 2], [0, 2, 3]]
+    assert creased is not None
+    assert creased.creases() == [((0, 2), (0, 1))]
+    assert creased.stacking() == []
 
 
 def test_a_crease_off_the_paper_names_its_segment() -> None:
-    square = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
-    edges = [(0, 1), (1, 2), (2, 3), (0, 3)]
+    paper = origamy_kernel.State([], SQUARE, [[0, 1, 2, 3]], [FLAT])
     segments = [(point(0, 0), point(1, 1)), (point(0, 0), point(2, 1))]
-    outcome, _, _, index = origamy_kernel.crease([], square, edges, square, segments)
-    assert (outcome, index) == ("off-paper", 1)
+    outcome, creased, _, _, index = paper.crease(SQUARE, segments)
+    assert (outcome, creased, index) == ("off-paper", None, 1)
 
 
-def test_malformed_numbers_and_indices_raise_value_errors() -> None:
-    square = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
+def test_malformed_numbers_and_faces_raise_value_errors() -> None:
     with pytest.raises(ValueError, match="denominator"):
-        origamy_kernel.crease([], [(([1], 0), ONE)], [], [], [])
+        origamy_kernel.State([], [(([1], 0), ONE), *SQUARE[1:]], [[0, 1, 2]], [FLAT])
     with pytest.raises(ValueError, match="power of two"):
-        origamy_kernel.crease([], [(([1, 2, 3], 1), ONE)], [], [], [])
-    with pytest.raises(ValueError, match="edge"):
-        origamy_kernel.crease([], square, [(0, 9)], square, [])
-    held = origamy_kernel.State(
-        [], square, [[0, 1, 2, 3]], [(ONE, ZERO, ZERO, ONE, ZERO, ZERO)], []
-    )
+        origamy_kernel.State([], [(([1, 2, 3], 1), ONE)], [[0, 0, 0]], [FLAT])
+    with pytest.raises(ValueError, match="face"):
+        origamy_kernel.State([], SQUARE, [[0, 1, 9]], [FLAT])
+    held = origamy_kernel.State([], SQUARE, [[0, 1, 2, 3]], [FLAT])
     with pytest.raises(ValueError, match="M, V or F"):
-        held.collapse([], [], "X", 0, 10)
+        held.collapse([], "X", 0, 10)
     with pytest.raises(ValueError, match="kind"):
-        held.collapse([], [], "", 3, 10)
+        held.collapse([], "", 3, 10)
 
 
 def test_a_held_state_folds_and_stacks() -> None:
     vertices = [point(0, 0), point(1, 0), point(2, 0), point(2, 1), point(1, 1)]
     vertices.append(point(0, 1))
-    corners = [[0, 1, 4, 5], [1, 2, 3, 4]]
-    flat = (ONE, ZERO, ZERO, ONE, ZERO, ZERO)
-    held = origamy_kernel.State([], vertices, corners, [flat, flat], [((1, 4), (0, 1))])
+    held = origamy_kernel.State([], vertices, [[0, 1, 4, 5], [1, 2, 3, 4]], [FLAT] * 2)
+    assert held.creases() == [((1, 4), (0, 1))]
+    assert held.stacking() is None
     assert held.largest() == 0
     assert held.overlapping() == []
     assert held.along([(point(1, 0), point(1, 1), False)]) == [[0]]
-    outcome, after, _, above, moved, *_ = held.collapse(
-        [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (0, 5)], [], "V", 0, 10
-    )
-    assert (outcome, above, moved) == ("collapsed", [(1, 0)], [1])
+    outcome, after, moved, *_ = held.collapse([], "V", 0, 10)
+    assert (outcome, moved) == ("collapsed", [1])
     assert after is not None
+    assert after.stacking() == [(1, 0)]
     assert after.overlapping() == [(0, 1)]
     assert after.thickest()[0] == 2
     assert after.stack([(1, 0)], [], 10)[:2] == ("stacked", [(1, 0)])
