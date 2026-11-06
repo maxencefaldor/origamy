@@ -50,6 +50,13 @@ _COLLAPSES: Final = frozenset({"collapse", "reverse", "petal", "squash"})
 _FRAMES: Final = 12
 """How many parts the viewer divides a collapse's path into."""
 
+_FLEX_FACES: Final = 128
+"""The most faces a collapse may hold for the viewer to follow it as rigid origami.
+
+The flex solver's work grows with the cube of the paper's creases, and a crease
+pattern of hundreds of folds rarely moves as rigid origami at all. A larger collapse
+moves each face straight to its place."""
+
 _TILT: Final = (0.35, -0.75, 0.75)
 """Toward the eye the viewer opens flat paper with: in front of it, and above."""
 
@@ -229,7 +236,8 @@ def _step(step: Step, previous: Step | None, *, motion: bool) -> Data:
         shifts = tuple(old.shifts[p] for p in parents)
         form_before = previous.form and previous.form.carried(previous.state, state)
     path = [form.motions for form in step.path]
-    if motion and previous and step.action in _COLLAPSES and not form_before:
+    rigid = len(state.faces) <= _FLEX_FACES
+    if motion and previous and step.action in _COLLAPSES and not form_before and rigid:
         # A collapse turns many creases at once: follow them as rigid origami, so the
         # paper stays whole on its way, where a rigid motion takes it there. A face
         # that turns over on the way starts its layer gap on its other side.

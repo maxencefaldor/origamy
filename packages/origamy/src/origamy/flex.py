@@ -63,6 +63,12 @@ Paper pressed flat turns its creases about axes that all lie in one plane, so th
 corrections there have directions that move nothing to first order."""
 _SMALL: Final = 1e-6
 """A turn too small, in radians, to find its axis from, by floats."""
+_DENSE: Final = 1_000_000
+"""The most entries a correction's Jacobian holds for the solver to factor it whole."""
+_LSQR_TOLERANCE: Final = 1e-14
+"""How small, relative to what it measures, a correction's residual may stay."""
+_LSQR_STEPS: Final = 4
+"""How many steps of LSQR, per free crease, a correction may take."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,6 +470,10 @@ def _loops(state: State, index: Mapping[Edge, int]) -> _Loops:
     for f, face in enumerate(state.faces):
         for v in face.corners:
             around.setdefault(v, []).append(f)
+    # The crease at a vertex between two faces.
+    between: dict[tuple[int, frozenset[int]], Edge] = {
+        (v, frozenset(pair)): edge for edge, pair in state.creases.items() for v in edge
+    }
     loops = []
     for v, faces in sorted(around.items()):
         if v in edge_border:
@@ -477,9 +487,7 @@ def _loops(state: State, index: Mapping[Edge, int]) -> _Loops:
         ordered = sorted(faces, key=angle)
         loop, directions = [], []
         for f, g in zip(ordered, (*ordered[1:], ordered[0]), strict=True):
-            edge = next(
-                e for e, pair in state.creases.items() if v in e and set(pair) == {f, g}
-            )
+            edge = between[v, frozenset((f, g))]
             direction, _ = hinge(state, edge, g)
             loop.append(index[edge])
             directions.append(direction)
@@ -519,35 +527,143 @@ def _close(loops: _Loops, angles: list[float], driven: set[int]) -> bool:
         best = min(best, gap)
         if not len(free) or stalled == _STALLED:
             break
-        turned[free] -= np.linalg.lstsq(jacobian, residuals, rcond=_RANK)[0]
+        turned[free] -= _least(jacobian, residuals)
     angles[:] = turned.tolist()
     return closed
 
 
+@dataclass(frozen=True, slots=True)
+class _Sparse:
+    """A matrix as its entries that may differ from zero: rows, columns and values.
+
+    Entries at one row and column add up.
+    """
+
+    rows: np.ndarray
+    columns: np.ndarray
+    values: np.ndarray
+    shape: tuple[int, int]
+
+    def times(self, vector: np.ndarray) -> np.ndarray:
+        """The matrix times a vector."""
+        weights = self.values * vector[self.columns]
+        return np.bincount(self.rows, weights=weights, minlength=self.shape[0])
+
+    def transposed(self, vector: np.ndarray) -> np.ndarray:
+        """The matrix's transpose times a vector."""
+        weights = self.values * vector[self.rows]
+        return np.bincount(self.columns, weights=weights, minlength=self.shape[1])
+
+
 def _linearize(
     loops: _Loops, angles: np.ndarray, columns: np.ndarray, free: int
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, _Sparse]:
     """How far each loop stays open, and how each free crease's turn moves it.
 
     Turning crease i of a loop by a little turns the loop's product by as much about
     the crease's direction, carried by the turns before it. ``columns`` gives each
-    crease of each loop its column, or -1 for a crease that stays.
+    crease of each loop its column, or -1 for a crease that stays. Each crease moves
+    only its own loop, so the Jacobian keeps its few entries alone.
     """
     count, longest = loops.creases.shape
     turns = loops.turns(angles)
     product = np.broadcast_to(np.eye(3), (count, 3, 3))
-    jacobian = np.zeros((3 * count, free))
     rows = 3 * np.arange(count)[:, None] + np.arange(3)
+    found: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     for k in range(longest):
         moved = product @ loops.directions[:, k, :, None]
         taken = columns[:, k] >= 0
-        np.add.at(
-            jacobian,
-            (rows[taken], columns[taken, k][:, None]),
-            moved[taken, :, 0],
+        found.append(
+            (
+                rows[taken].ravel(),
+                np.repeat(columns[taken, k], 3),
+                moved[taken, :, 0].ravel(),
+            )
         )
         product = product @ turns[:, k]
+    empty = np.zeros(0, dtype=np.int64)
+    jacobian = _Sparse(
+        np.concatenate([empty, *(r for r, _, _ in found)]),
+        np.concatenate([empty, *(c for _, c, _ in found)]),
+        np.concatenate([np.zeros(0), *(v for _, _, v in found)]),
+        (3 * count, free),
+    )
     return _log(product).ravel(), jacobian
+
+
+def _least(matrix: _Sparse, target: np.ndarray) -> np.ndarray:
+    """The shortest vector that the matrix takes nearest a target.
+
+    A matrix of at most `_DENSE` entries decomposes whole, and singular values under
+    `_RANK` of the largest count as none. A larger one runs LSQR, which needs only the
+    entries that may differ from zero.
+    """
+    rows, columns = matrix.shape
+    if rows * columns <= _DENSE:
+        whole = np.zeros(matrix.shape)
+        np.add.at(whole, (matrix.rows, matrix.columns), matrix.values)
+        return np.linalg.lstsq(whole, target, rcond=_RANK)[0]
+    return _lsqr(matrix, target)
+
+
+def _lsqr(matrix: _Sparse, target: np.ndarray) -> np.ndarray:
+    """The shortest vector that the matrix takes nearest a target, by LSQR.
+
+    Paige and Saunders' LSQR bidiagonalizes the matrix a column at a time, using only
+    its products with vectors. Starting from zero, it reaches the least squares
+    solution of least length. It stops once the residual or its projection is as
+    small as floats tell, or once the condition estimate passes the reciprocal of
+    `_RANK`, so that directions that move nothing to first order stay unturned.
+    """
+    solution = np.zeros(matrix.shape[1])
+    target_norm = beta = float(np.linalg.norm(target))
+    if not beta:
+        return solution
+    u = target / beta
+    v = matrix.transposed(u)
+    alpha = float(np.linalg.norm(v))
+    if not alpha:
+        return solution
+    v /= alpha
+    w = v.copy()
+    rho_bar, phi_bar = alpha, beta
+    norm = condition_sum = x_square = z = 0.0
+    cosine_2, sine_2 = -1.0, 0.0
+    for _ in range(_LSQR_STEPS * max(1, matrix.shape[1])):
+        u = matrix.times(v) - alpha * u
+        beta = float(np.linalg.norm(u))
+        if beta:
+            u /= beta
+            norm = sqrt(norm * norm + alpha * alpha + beta * beta)
+            v = matrix.transposed(u) - beta * v
+            alpha = float(np.linalg.norm(v))
+            if alpha:
+                v /= alpha
+        rho = sqrt(rho_bar * rho_bar + beta * beta)
+        cosine, sine = rho_bar / rho, beta / rho
+        theta, rho_bar = sine * alpha, -cosine * alpha
+        phi, phi_bar = cosine * phi_bar, sine * phi_bar
+        solution += (phi / rho) * w
+        condition_sum += float(np.dot(w, w)) / (rho * rho)
+        w = v - (theta / rho) * w
+        # The solution's length, estimated as LSQR estimates it.
+        delta, gamma_bar = sine_2 * rho, -cosine_2 * rho
+        rhs = phi - delta * z
+        length = sqrt(x_square + (rhs / gamma_bar) ** 2)
+        gamma = sqrt(gamma_bar * gamma_bar + theta * theta)
+        cosine_2, sine_2 = gamma_bar / gamma, theta / gamma
+        z = rhs / gamma
+        x_square += z * z
+        residual = phi_bar
+        projected = alpha * abs(sine * phi)
+        condition = norm * sqrt(condition_sum)
+        if (
+            residual <= _LSQR_TOLERANCE * (target_norm + norm * length)
+            or projected <= _LSQR_TOLERANCE * norm * residual
+            or condition * _RANK >= 1
+        ):
+            break
+    return solution
 
 
 def _log(rotations: np.ndarray) -> np.ndarray:
