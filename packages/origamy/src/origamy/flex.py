@@ -54,6 +54,8 @@ _TOUCH: Final = 1e-7
 """How far faces may reach through each other and only touch, as floats tell."""
 _JUMP: Final = radians(8)
 """The most a crease turns between two small parts of a path that stays continuous."""
+_START: Final = 8
+"""How many small turns from its start paper may first meet the nearest closed loops."""
 _RANK: Final = 1e-9
 """How small a share of the largest singular value counts as none in a correction.
 
@@ -319,10 +321,7 @@ def path(
     first = [begin[e] for e in creases]
     turns = [finish[e] - begin[e] for e in creases]
     count = max(1, ceil(max(map(abs, turns), default=0.0) / _STEP))
-    nearest: list[list[float] | None] = []
-    for k in range(1, count + 1):
-        angles = [a + t * k / count for a, t in zip(first, turns, strict=True)]
-        nearest.append(angles if _close(loops, angles, still) else None)
+    nearest = _Nearest(loops, first, turns, count, still)
     walk = _walk(loops, first, nearest, still)
     if walk is None:
         return None
@@ -342,7 +341,7 @@ def path(
 def _walk(
     loops: _Loops,
     first: list[float],
-    nearest: Sequence[list[float] | None],
+    nearest: _Nearest,
     held: set[int],
 ) -> list[list[float]] | None:
     """The angles of the closed loops paper passes through, in small turns.
@@ -352,27 +351,32 @@ def _walk(
     turn away. Where none lies that near, it follows its own path on by a small turn,
     the way it last turned, until it meets them. No walk comes back when the paper
     cannot follow its path, or meets the nearest closed loops nowhere within twice
-    their way. The creases ``held`` keep their angles.
+    their way, or within its first few turns from the start. The creases ``held``
+    keep their angles.
     """
     walk: list[list[float]] = [first]
     k, followed = 0, 0
-    while k < len(nearest):
+    steps = nearest.steps
+    while k < steps:
         here = walk[-1]
+        # Paper that has not moved yet meets the nearest closed loops within its first
+        # few small turns, or not at all.
+        reach = steps if len(walk) > 1 else min(steps, _START)
         meet = next(
             (
                 j
-                for j in range(k, len(nearest))
-                if (near := nearest[j]) is not None and _apart(near, here) <= _JUMP
+                for j in range(k, reach)
+                if (near := nearest(j)) is not None and _apart(near, here) <= _JUMP
             ),
             None,
         )
         if meet is not None:
-            walk.append(cast("list[float]", nearest[meet]))
+            walk.append(cast("list[float]", nearest(meet)))
             k = meet + 1
             continue
         followed += 1
         last = _apart(here, walk[-2]) if len(walk) > 1 else 0.0
-        if not last or followed > 2 * len(nearest):
+        if not last or followed > 2 * steps:
             return None
         ahead: list[float] = [
             a + remainder(a - b, tau) * _STEP / last
@@ -382,6 +386,37 @@ def _walk(
             return None
         walk.append(ahead)
     return walk
+
+
+class _Nearest:
+    """The closed loops nearest the angles even rates of turning give, step by step.
+
+    Each step's loops are closed the first time the walk asks for them, so a walk that
+    stops early closes few.
+    """
+
+    def __init__(
+        self,
+        loops: _Loops,
+        first: list[float],
+        turns: list[float],
+        steps: int,
+        held: set[int],
+    ) -> None:
+        self.loops, self.first, self.turns = loops, first, turns
+        self.steps, self.held = steps, held
+        self.found: dict[int, list[float] | None] = {}
+
+    def __call__(self, step: int) -> list[float] | None:
+        """The closed loops nearest the even turns of a step, counted from 0."""
+        if step not in self.found:
+            share = (step + 1) / self.steps
+            angles = [
+                a + t * share for a, t in zip(self.first, self.turns, strict=True)
+            ]
+            closed = _close(self.loops, angles, self.held)
+            self.found[step] = angles if closed else None
+        return self.found[step]
 
 
 def _along(
