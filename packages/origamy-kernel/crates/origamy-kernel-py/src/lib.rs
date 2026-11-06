@@ -47,10 +47,7 @@ impl<'py> IntoPyObject<'py> for Integer {
 
     fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
         match self.0 {
-            Int::Small(value) => match i64::try_from(value) {
-                Ok(small) => Ok(small.into_pyobject(py)?.into_any()),
-                Err(_) => Ok(value.into_pyobject(py)?.into_any()),
-            },
+            Int::Small(value) => Ok(value.into_pyobject(py)?.into_any()),
             Int::Big(value) => Ok((*value).into_pyobject(py)?.into_any()),
         }
     }

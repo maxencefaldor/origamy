@@ -110,7 +110,7 @@ impl Number {
     #[must_use]
     pub fn integer(value: i128) -> Number {
         Number {
-            numerators: smallvec![Int::Small(value)],
+            numerators: smallvec![Int::from(value)],
             denominator: Int::ONE,
         }
     }
@@ -519,8 +519,8 @@ mod tests {
 
     fn n(numerators: &[i128], denominator: i128) -> Number {
         Number::new(
-            numerators.iter().map(|&v| Int::Small(v)).collect(),
-            Int::Small(denominator),
+            numerators.iter().map(|&v| Int::from(v)).collect(),
+            Int::from(denominator),
         )
     }
 
@@ -553,8 +553,8 @@ mod tests {
         (proptest::collection::vec(-50i128..50, 4), 1i128..30).prop_map(
             |(coefficients, denominator)| {
                 Number::new(
-                    coefficients.into_iter().map(Int::Small).collect(),
-                    Int::Small(denominator),
+                    coefficients.into_iter().map(Int::from).collect(),
+                    Int::from(denominator),
                 )
             },
         )

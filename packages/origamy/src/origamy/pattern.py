@@ -345,35 +345,36 @@ def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number
     return found[1]
 
 
+type _Candidate = tuple[float, int, Fraction, Fraction, int]
+"""A candidate ``a + b√r``: its fit, its size, a, b and r, with r 1 for a fraction."""
+
+
 def _explanation(value: float, tolerance: float) -> tuple[float, Number] | None:
-    """The candidate that explains a float best, and its fit, within a tolerance."""
-    found: list[tuple[float, int, Number]] = []
+    """The candidate that explains a float best, and its fit, within a tolerance.
+
+    Only the best candidate becomes a number, so the tower gains a level only for a
+    root that some coordinate needs.
+    """
+    found: list[_Candidate] = []
     for fraction in _convergents(Fraction(value)):
         error = abs(value - float(fraction))
         if error <= tolerance:
             fit = error * fraction.denominator**2
-            found.append((fit, fraction.denominator, Number.of(fraction)))
-    if any(fit <= SURE for fit, _, _ in found):
-        return _best(found)
-    for root in _ROOTS:
-        surd = sqrt(root)
-        for d, p, q in _relations(value, root):
-            if abs(value - (p + q * surd) / d) <= tolerance:
-                size = max(d, abs(p), abs(q))
-                fit = abs(d * value - p - q * surd) * size**2
-                number = (
-                    Number.of(Fraction(p, d))
-                    + Number.of(Fraction(q, d)) * Number.of(root).sqrt()
-                )
-                found.append((fit, size, number))
+            found.append((fit, fraction.denominator, fraction, Fraction(0), 1))
+    if not any(fit <= SURE for fit, *_ in found):
+        for root in _ROOTS:
+            surd = sqrt(root)
+            for d, p, q in _relations(value, root):
+                if abs(value - (p + q * surd) / d) <= tolerance:
+                    size = max(d, abs(p), abs(q))
+                    fit = abs(d * value - p - q * surd) * size**2
+                    found.append((fit, size, Fraction(p, d), Fraction(q, d), root))
     if not found:
         return None
-    return _best(found)
-
-
-def _best(found: list[tuple[float, int, Number]]) -> tuple[float, Number]:
-    """The candidate with the smallest fit, the smallest size among equals."""
-    fit, _, number = min(found, key=lambda candidate: candidate[:2])
+    fit, _, rational, surd, root = min(found, key=lambda candidate: candidate[:2])
+    number = Number.of(rational)
+    if surd:
+        number += Number.of(surd) * Number.of(root).sqrt()
     return fit, number
 
 

@@ -1,8 +1,9 @@
-//! Integers of any size, kept in 128 bits while they fit.
+//! Integers of any size, kept in 64 bits while they fit.
 //!
 //! Folding multiplies small integers almost always, and a heap allocation for each
-//! would cost more than the arithmetic. An [`Int`] holds an `i128` until an operation
-//! overflows it, and a [`BigInt`] from then on.
+//! would cost more than the arithmetic. An [`Int`] holds an `i64`, and a [`BigInt`] once
+//! a result outgrows it. Sums and products of two `i64`s fit in an `i128`, so each
+//! operation on small integers is exact before it narrows.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -15,9 +16,9 @@ use num_traits::{Signed, ToPrimitive, Zero};
 /// An integer, small or big.
 #[derive(Clone, Debug)]
 pub enum Int {
-    /// An integer that fits in 128 bits.
-    Small(i128),
-    /// An integer too large for 128 bits.
+    /// An integer that fits in 64 bits.
+    Small(i64),
+    /// An integer too large for 64 bits.
     Big(Box<BigInt>),
 }
 
@@ -31,7 +32,7 @@ impl Int {
     #[must_use]
     pub fn from_big(value: BigInt) -> Int {
         value
-            .to_i128()
+            .to_i64()
             .map_or_else(|| Int::Big(Box::new(value)), Int::Small)
     }
 
@@ -91,8 +92,8 @@ impl Int {
     pub fn gcd(&self, other: &Int) -> Int {
         match (self, other) {
             (Int::Small(a), Int::Small(b)) => {
-                let g = gcd_u128(a.unsigned_abs(), b.unsigned_abs());
-                i128::try_from(g).map_or_else(|_| Int::from_big(BigInt::from(g)), Int::Small)
+                let g = gcd_u64(a.unsigned_abs(), b.unsigned_abs());
+                i64::try_from(g).map_or_else(|_| Int::from_big(BigInt::from(g)), Int::Small)
             }
             _ => Int::from_big(self.to_big().gcd(&other.to_big())),
         }
@@ -111,7 +112,7 @@ impl Int {
     }
 }
 
-fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
     if a == 0 {
         return b;
     }
@@ -134,25 +135,23 @@ fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
 
 impl From<i128> for Int {
     fn from(value: i128) -> Int {
-        Int::Small(value)
+        i64::try_from(value).map_or_else(|_| Int::Big(Box::new(BigInt::from(value))), Int::Small)
     }
 }
 
 impl From<i64> for Int {
     fn from(value: i64) -> Int {
-        Int::Small(i128::from(value))
+        Int::Small(value)
     }
 }
 
 macro_rules! arithmetic {
-    ($trait:ident, $method:ident, $checked:ident) => {
+    ($trait:ident, $method:ident) => {
         impl $trait<&Int> for &Int {
             type Output = Int;
             fn $method(self, other: &Int) -> Int {
                 if let (Int::Small(a), Int::Small(b)) = (self, other) {
-                    if let Some(v) = a.$checked(*b) {
-                        return Int::Small(v);
-                    }
+                    return Int::from(i128::from(*a).$method(i128::from(*b)));
                 }
                 Int::from_big(self.to_big().$method(other.to_big()))
             }
@@ -166,9 +165,9 @@ macro_rules! arithmetic {
     };
 }
 
-arithmetic!(Add, add, checked_add);
-arithmetic!(Sub, sub, checked_sub);
-arithmetic!(Mul, mul, checked_mul);
+arithmetic!(Add, add);
+arithmetic!(Sub, sub);
+arithmetic!(Mul, mul);
 
 impl Neg for &Int {
     type Output = Int;
@@ -193,7 +192,7 @@ impl PartialEq for Int {
     fn eq(&self, other: &Int) -> bool {
         match (self, other) {
             (Int::Small(a), Int::Small(b)) => a == b,
-            // A big integer never fits in 128 bits, so it never equals a small one.
+            // A big integer never fits in 64 bits, so it never equals a small one.
             (Int::Big(a), Int::Big(b)) => a == b,
             _ => false,
         }
@@ -241,9 +240,9 @@ mod tests {
 
     #[test]
     fn overflow_moves_to_big_and_back() {
-        let big = &Int::Small(i128::MAX) + &Int::ONE;
+        let big = &Int::Small(i64::MAX) + &Int::ONE;
         assert!(matches!(big, Int::Big(_)));
-        assert_eq!(&big - &Int::ONE, Int::Small(i128::MAX));
+        assert_eq!(&big - &Int::ONE, Int::Small(i64::MAX));
         let square = &big * &big;
         assert_eq!(square.div_exact(&big), big);
     }
