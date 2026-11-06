@@ -231,10 +231,24 @@ def fold() -> Paper:
 ```
 
 The paper's lower left corner goes to (0, 0), and its longer side to length 1.
-A file gives its coordinates as floats, and reading snaps each one to the simplest exact number within `tolerance`.
-The candidates are fractions, then fractions plus a fraction of √2 or √3.
-Patterns on grids, on 22.5° angles and on 30° angles all snap.
-Reading refuses a coordinate no candidate matches, with a `ValueError`.
+A file gives its coordinates as floats, and reading finds the exact number each one stands for.
+
+| Candidate | Size |
+| --- | --- |
+| A fraction p / d | Its denominator d, up to a million |
+| (p + q√r) / d, for r one of 2, 3, 5 and 6 | Its largest integer s, up to 10,000 |
+
+Lattice reduction finds the integers of each candidate.
+A candidate's fit is its error times d², or times s³.
+A random float's best candidate has a fit near 1, so a far smaller fit shows the number the float stands for.
+The candidate with the smallest fit wins, within `tolerance` of the float.
+
+Reading takes the coordinates with a fit under `origamy.pattern.SURE`, 10⁻⁸, first.
+A corner without both then lies where two lines of creases cross, each through corners already exact.
+A line runs straight along creases through two exact corners, or leaves an exact corner at a slope that snaps.
+Coordinates with a fit under `origamy.pattern.FIT`, 10⁻⁴, come next, then crossings again, until every corner is exact.
+Patterns on grids, on 22.5° and 30° angles, with golden ratios, and on crossings of their creases all read exactly.
+Reading refuses a corner left over, with a `ValueError`.
 
 A FOLD file's unassigned creases read as flat creases, and an assignment origamy cannot fold is refused.
 An ORIPA file's aid lines are ignored.

@@ -9,7 +9,7 @@ import pytest
 
 from origamy import CreasePattern, Line, Number, Paper, Point, RefusedError, service
 from origamy.geometry import PointLike
-from origamy.pattern import snap
+from origamy.pattern import SURE, snap
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 
@@ -29,11 +29,48 @@ middle lines and an aid line. The other diagonal stays flat inside the flaps."""
 
 def test_coordinates_snap_to_the_simplest_exact_number() -> None:
     assert snap(0.5) == Number.of("1/2")
-    assert snap(0.3333333333) == Number.of(Fraction(1, 3))
+    assert snap(1 / 3) == Number.of(Fraction(1, 3))
+    assert snap(81 / 1040) == Number.of(Fraction(81, 1040))
+    assert snap((1 + 5**0.5) / 4) == Number.of("1/4 + √5/4")
+    assert snap((3 - 6**0.5) / 7) == Number.of("3/7 - √6/7")
     assert snap(1 - 2**0.5 / 2) == Number.of("1 - √2/2")
     assert snap(3**0.5 / 4) == Number.of("√3/4")
     with pytest.raises(ValueError, match="no exact number"):
         snap(0.123456789)
+    # A file's rounding: the number still explains the float far better than chance,
+    # though not surely.
+    rounded = (8 + 2**0.5) / 1024 + 1e-14
+    assert snap(rounded) == Number.of("1/128 + √2/1024")
+    with pytest.raises(ValueError, match="no exact number"):
+        snap(rounded, fit=SURE)
+
+
+def test_a_corner_no_number_explains_lies_where_creases_cross(tmp_path: Path) -> None:
+    # Two creases from exact corners cross at a point of Q(√2, √3), which no single
+    # square root's numbers explain.
+    rising = Line.through((0, 0), (1, "√2/2"))
+    falling = Line.through((0, 1), (1, "√3/3"))
+    crossing = rising.meet(falling)
+    assert crossing is not None
+    corners = [(0, 0), (1, 0), (1, 3**0.5 / 3), (1, 2**0.5 / 2), (1, 1), (0, 1)]
+    border = [(k, (k + 1) % len(corners)) for k in range(len(corners))]
+    document = {
+        "vertices_coords": [*corners, list(crossing.floats())],
+        "edges_vertices": [*border, (0, 6), (6, 3), (5, 6), (6, 2)],
+        "edges_assignment": ["B"] * len(border) + ["F"] * 4,
+    }
+    path = tmp_path / "crossing.fold"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match="no exact number"):
+        snap(crossing.floats()[0])
+    pattern = CreasePattern.read(path)
+    assert {end for crease in pattern.flats for end in crease} == {
+        Point.of((0, 0)),
+        Point.of((0, 1)),
+        Point.of((1, "√2/2")),
+        Point.of((1, "√3/3")),
+        crossing,
+    }
 
 
 def test_an_oripa_pattern_collapses_into_a_preliminary_base(tmp_path: Path) -> None:
