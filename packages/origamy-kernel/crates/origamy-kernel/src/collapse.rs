@@ -381,8 +381,11 @@ mod tests {
         Point::new(Number::integer(x), Number::integer(y), tower)
     }
 
+    /// A segment as its two ends' integer coordinates.
+    type Ends = ((i128, i128), (i128, i128));
+
     /// Open paper, a square of side 4 creased along segments.
-    fn paper(segments: &[((i128, i128), (i128, i128))]) -> Paper {
+    fn paper(segments: &[Ends]) -> Paper {
         let tower = Tower::default();
         let square = vec![
             point(0, 0, &tower),
