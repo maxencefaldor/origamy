@@ -12,18 +12,19 @@ from origamy_kernel.data import NumberData, PlaceData, PointData
 
 def number(value: Number) -> NumberData:
     """A number as its numerators and denominator."""
-    return list(value.numerators), value.denominator
+    return value.numerators, value.denominator
 
 
 def from_number(data: NumberData) -> Number:
-    """The number that data holds."""
+    """The number that data holds, which the kernel gives in its one form."""
     numerators, denominator = data
-    return Number(tuple(numerators), denominator)
+    return Number.of_form(tuple(numerators), denominator)
 
 
 def point(p: Point) -> PointData:
     """A point as its two coordinates."""
-    return number(p.x), number(p.y)
+    x, y = p.x, p.y
+    return (x.numerators, x.denominator), (y.numerators, y.denominator)
 
 
 def from_point(data: PointData) -> Point:

@@ -123,6 +123,18 @@ class Number:
         self._hash: int | None = None
 
     @classmethod
+    def of_form(cls, numerators: Coefficients, denominator: int) -> Number:
+        """The number whose one form is ``numerators / denominator``, taken as given.
+
+        The kernel gives its numbers in their one form, so reading them back skips the
+        reduction. Scripts make numbers with `Number.of`.
+        """
+        number = cls.__new__(cls)
+        number.numerators, number.denominator = numerators, denominator
+        number._estimate = number._hash = None  # noqa: SLF001 - the class's own
+        return number
+
+    @classmethod
     def of(cls, value: Exact) -> Number:
         """Convert an exact value, or text such as ``"1 - √2/2"``, to a `Number`.
 

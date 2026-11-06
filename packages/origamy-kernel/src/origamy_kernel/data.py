@@ -1,8 +1,10 @@
 # Copyright 2026 Maxence Faldor
 """The data the kernel reads and returns: numbers, points, places, creases."""
 
-type NumberData = tuple[list[int], int]
-"""A number as its numerators and its denominator."""
+from collections.abc import Sequence
+
+type NumberData = tuple[Sequence[int], int]
+"""A number as its numerators and its denominator, in its one form."""
 
 type PointData = tuple[NumberData, NumberData]
 """A point as its two coordinates."""

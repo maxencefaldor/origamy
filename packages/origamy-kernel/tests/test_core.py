@@ -7,12 +7,13 @@ import pytest
 
 import origamy_kernel
 from origamy_kernel import _core
+from origamy_kernel.data import NumberData, PlaceData, PointData
 
-ONE = ([1], 1)
-ZERO = ([0], 1)
+ONE: NumberData = ([1], 1)
+ZERO: NumberData = ([0], 1)
 
 
-def point(x: int, y: int) -> tuple[tuple[list[int], int], tuple[list[int], int]]:
+def point(x: int, y: int) -> PointData:
     return ([x], 1), ([y], 1)
 
 
@@ -41,7 +42,7 @@ def test_the_stub_types_everything_the_compiled_core_defines() -> None:
     assert sorted(origamy_kernel.__all__) == sorted(defined)
 
 
-FLAT = (ONE, ZERO, ZERO, ONE, ZERO, ZERO)
+FLAT: PlaceData = (ONE, ZERO, ZERO, ONE, ZERO, ZERO)
 SQUARE = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
 
 
