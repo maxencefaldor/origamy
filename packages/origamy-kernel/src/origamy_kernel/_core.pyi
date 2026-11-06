@@ -46,6 +46,9 @@ def largest(
     vertices: list[PointData],
     corners: list[list[int]],
 ) -> int: ...
+def relations(
+    value: float, root: int, scale: int, size: int
+) -> list[tuple[int, int, int]]: ...
 def collapse(
     radicands: list[NumberData],
     vertices: list[PointData],

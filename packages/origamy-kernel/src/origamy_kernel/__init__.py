@@ -6,9 +6,25 @@ defines them. `crease` divides open paper along a crease pattern's segments. `al
 finds the creases along lines and segments, and `largest` the face of largest area.
 `collapse` folds every crease at once. `stack` finds which face lies above which
 wherever folded faces overlap, and `violations` names the constraints a stacking
-breaks.
+breaks. `relations` finds the small integer relations that explain a float.
 """
 
-from origamy_kernel._core import along, collapse, crease, largest, stack, violations
+from origamy_kernel._core import (
+    along,
+    collapse,
+    crease,
+    largest,
+    relations,
+    stack,
+    violations,
+)
 
-__all__ = ["along", "collapse", "crease", "largest", "stack", "violations"]
+__all__ = [
+    "along",
+    "collapse",
+    "crease",
+    "largest",
+    "relations",
+    "stack",
+    "violations",
+]

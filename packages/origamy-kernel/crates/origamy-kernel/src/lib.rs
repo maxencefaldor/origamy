@@ -13,6 +13,7 @@ pub mod crease;
 pub mod field;
 pub mod geometry;
 pub mod int;
+pub mod lattice;
 pub mod lines;
 pub mod overlay;
 pub mod sheet;

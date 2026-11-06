@@ -403,104 +403,10 @@ def _relations(value: float, root: int) -> list[tuple[int, int, int]]:
     """Small integers ``(d, p, q)``, with q nonzero, that make ``d·value ≈ p + q√root``.
 
     Lattice reduction of the integer combinations of ``value``, 1 and ``√root`` leaves
-    short vectors: those with small integers and a small error.
+    short vectors: those with small integers and a small error. The kernel reduces
+    the lattice exactly, by Cohen's integral LLL.
     """
-    surd = sqrt(root)
-    basis = [
-        [1, 0, 0, round(_SCALE * value)],
-        [0, 1, 0, _SCALE],
-        [0, 0, 1, round(_SCALE * surd)],
-    ]
-    found = []
-    for times, minus_p, minus_q, _ in _reduced(basis):
-        sign = 1 if times > 0 else -1
-        d, p, q = sign * times, -sign * minus_p, -sign * minus_q
-        if d and q and max(d, abs(p), abs(q)) <= _SIZE:
-            found.append((d, p, q))
-    return found
-
-
-def _reduced(basis: list[list[int]]) -> list[list[int]]:
-    """An LLL-reduced basis of the lattice the integer vectors span."""
-    lattice = _Lattice(basis)
-    k = 2
-    while k <= lattice.count:
-        lattice.orthogonalize(k)
-        lattice.reduce(k, k - 1)
-        while not lattice.lovasz(k):
-            lattice.swap(k)
-            k = max(2, k - 1)
-            lattice.reduce(k, k - 1)
-        for j in range(k - 2, 0, -1):
-            lattice.reduce(k, j)
-        k += 1
-    return lattice.vectors[1:]
-
-
-class _Lattice:
-    """A lattice basis under Cohen's integral LLL, its Gram-Schmidt kept in integers.
-
-    ``d[i]`` is the Gram determinant of the first i vectors, and ``mu[k][j]`` is
-    ``d[j]`` times vector k's Gram-Schmidt coefficient on vector j. Lists count from 1.
-    """
-
-    def __init__(self, basis: list[list[int]]) -> None:
-        self.count = len(basis)
-        self.vectors: list[list[int]] = [[], *(list(vector) for vector in basis)]
-        self.d = [1, _dot(basis[0], basis[0])] + [0] * (self.count - 1)
-        self.mu = [[0] * (self.count + 1) for _ in range(self.count + 1)]
-        self.known = 1
-
-    def orthogonalize(self, k: int) -> None:
-        """Find vector k's Gram-Schmidt coefficients, the first time it is reached."""
-        if k <= self.known:
-            return
-        self.known = k
-        d, mu = self.d, self.mu
-        for j in range(1, k + 1):
-            u = _dot(self.vectors[k], self.vectors[j])
-            for i in range(1, j):
-                u = (d[i] * u - mu[k][i] * mu[j][i]) // d[i - 1]
-            if j < k:
-                mu[k][j] = u
-            else:
-                d[k] = u
-
-    def lovasz(self, k: int) -> bool:
-        """Whether vectors k - 1 and k meet Lovász's condition, with a factor of 3/4."""
-        d = self.d
-        return 4 * d[k] * d[k - 2] >= 3 * d[k - 1] ** 2 - 4 * self.mu[k][k - 1] ** 2
-
-    def reduce(self, k: int, j: int) -> None:
-        """Take the nearest multiple of vector j from vector k."""
-        d, mu = self.d, self.mu
-        if 2 * abs(mu[k][j]) <= d[j]:
-            return
-        shift = (2 * mu[k][j] + d[j]) // (2 * d[j])
-        self.vectors[k] = [
-            a - shift * b for a, b in zip(self.vectors[k], self.vectors[j], strict=True)
-        ]
-        mu[k][j] -= shift * d[j]
-        for i in range(1, j):
-            mu[k][i] -= shift * mu[j][i]
-
-    def swap(self, k: int) -> None:
-        """Exchange vectors k - 1 and k."""
-        vectors, d, mu = self.vectors, self.d, self.mu
-        vectors[k], vectors[k - 1] = vectors[k - 1], vectors[k]
-        for j in range(1, k - 1):
-            mu[k][j], mu[k - 1][j] = mu[k - 1][j], mu[k][j]
-        m = mu[k][k - 1]
-        before = (d[k - 2] * d[k] + m * m) // d[k - 1]
-        for i in range(k + 1, self.known + 1):
-            t = mu[i][k]
-            mu[i][k] = (d[k] * mu[i][k - 1] - m * t) // d[k - 1]
-            mu[i][k - 1] = (before * t + m * mu[i][k]) // d[k]
-        d[k - 1] = before
-
-
-def _dot(first: list[int], second: list[int]) -> int:
-    return sum(a * b for a, b in zip(first, second, strict=True))
+    return origamy_kernel.relations(value, root, _SCALE, _SIZE)
 
 
 def crease(state: State, segments: Iterable[Segment]) -> State:

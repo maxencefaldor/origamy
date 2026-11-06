@@ -17,6 +17,7 @@ use origamy_kernel::crease::{CreaseError, crease as crease_paper};
 use origamy_kernel::field::{Number, Tower};
 use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
+use origamy_kernel::lattice::relations as find_relations;
 use origamy_kernel::lines::{Along, along as creases_along};
 use origamy_kernel::sheet::{Pair, Sheet};
 use origamy_kernel::stacking::{
@@ -397,6 +398,30 @@ fn largest(
     Ok(py.detach(|| largest_face(&vertices, &corners, &tower)))
 }
 
+/// Small integers `(d, p, q)`, with `d` positive and `q` nonzero, that make
+/// `d·value ≈ p + q√root`, by lattice reduction.
+///
+/// Args:
+///     value: The float to explain.
+///     root: The integer whose square root may explain it.
+///     scale: The weight of a relation's error against its integers.
+///     size: The largest integer kept.
+///
+/// Returns:
+///     The relations the reduced basis holds, in its order.
+///
+/// Raises:
+///     ValueError: The root is not positive, or the scale or size is not positive.
+#[pyfunction]
+fn relations(value: f64, root: u32, scale: i64, size: i64) -> PyResult<Vec<(i64, i64, i64)>> {
+    if root == 0 || scale <= 0 || size <= 0 || !value.is_finite() {
+        return Err(PyValueError::new_err(
+            "relations need a finite value, and a positive root, scale and size",
+        ));
+    }
+    Ok(find_relations(value, root, scale, size))
+}
+
 /// What a collapse came to: an outcome's name, the places and stacking, the faces
 /// moved, and the facts of a refusal.
 type CollapseData = (
@@ -532,6 +557,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(crease, module)?)?;
     module.add_function(wrap_pyfunction!(along, module)?)?;
     module.add_function(wrap_pyfunction!(largest, module)?)?;
+    module.add_function(wrap_pyfunction!(relations, module)?)?;
     module.add_function(wrap_pyfunction!(collapse, module)?)?;
     Ok(())
 }

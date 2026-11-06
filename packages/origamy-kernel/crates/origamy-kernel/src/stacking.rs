@@ -386,17 +386,15 @@ impl<'a> Problem<'a> {
     fn shared(&self, (f, g): Pair, out: &mut Vec<(u32, u32, u32)>) {
         out.clear();
         let (a, b) = (&self.holding[f as usize], &self.holding[g as usize]);
+        // A merge whose steps take no branch: each side moves on when it is not ahead.
         let (mut i, mut j) = (0, 0);
         while i < a.len() && j < b.len() {
-            match a[i].0.cmp(&b[j].0) {
-                std::cmp::Ordering::Less => i += 1,
-                std::cmp::Ordering::Greater => j += 1,
-                std::cmp::Ordering::Equal => {
-                    out.push((a[i].0, a[i].1, b[j].1));
-                    i += 1;
-                    j += 1;
-                }
+            let ((x, k), (y, m)) = (a[i], b[j]);
+            if x == y {
+                out.push((x, k, m));
             }
+            i += usize::from(x <= y);
+            j += usize::from(y <= x);
         }
     }
 
@@ -649,7 +647,7 @@ impl<'p, 'a> Solver<'p, 'a> {
                     if x == u && y == l {
                         continue;
                     }
-                    start += neighbors[start..].partition_point(|&(g, _)| g < faces[y]);
+                    start = gallop(neighbors, start, faces[y]);
                     let literal = neighbors[start].1;
                     match self.value(literal) {
                         0 => self.assign(literal, Reason::Cycle(triple(x, y))),
@@ -947,6 +945,19 @@ fn cycle_among(faces: &[u32], beats: impl Fn(u32, u32) -> bool) -> Option<[u32; 
         }
     }
     None
+}
+
+/// The first place at or after `start` among sorted neighbors whose face is not below
+/// `face`: steps that double from `start`, then a binary search within the last step.
+fn gallop(neighbors: &[(u32, i32)], start: usize, face: u32) -> usize {
+    let mut step = 1;
+    let mut low = start;
+    while low + step < neighbors.len() && neighbors[low + step].0 < face {
+        low += step;
+        step *= 2;
+    }
+    let high = (low + step + 1).min(neighbors.len());
+    low + neighbors[low..high].partition_point(|&(g, _)| g < face)
 }
 
 /// Whether some face repeats among four.
