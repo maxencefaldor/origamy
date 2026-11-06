@@ -16,6 +16,7 @@ The solver propagates these constraints and searches, keeping the reason for eac
 deduction, so that when no stacking exists it names the constraints that conflict.
 """
 
+from array import array
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -78,7 +79,12 @@ class BudgetError(OrigamyError):
 
 
 class Problem:
-    """The stacking constraints of a state, as clauses over pairs of faces."""
+    """The stacking constraints of a state, as clauses over pairs of faces.
+
+    Transitivity makes most constraints, three faces at a time, so each three faces
+    that share area take three integers, not two clauses. Constraint ``k`` is clause
+    ``k`` while k counts clauses, and then each cycle in order.
+    """
 
     def __init__(self, state: State) -> None:
         """Build every constraint of a state's geometry."""
@@ -87,10 +93,40 @@ class Problem:
         self.variables = {pair: index + 1 for index, pair in enumerate(self.pairs)}
         self.clauses: list[Clause] = []
         self.origins: list[Constraint] = []
+        self.cycles = array("l")
+        """Each three faces f < g < h that share area, as the variables of their pairs
+        (f, g), (g, h) and (f, h). No stacking orders the three in a cycle."""
+        self.around: list[array[int]] = [array("l") for _ in range(len(self.pairs) + 1)]
+        """The cycles each variable takes part in, by their order in ``cycles``."""
         creases = list(_creases(state))
         self._folds_and_flats(creases)
         self._crossings(creases)
         self._transitivity()
+
+    @property
+    def size(self) -> int:
+        """How many constraints the problem holds: clauses, then cycles."""
+        return len(self.clauses) + len(self.cycles) // 3
+
+    def literals(self, index: int) -> Clause:
+        """A constraint's literals: a clause's, or a cycle's three pairs around it.
+
+        A cycle's literals put f above g, g above h and h above f. A stacking makes
+        some of them hold, and not all.
+        """
+        if index < len(self.clauses):
+            return self.clauses[index]
+        k = 3 * (index - len(self.clauses))
+        return (self.cycles[k], self.cycles[k + 1], -self.cycles[k + 2])
+
+    def constraint(self, index: int) -> Constraint:
+        """The geometric reason behind a constraint."""
+        if index < len(self.clauses):
+            return self.origins[index]
+        k = 3 * (index - len(self.clauses))
+        f, g = self.pairs[self.cycles[k] - 1]
+        h = self.pairs[self.cycles[k + 1] - 1][1]
+        return Constraint("transitivity", (f, g, h), None)
 
     def literal(self, upper: int, lower: int) -> int | None:
         """The literal that says ``upper`` is above ``lower``, if the two overlap."""
@@ -188,6 +224,7 @@ class Problem:
         # Three faces share area when their footprints do, so each triple of
         # footprints is measured once, however many faces stack on each.
         shapes, footprint = self.state.footprints, self.state.footprint
+        variables = self.variables
         neighbors: dict[int, set[int]] = defaultdict(set)
         for f, g in self.pairs:
             neighbors[f].add(g)
@@ -207,11 +244,11 @@ class Problem:
                     )
                 if not shared[key]:
                     continue
-                x, y, z = self.literal(f, g), self.literal(g, h), self.literal(h, f)
-                if x is None or y is None or z is None:
-                    continue
-                constraint = Constraint("transitivity", (f, g, h), None)
-                self._add(constraint, ((-x, -y, -z), (x, y, z)))
+                cycle = (variables[f, g], variables[g, h], variables[f, h])
+                index = len(self.cycles) // 3
+                self.cycles.extend(cycle)
+                for variable in cycle:
+                    self.around[variable].append(index)
 
 
 def _creases(state: State) -> Iterable[Crease]:
@@ -256,7 +293,7 @@ def solve(
     if (conflict := solver.propagate(0)) is not None:
         clauses, literals = solver.explain(conflict)
         raise NoStackingError(
-            [problem.origins[index] for index in clauses],
+            [problem.constraint(index) for index in clauses],
             [_pair(problem, literal) for literal in literals],
         )
     order = [lit for pair in prefer if (lit := problem.literal(*pair)) is not None]
@@ -277,7 +314,9 @@ class _Solver:
     """Unit propagation and chronological backtracking over a problem's clauses."""
 
     def __init__(self, problem: Problem) -> None:
+        self.problem = problem
         self.clauses = problem.clauses
+        self.cycles, self.around = problem.cycles, problem.around
         self.values = [0] * (len(problem.pairs) + 1)
         self.reasons: list[int | None] = [None] * len(self.values)
         self.trail: list[int] = []
@@ -315,6 +354,23 @@ class _Solver:
                     if open_literal is None:
                         return index
                     self.assign(open_literal, index)
+            if (conflict := self._close_cycles(abs(falsified))) is not None:
+                return conflict
+        return None
+
+    def _close_cycles(self, variable: int) -> int | None:
+        """Deduce from the cycles a variable takes part in; return one that closes."""
+        cycles, base = self.cycles, len(self.clauses)
+        for index in self.around[variable]:
+            k = 3 * index
+            literals = (cycles[k], cycles[k + 1], -cycles[k + 2])
+            values = [self.value(literal) for literal in literals]
+            held, failed = values.count(1), values.count(-1)
+            if held == 3 or failed == 3:  # noqa: PLR2004 - all three around
+                return base + index
+            if held + failed == 2 and held != failed:  # noqa: PLR2004 - one open
+                open_literal = literals[values.index(0)]
+                self.assign(-open_literal if held else open_literal, base + index)
         return None
 
     def explain(self, conflict: int) -> tuple[list[int], list[int]]:
@@ -325,7 +381,7 @@ class _Solver:
         while pending:
             index = pending.pop()
             clauses.add(index)
-            for literal in self.clauses[index]:
+            for literal in self.problem.literals(index):
                 variable = abs(literal)
                 if variable in seen:
                     continue

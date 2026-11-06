@@ -44,7 +44,15 @@ def assert_valid(state: State) -> None:
     assert len(pairs) == len(state.above)
     problem = Problem(state)
     literals = {problem.literal(*pair) for pair in state.above}
-    assert all(any(x in literals for x in clause) for clause in problem.clauses)
+    assert all(
+        any(x in literals for x in problem.literals(index))
+        for index in range(problem.size)
+    )
+    # No three faces stack in a cycle.
+    assert all(
+        not all(x in literals for x in problem.literals(index))
+        for index in range(len(problem.clauses), problem.size)
+    )
     assert sum(area(polygon) for polygon in state.patterns) == 1
 
 
@@ -196,9 +204,8 @@ def test_every_three_faces_that_share_area_stack_transitively(
             continue
     problem = Problem(state)
     found = {
-        constraint.faces
-        for constraint in problem.origins
-        if constraint.kind == "transitivity"
+        problem.constraint(index).faces
+        for index in range(len(problem.clauses), problem.size)
     }
     folded = state.folded
     shared = {
