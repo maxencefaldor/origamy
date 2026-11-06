@@ -170,7 +170,7 @@ def fold_angles(state: State, form: Form | None) -> dict[Edge, float]:
     """
     if form is None:
         turn = {"V": 180.0, "M": -180.0, "F": 0.0}
-        return {edge: turn[state.sense(f, g)] for edge, (f, g) in state.creases.items()}
+        return {edge: turn[state.assignment(edge)] for edge in state.creases}
     angles = crease_angles(state, placements(state, form))
     return {edge: degrees(angle) for edge, angle in angles.items()}
 

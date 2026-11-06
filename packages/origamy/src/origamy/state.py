@@ -291,7 +291,12 @@ class State:
         """
         if edge in self.border:
             return "B"
-        return self.sense(*self.creases[edge])
+        return self._assignments[edge]
+
+    @cached_property
+    def _assignments(self) -> Mapping[Edge, str]:
+        """Each crease's sense, as the kernel finds them all at once."""
+        return dict(zip(self.creases, self.kernel.assignments(), strict=True))
 
     def sense(self, f: int, g: int) -> str:
         """How two faces joined at a crease meet: ``V``, ``M`` or ``F``, as there."""
