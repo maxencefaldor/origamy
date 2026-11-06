@@ -122,6 +122,11 @@ class State:
         return cls(vertices, (Face(tuple(range(len(vertices))), IDENTITY),))
 
     @cached_property
+    def index(self) -> Mapping[Point, int]:
+        """Each vertex's id, by where it is on the crease pattern."""
+        return {p: v for v, p in enumerate(self.vertices)}
+
+    @cached_property
     def patterns(self) -> tuple[Polygon, ...]:
         """Each face's corners on the crease pattern."""
         return tuple(tuple(self.vertices[i] for i in f.corners) for f in self.faces)

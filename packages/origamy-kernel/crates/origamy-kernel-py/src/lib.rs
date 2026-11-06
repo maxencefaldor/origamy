@@ -62,6 +62,23 @@ type NumberData = (Vec<Integer>, Integer);
 /// A point as two numbers.
 type PointData = (NumberData, NumberData);
 
+/// An end of a line or segment: a vertex of the crease pattern by its index, or a point.
+enum End {
+    Vertex(u32),
+    Point(PointData),
+}
+
+impl<'py> FromPyObject<'_, 'py> for End {
+    type Error = PyErr;
+
+    fn extract(object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(vertex) = object.extract::<u32>() {
+            return Ok(End::Vertex(vertex));
+        }
+        Ok(End::Point(object.extract()?))
+    }
+}
+
 /// A constraint as Python reads it: its kind, its faces, and its crease if any.
 type ConstraintData = (String, Vec<u32>, Option<u32>);
 
@@ -384,27 +401,31 @@ impl State {
     /// The creases along each line or segment of the crease pattern.
     ///
     /// Args:
-    ///     queries: Each line or segment as two points, and whether it is a segment.
+    ///     queries: Each line or segment as two ends, and whether it is a segment. An
+    ///         end is a vertex's index, or a point.
     ///
     /// Returns:
     ///     The creases along each, by their places among the creases, in order.
     ///
     /// Raises:
-    ///     ValueError: A number is malformed.
+    ///     ValueError: A number is malformed, or an index names no vertex.
     #[allow(clippy::needless_pass_by_value)]
-    fn along(
-        &self,
-        py: Python<'_>,
-        queries: Vec<(PointData, PointData, bool)>,
-    ) -> PyResult<Vec<Vec<u32>>> {
+    fn along(&self, py: Python<'_>, queries: Vec<(End, End, bool)>) -> PyResult<Vec<Vec<u32>>> {
         let tower = &self.tower;
+        let end = |end: End| -> PyResult<Point> {
+            match end {
+                End::Vertex(v) => self
+                    .vertices
+                    .get(v as usize)
+                    .cloned()
+                    .ok_or_else(|| PyValueError::new_err(format!("no vertex {v}"))),
+                End::Point((x, y)) => Ok(Point::new(number(x)?, number(y)?, tower)),
+            }
+        };
         let queries = queries
             .into_iter()
-            .map(|((ax, ay), (bx, by), segment)| {
-                let (p, q) = (
-                    Point::new(number(ax)?, number(ay)?, tower),
-                    Point::new(number(bx)?, number(by)?, tower),
-                );
+            .map(|(a, b, segment)| {
+                let (p, q) = (end(a)?, end(b)?);
                 Ok(if segment {
                     Along::Segment(p, q)
                 } else {

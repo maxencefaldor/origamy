@@ -87,6 +87,9 @@ def test_a_held_state_folds_and_stacks() -> None:
     assert held.largest() == 0
     assert held.overlapping() == []
     assert held.along([(point(1, 0), point(1, 1), False)]) == [[0]]
+    assert held.along([(1, 4, True), (point(2, 0), 3, True)]) == [[0], []]
+    with pytest.raises(ValueError, match="no vertex"):
+        held.along([(1, 9, True)])
     outcome, after, moved, *_ = held.collapse([], "V", 0, 10)
     assert (outcome, moved) == ("collapsed", [1])
     assert after is not None

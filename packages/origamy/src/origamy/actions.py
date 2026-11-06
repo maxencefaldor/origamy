@@ -39,7 +39,7 @@ from origamy.layers import (
 from origamy.rules import RefusalError
 from origamy.space import Form, Turn
 from origamy.state import Edge, Face, Pair, State, sides_of
-from origamy_kernel.data import ConstraintData
+from origamy_kernel.data import ConstraintData, PointData
 
 
 class Sense(StrEnum):
@@ -218,14 +218,16 @@ def along(
     state: State, creases: Iterable[Line | tuple[Point, Point]]
 ) -> list[list[Edge]]:
     """The creases inside the paper along each line or segment of the crease pattern."""
+    index = state.index
+
+    def end(p: Point) -> int | PointData:
+        found = index.get(p)
+        return kernel.point(p) if found is None else found
+
     queries = [
-        (
-            kernel.point(crease.point),
-            kernel.point(crease.point + crease.direction),
-            False,
-        )
+        (end(crease.point), end(crease.point + crease.direction), False)
         if isinstance(crease, Line)
-        else (kernel.point(crease[0]), kernel.point(crease[1]), True)
+        else (end(crease[0]), end(crease[1]), True)
         for crease in creases
     ]
     edges = list(state.creases)
