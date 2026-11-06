@@ -447,10 +447,14 @@ def _apart(first: Sequence[float], second: Sequence[float]) -> float:
     A crease turned a whole turn further lies where it lay, so a crease folded flat
     one way lies where it lies folded flat the other way.
     """
-    return max(
-        (abs(remainder(a - b, tau)) for a, b in zip(first, second, strict=True)),
-        default=0.0,
-    )
+    if len(first) != len(second):
+        msg = "angles to compare come in equal numbers"
+        raise ValueError(msg)
+    if not len(first):
+        return 0.0
+    turns = np.subtract(first, second)
+    # The remainder by a whole turn, its quotient rounded half to even, as IEEE's is.
+    return float(np.max(np.abs(turns - tau * np.rint(turns / tau))))
 
 
 def _form(state: State, world: Sequence[Motion]) -> Form:
@@ -514,11 +518,12 @@ def _close(loops: _Loops, angles: list[float], driven: set[int]) -> bool:
     column = np.full(len(angles), -1, dtype=np.int64)
     column[free] = np.arange(len(free))
     columns = np.where(loops.creases >= 0, column[loops.creases], -1)
+    layout = _Layout.of(columns, len(free))
     turned = np.array(angles, dtype=float)
     closed = False
     best, stalled = inf, 0
     for _ in range(_TRIES):
-        residuals, jacobian = _linearize(loops, turned, columns, len(free))
+        residuals, jacobian = _linearize(loops, turned, layout)
         gap = float(np.max(np.abs(residuals))) if residuals.size else 0.0
         if gap < _CLOSED:
             closed = True
@@ -555,38 +560,59 @@ class _Sparse:
         return np.bincount(self.columns, weights=weights, minlength=self.shape[1])
 
 
+@dataclass(frozen=True, slots=True)
+class _Layout:
+    """Where each free crease of each loop's k-th place goes in the Jacobian.
+
+    Row 3i to 3i + 2 is loop i's gap, and each free crease has a column. The layout
+    stays while the free creases do, so each correction fills in values alone.
+    """
+
+    taken: tuple[np.ndarray, ...]
+    """For each place k, which loops hold a free crease there."""
+    rows: np.ndarray
+    """Each entry's row, place by place."""
+    columns: np.ndarray
+    """Each entry's column, place by place."""
+    shape: tuple[int, int]
+
+    @classmethod
+    def of(cls, columns: np.ndarray, free: int) -> _Layout:
+        """The layout of loops whose k-th creases take ``columns``, -1 for none."""
+        count, longest = columns.shape
+        rows = 3 * np.arange(count)[:, None] + np.arange(3)
+        taken = tuple(columns[:, k] >= 0 for k in range(longest))
+        empty = np.zeros(0, dtype=np.int64)
+        return cls(
+            taken,
+            np.concatenate([empty, *(rows[t].ravel() for t in taken)]),
+            np.concatenate(
+                [empty, *(np.repeat(columns[t, k], 3) for k, t in enumerate(taken))]
+            ),
+            (3 * count, free),
+        )
+
+
 def _linearize(
-    loops: _Loops, angles: np.ndarray, columns: np.ndarray, free: int
+    loops: _Loops, angles: np.ndarray, layout: _Layout
 ) -> tuple[np.ndarray, _Sparse]:
     """How far each loop stays open, and how each free crease's turn moves it.
 
     Turning crease i of a loop by a little turns the loop's product by as much about
-    the crease's direction, carried by the turns before it. ``columns`` gives each
-    crease of each loop its column, or -1 for a crease that stays. Each crease moves
-    only its own loop, so the Jacobian keeps its few entries alone.
+    the crease's direction, carried by the turns before it. Each crease moves only
+    its own loop, so the Jacobian keeps its few entries alone, where ``layout`` puts
+    them.
     """
     count, longest = loops.creases.shape
     turns = loops.turns(angles)
     product = np.broadcast_to(np.eye(3), (count, 3, 3))
-    rows = 3 * np.arange(count)[:, None] + np.arange(3)
-    found: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    values = [np.zeros(0)]
     for k in range(longest):
         moved = product @ loops.directions[:, k, :, None]
-        taken = columns[:, k] >= 0
-        found.append(
-            (
-                rows[taken].ravel(),
-                np.repeat(columns[taken, k], 3),
-                moved[taken, :, 0].ravel(),
-            )
-        )
+        values.append(moved[layout.taken[k], :, 0].ravel())
         product = product @ turns[:, k]
-    empty = np.zeros(0, dtype=np.int64)
     jacobian = _Sparse(
-        np.concatenate([empty, *(r for r, _, _ in found)]),
-        np.concatenate([empty, *(c for _, c, _ in found)]),
-        np.concatenate([np.zeros(0), *(v for _, _, v in found)]),
-        (3 * count, free),
+        layout.rows, layout.columns, np.concatenate(values), layout.shape
     )
     return _log(product).ravel(), jacobian
 
