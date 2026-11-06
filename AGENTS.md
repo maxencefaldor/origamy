@@ -37,8 +37,8 @@ Each module imports only from the modules listed before it:
 
 1. `errors`: the errors front ends show as messages.
 1. `field`, `geometry`, `constructions`: exact numbers in a tower of square roots, points, lines, isometries and convex polygons, and the Huzita-Justin constructions.
-1. `state`, `space`: the crease pattern, each face's place, and the stacking; and the form shaping gives paper in space.
 1. `kernel`: the bridge to the exact kernel, `origamy_kernel`, which reads numbers, points and places as data.
+1. `state`, `space`: the crease pattern, each face's place, and the stacking, which the kernel holds folded; and the form shaping gives paper in space.
 1. `layers`: the layer solver, which the kernel runs, and its errors and constraints.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
 1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
@@ -57,7 +57,7 @@ The exact kernel, `packages/origamy-kernel`, is a Rust core with Python bindings
 | --- | --- |
 | `crates/origamy-kernel` | The core, with no Python: exact numbers and geometry, the overlay of footprints, creasing, collapsing and the layer solver |
 | `crates/origamy-kernel-py` | The bindings, which make the core the module `origamy_kernel._core` |
-| `src/origamy_kernel` | The Python package: the core's functions, typed by `_core.pyi`, and the data they read and return |
+| `src/origamy_kernel` | The Python package: the core's `State` and functions, typed by `_core.pyi`, and the data they read and return |
 
 The kernel reads the numbers of `origamy.field`, in the same tower, and numbers the vertices and faces it makes as `origamy.state` expects.
 

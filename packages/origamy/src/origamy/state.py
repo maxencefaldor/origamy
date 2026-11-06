@@ -7,12 +7,12 @@ Everything else, such as whether a crease is folded or flat, follows from these 
 """
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
-from itertools import combinations
-from typing import Final
 
+import origamy_kernel
+from origamy import kernel
 from origamy.geometry import (
     IDENTITY,
     Isometry,
@@ -20,15 +20,9 @@ from origamy.geometry import (
     Point,
     Polygon,
     center,
-    clip,
     covers,
     overlaps,
-    sides,
 )
-
-_ROOM: Final = 1e-9
-"""How far, relative to its coordinates, a box in floats reaches beyond its polygon:
-far more than rounding moves a corner."""
 
 type Pair = tuple[int, int]
 """Two faces, the upper first: ``(upper, lower)``."""
@@ -108,85 +102,50 @@ class State:
         return frozenset(self.edges.keys() - self.creases.keys())
 
     @cached_property
-    def footprints(self) -> tuple[Polygon, ...]:
-        """Each region a face covers once folded, faces stacked exactly sharing one."""
-        found: dict[frozenset[Point], Polygon] = {}
-        for polygon in self.folded:
-            found.setdefault(frozenset(polygon), polygon)
-        return tuple(found.values())
+    def kernel(self) -> origamy_kernel.State:
+        """The kernel's hold on the state: its crease pattern and each face's place.
 
-    @cached_property
-    def footprint(self) -> tuple[int, ...]:
-        """The index of each face's footprint."""
-        index = {frozenset(polygon): k for k, polygon in enumerate(self.footprints)}
-        return tuple(index[frozenset(polygon)] for polygon in self.folded)
-
-    @cached_property
-    def stacked(self) -> tuple[tuple[int, ...], ...]:
-        """The faces on each footprint, in order."""
-        faces: list[list[int]] = [[] for _ in self.footprints]
-        for f, k in enumerate(self.footprint):
-            faces[k].append(f)
-        return tuple(tuple(group) for group in faces)
-
-    @cached_property
-    def meeting(self) -> frozenset[Pair]:
-        """Every pair of footprints that share area, the lesser index first.
-
-        A sweep across the footprints' boxes, in floats with room for rounding, finds
-        the pairs whose boxes may meet, and exact geometry decides those alone.
+        The kernel folds the faces once, the first time a question needs them.
         """
-        shapes = self.footprints
-        return frozenset(
-            (a, b) for a, b in _near_pairs(shapes) if overlaps(shapes[a], shapes[b])
+        return origamy_kernel.State(
+            kernel.tower(),
+            [kernel.point(p) for p in self.vertices],
+            [list(face.corners) for face in self.faces],
+            [kernel.place(face.place) for face in self.faces],
+            list(self.creases.items()),
         )
+
+    @classmethod
+    def held(
+        cls,
+        vertices: tuple[Point, ...],
+        faces: tuple[Face, ...],
+        above: frozenset[Pair],
+        hold: origamy_kernel.State,
+    ) -> State:
+        """A state the kernel already holds, as a collapse leaves the paper."""
+        state = cls(vertices, faces, above)
+        vars(state)["kernel"] = hold
+        return state
 
     @cached_property
     def overlapping(self) -> frozenset[Pair]:
         """Every pair of faces that share area once folded, the lesser id first.
 
-        Faces on one footprint all overlap, and faces on two footprints overlap when
-        the footprints do.
+        The kernel overlays the faces' footprints. Two faces overlap exactly when they
+        meet in one of the overlay's regions where the most footprints meet.
         """
-        stacked = self.stacked
-        pairs = {pair for group in stacked for pair in combinations(group, 2)}
-        for a, b in self.meeting:
-            pairs.update((min(f, g), max(f, g)) for f in stacked[a] for g in stacked[b])
-        return frozenset(pairs)
+        return frozenset(self.kernel.overlapping())
 
     @cached_property
     def thickest(self) -> tuple[int, Point]:
         """The most layers of paper at one point once folded, and a point inside them.
 
-        Cutting a footprint along the sides of every footprint that overlaps it leaves
-        cells that each of those footprints covers whole or misses. A cell on the outer
-        side of any side of a footprint misses it, so each cut lowers a bound on the
-        cell's layers. Depth first, a cell whose bound reaches no further than the most
-        found so far is dropped uncut.
+        The point is the middle of the region of the footprints' overlay with the most
+        layers, the first such region when several tie.
         """
-        shapes, stacked = self.footprints, self.stacked
-        near: dict[int, set[int]] = defaultdict(set)
-        for a, b in self.meeting:
-            near[a].add(b)
-            near[b].add(a)
-        depth = [len(group) for group in stacked]
-        most, where = depth[0], center(shapes[0])
-
-        def bound(a: int) -> int:
-            return depth[a] + sum(depth[b] for b in near[a])
-
-        for a in sorted(range(len(shapes)), key=lambda a: -bound(a)):
-            if bound(a) <= most:
-                break
-            # Each line cut holds the footprints with a side along it: their bit, the
-            # side their inside lies on, and their layers.
-            users: dict[Line, list[tuple[int, int, int]]] = defaultdict(list)
-            for k, b in enumerate(sorted(near[a])):
-                for line, side in _inner_sides(shapes[b]).items():
-                    users[line].append((1 << k, side, depth[b]))
-            if deeper := _deepest(shapes[a], users, bound(a), most):
-                most, where = deeper
-        return most, where
+        most, point = self.kernel.thickest()
+        return most, kernel.from_point(point)
 
     def is_above(self, upper: int, lower: int) -> bool:
         """Whether face ``upper`` lies above face ``lower``, where they overlap."""
@@ -314,83 +273,3 @@ def _insert(
                 sorted(between, key=lambda w: direction.dot(vertices[w] - start))
             )
     return tuple(result)
-
-
-def _inner_sides(polygon: Polygon) -> dict[Line, int]:
-    """The line of each side of a convex polygon, and the side its inside lies on."""
-    inner = {}
-    for p, q in sides(polygon):
-        line = Line.through(p, q)
-        inner[line] = next(side for corner in polygon if (side := line.side(corner)))
-    return inner
-
-
-def _deepest(
-    shape: Polygon,
-    users: Mapping[Line, list[tuple[int, int, int]]],
-    upper: int,
-    most: int,
-) -> tuple[int, Point] | None:
-    """The deepest cell of a footprint, if deeper than ``most``, and a point inside it.
-
-    Each cell carries how many lines it has been cut along, the footprints it misses
-    as bits, and its bound on layers.
-    """
-    lines = sorted(users, key=str)
-    found: tuple[int, Point] | None = None
-    cells = [(shape, 0, 0, upper)]
-    while cells:
-        cell, cuts, missed, upper = cells.pop()
-        if upper <= most:
-            continue
-        if cuts == len(lines):
-            most = upper
-            found = most, center(cell)
-            continue
-        line = lines[cuts]
-        sides_of = {line.side(p) for p in cell}
-        parts = (
-            [(clip(cell, line, side), side) for side in (1, -1)]
-            if 1 in sides_of and -1 in sides_of
-            else [(cell, 1 if 1 in sides_of else -1)]
-        )
-        split = []
-        for part, side in parts:
-            lost = [
-                (bit, layers)
-                for bit, inside, layers in users[line]
-                if inside != side and not missed & bit
-            ]
-            split.append(
-                (
-                    part,
-                    cuts + 1,
-                    missed | sum(bit for bit, _ in lost),
-                    upper - sum(layers for _, layers in lost),
-                )
-            )
-        cells += sorted(split, key=lambda entry: entry[3])
-    return found
-
-
-def _near_pairs(shapes: Sequence[Polygon]) -> list[Pair]:
-    """The pairs of polygons whose boxes may meet, the lesser index first."""
-    boxes = []
-    for polygon in shapes:
-        points = [p.floats() for p in polygon]
-        xs, ys = [x for x, _ in points], [y for _, y in points]
-        room = _ROOM * max(1.0, *map(abs, xs), *map(abs, ys))
-        boxes.append((min(xs) - room, min(ys) - room, max(xs) + room, max(ys) + room))
-    order = sorted(range(len(boxes)), key=lambda k: boxes[k][0])
-    pairs: list[Pair] = []
-    active: list[int] = []
-    for k in order:
-        left, bottom, _, top = boxes[k]
-        active = [j for j in active if boxes[j][2] > left]
-        pairs.extend(
-            (min(j, k), max(j, k))
-            for j in active
-            if boxes[j][1] < top and bottom < boxes[j][3]
-        )
-        active.append(k)
-    return sorted(pairs)

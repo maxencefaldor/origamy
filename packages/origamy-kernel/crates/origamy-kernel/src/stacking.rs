@@ -17,8 +17,8 @@ use std::collections::BTreeSet;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::folded::{Folded, Pair};
 use crate::geometry::{Line, Point};
-use crate::sheet::{Pair, Sheet};
 
 /// One geometric reason that limits how some faces stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub struct Constraint {
     pub kind: &'static str,
     /// The faces involved.
     pub faces: Vec<u32>,
-    /// The crease the constraint is about, by its index among the sheet's creases.
+    /// The crease the constraint is about, by its index among the paper's creases.
     pub crease: Option<u32>,
 }
 
@@ -88,9 +88,9 @@ struct Crease {
     side: i32,
 }
 
-/// The stacking constraints of a sheet: clauses, and transitivity found on demand.
+/// The stacking constraints of folded paper: clauses, and transitivity found on demand.
 pub struct Problem<'a> {
-    sheet: &'a Sheet,
+    paper: &'a Folded,
     /// Where each face's neighbors start in `neighbors`.
     rows: Vec<u32>,
     /// Each face's overlapping faces, sorted, each with the literal that puts the face
@@ -108,24 +108,24 @@ pub struct Problem<'a> {
 }
 
 impl<'a> Problem<'a> {
-    /// Every constraint of a sheet's geometry.
+    /// Every constraint of a paper's geometry.
     ///
     /// # Panics
     ///
     /// When the constraints or their literals number 2³² or more.
     #[must_use]
-    pub fn new(sheet: &'a Sheet) -> Problem<'a> {
-        let mut rows = vec![0u32; sheet.folded.len() + 1];
-        for &(f, g) in &sheet.overlapping {
+    pub fn new(paper: &'a Folded) -> Problem<'a> {
+        let mut rows = vec![0u32; paper.folded.len() + 1];
+        for &(f, g) in &paper.overlapping {
             rows[f as usize + 1] += 1;
             rows[g as usize + 1] += 1;
         }
-        for f in 0..sheet.folded.len() {
+        for f in 0..paper.folded.len() {
             rows[f + 1] += rows[f];
         }
         let mut fill: Vec<u32> = rows.clone();
-        let mut neighbors = vec![(0, 0); 2 * sheet.overlapping.len()];
-        for (v, &(f, g)) in sheet.overlapping.iter().enumerate() {
+        let mut neighbors = vec![(0, 0); 2 * paper.overlapping.len()];
+        for (v, &(f, g)) in paper.overlapping.iter().enumerate() {
             let literal = signed(v + 1);
             neighbors[fill[f as usize] as usize] = (g, literal);
             fill[f as usize] += 1;
@@ -134,24 +134,24 @@ impl<'a> Problem<'a> {
         }
         // The pairs come sorted, so each face's neighbors below it come first and in
         // order, then those above it in order: a merge sorts them.
-        for f in 0..sheet.folded.len() {
+        for f in 0..paper.folded.len() {
             neighbors[rows[f] as usize..rows[f + 1] as usize].sort_unstable_by_key(|&(g, _)| g);
         }
-        let regions: Vec<Vec<u32>> = sheet
+        let regions: Vec<Vec<u32>> = paper
             .overlay
             .regions
             .iter()
             .map(|cover| {
                 let mut faces: Vec<u32> = cover
                     .iter()
-                    .flat_map(|&k| sheet.stacked[k as usize].iter().copied())
+                    .flat_map(|&k| paper.stacked[k as usize].iter().copied())
                     .collect();
                 faces.sort_unstable();
                 faces
             })
             .filter(|faces| faces.len() > 2)
             .collect();
-        let mut holding = vec![vec![]; sheet.folded.len()];
+        let mut holding = vec![vec![]; paper.folded.len()];
         for (r, faces) in regions.iter().enumerate() {
             let r = u32::try_from(r).expect("regions fit in 32 bits");
             for (k, &f) in faces.iter().enumerate() {
@@ -159,7 +159,7 @@ impl<'a> Problem<'a> {
             }
         }
         let mut problem = Problem {
-            sheet,
+            paper,
             rows,
             neighbors,
             clause_starts: vec![0],
@@ -178,7 +178,7 @@ impl<'a> Problem<'a> {
     /// How many pairs of faces overlap: the variables.
     #[must_use]
     pub fn variables(&self) -> usize {
-        self.sheet.overlapping.len()
+        self.paper.overlapping.len()
     }
 
     /// The literal that says `upper` is above `lower`, if the two overlap.
@@ -200,7 +200,7 @@ impl<'a> Problem<'a> {
     }
 
     fn pair(&self, literal: i32) -> Pair {
-        let (f, g) = self.sheet.overlapping[literal.unsigned_abs() as usize - 1];
+        let (f, g) = self.paper.overlapping[literal.unsigned_abs() as usize - 1];
         if literal > 0 { (f, g) } else { (g, f) }
     }
 
@@ -229,17 +229,17 @@ impl<'a> Problem<'a> {
     }
 
     fn creases(&self) -> Vec<Crease> {
-        let sheet = self.sheet;
-        sheet
+        let paper = self.paper;
+        paper
             .creases
             .iter()
             .enumerate()
             .map(|(index, &([v, w], [f, g]))| {
-                let ends = (sheet.image(f, v).clone(), sheet.image(f, w).clone());
-                let line = sheet.overlay.crease_lines[index];
-                let side = sheet.inside(f, v, w);
+                let ends = (paper.image(f, v).clone(), paper.image(f, w).clone());
+                let line = paper.overlay.crease_lines[index];
+                let side = paper.inside(f, v, w);
                 let index = u32::try_from(index).expect("creases fit in 32 bits");
-                if sheet.same_place(f, g) {
+                if paper.same_place(f, g) {
                     let faces = if side > 0 { [f, g] } else { [g, f] };
                     Crease {
                         index,
@@ -262,7 +262,7 @@ impl<'a> Problem<'a> {
     }
 
     fn folds_and_flats(&mut self, creases: &[Crease]) {
-        let tower = &self.sheet.tower;
+        let tower = &self.paper.tower;
         let mut lines: FxHashMap<u32, usize> = FxHashMap::default();
         let mut groups: Vec<Vec<&Crease>> = vec![];
         for crease in creases {
@@ -274,7 +274,7 @@ impl<'a> Problem<'a> {
             groups[k].push(crease);
         }
         for group in &groups {
-            let line = &self.sheet.overlay.arrangement.lines[group[0].line as usize];
+            let line = &self.paper.overlay.arrangement.lines[group[0].line as usize];
             for (i, j) in overlapping_stretches(group, line, tower) {
                 let (first, second) = (group[i], group[j]);
                 if first.side != 0 && second.side != 0 {
@@ -362,7 +362,7 @@ impl<'a> Problem<'a> {
     }
 
     fn crossings(&mut self, creases: &[Crease]) {
-        let sheet = self.sheet;
+        let paper = self.paper;
         for crease in creases {
             let [a, b] = crease.faces;
             let kind = if crease.side != 0 {
@@ -370,8 +370,8 @@ impl<'a> Problem<'a> {
             } else {
                 "tortilla-tortilla"
             };
-            for &k in &sheet.overlay.crossed[crease.index as usize] {
-                for &face in &sheet.stacked[k as usize] {
+            for &k in &paper.overlay.crossed[crease.index as usize] {
+                for &face in &paper.stacked[k as usize] {
                     if face != a && face != b {
                         let (x, y) = (self.literal(face, a), self.literal(face, b));
                         self.equal(Origin::new(kind, &[a, b, face], crease.index), x, y);
@@ -731,7 +731,7 @@ impl<'p, 'a> Solver<'p, 'a> {
             let variable = literal.unsigned_abs() as usize;
             self.values[variable] = 0;
             self.reasons[variable] = Reason::Given;
-            let pair = self.problem.sheet.overlapping[variable - 1];
+            let pair = self.problem.paper.overlapping[variable - 1];
             self.problem.shared(pair, &mut regions);
             for &(r, a, b) in &regions {
                 let (a, b) = (a as usize, b as usize);

@@ -15,8 +15,8 @@ use std::cmp::Ordering;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::field::{Number, Tower};
+use crate::folded::{Folded, Pair};
 use crate::geometry::{Isometry, Line, Point, twice_area};
-use crate::sheet::{Pair, Sheet};
 use crate::stacking::{Problem, StackError, stack};
 
 /// Paper before a collapse: its faces where they lie, and how they stack.
@@ -62,8 +62,8 @@ pub enum CollapseError {
 
 /// The paper after a collapse: each face's place, the stacking, and the faces moved.
 pub struct Collapsed {
-    /// Each face's place.
-    pub places: Vec<Isometry>,
+    /// The paper folded: each face where its new place puts it.
+    pub folded: Folded,
     /// The stacking: `(upper, lower)` for every pair of overlapping faces.
     pub above: Vec<Pair>,
     /// The faces that moved.
@@ -137,17 +137,17 @@ pub fn collapse(
         .map(|(old, new)| new.after(&inverse(old, tower), tower))
         .collect();
     let prefer = least_motion(paper, target, &change, tower);
-    let sheet = Sheet::new(
+    let folded = Folded::new(
         paper.tower.clone(),
         paper.vertices.clone(),
         paper.corners.clone(),
         places,
         paper.creases.clone(),
     );
-    let problem = Problem::new(&sheet);
+    let problem = Problem::new(&folded);
     let above = stack(&problem, &required, &prefer, budget).map_err(CollapseError::Stack)?;
     Ok(Collapsed {
-        places: sheet.places.clone(),
+        folded,
         above,
         moved,
     })
@@ -523,14 +523,14 @@ mod tests {
             .collect();
         let done = collapse(&paper, &kinds, 0, 100).unwrap();
         assert_eq!(done.above.len(), 6);
-        let sheet = Sheet::new(
+        let folded = Folded::new(
             paper.tower.clone(),
             paper.vertices.clone(),
             paper.corners.clone(),
-            done.places,
+            done.folded.places.clone(),
             paper.creases.clone(),
         );
-        assert!(violations(&Problem::new(&sheet), &done.above).is_empty());
+        assert!(violations(&Problem::new(&folded), &done.above).is_empty());
     }
 
     #[test]

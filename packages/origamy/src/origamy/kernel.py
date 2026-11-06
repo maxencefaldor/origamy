@@ -7,18 +7,7 @@ The kernel reads each number as its numerators and denominator, in the tower tha
 
 from origamy.field import Number, radicands
 from origamy.geometry import Isometry, Point
-from origamy.state import State
-from origamy_kernel.data import CreaseData, NumberData, PlaceData, PointData
-
-type Sheet = tuple[
-    list[NumberData],
-    list[PointData],
-    list[list[int]],
-    list[PlaceData],
-    list[CreaseData],
-]
-"""A state's paper as the kernel reads it: the tower's radicands, the vertices, each
-face's corners and place, and each crease's vertices and faces."""
+from origamy_kernel.data import NumberData, PlaceData, PointData
 
 
 def number(value: Number) -> NumberData:
@@ -62,14 +51,3 @@ def from_place(data: PlaceData) -> Isometry:
 def tower() -> list[NumberData]:
     """The tower's radicands, level 1 first."""
     return [number(radicand) for radicand in radicands()]
-
-
-def sheet(state: State) -> Sheet:
-    """A state's paper as the kernel reads it, its creases in the state's order."""
-    return (
-        tower(),
-        [point(p) for p in state.vertices],
-        [list(face.corners) for face in state.faces],
-        [place(face.place) for face in state.faces],
-        [(edge, faces) for edge, faces in state.creases.items()],
-    )

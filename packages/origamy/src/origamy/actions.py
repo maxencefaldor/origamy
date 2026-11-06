@@ -18,7 +18,6 @@ from functools import cmp_to_key, partial
 from itertools import permutations
 from typing import NoReturn
 
-import origamy_kernel
 from origamy import kernel
 from origamy.geometry import (
     IDENTITY,
@@ -34,12 +33,13 @@ from origamy.layers import (
     BudgetError,
     Constraint,
     NoStackingError,
-    raise_unstacked,
     solve,
+    unstacked,
 )
 from origamy.rules import RefusalError
 from origamy.space import Form, Turn
 from origamy.state import Edge, Face, Pair, State, sides_of
+from origamy_kernel.data import ConstraintData
 
 
 class Sense(StrEnum):
@@ -130,25 +130,41 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
     land as near their old order as a valid stacking allows.
     """
     target = {edge: changes.get(edge, state.assignment(edge)) for edge in state.creases}
-    outcome, places, above, moved, facts, found, conflict = origamy_kernel.collapse(
-        *kernel.sheet(state),
+    outcome, hold, places, above, moved, facts, found, conflict = state.kernel.collapse(
         sorted(state.border),
         sorted(state.above),
         "".join(target.values()),
         fixed,
         BUDGET,
     )
-    if facts is not None:
-        _refuse_vertex(state, outcome, facts)
-    try:
-        raise_unstacked(state, outcome, found, conflict)
-    except (NoStackingError, BudgetError) as error:
-        _refuse_stacking(state, error, partial(_collapse_reason, state, target))
+    if hold is None:
+        _refuse_collapse(state, target, outcome, (facts, found, conflict))
     faces = tuple(
         Face(face.corners, kernel.from_place(place))
         for face, place in zip(state.faces, places, strict=True)
     )
-    return Outcome(State(state.vertices, faces, frozenset(above)), frozenset(moved))
+    after = State.held(state.vertices, faces, frozenset(above), hold)
+    return Outcome(after, frozenset(moved))
+
+
+def _refuse_collapse(
+    state: State,
+    target: Mapping[Edge, str],
+    outcome: str,
+    refusal: tuple[
+        tuple[int, int, int, float, float] | None, list[ConstraintData], list[Pair]
+    ],
+) -> NoReturn:
+    """Refuse a collapse the kernel refused, with the facts it found.
+
+    Raises:
+        RefusalError: Always.
+    """
+    facts, found, conflict = refusal
+    if facts is not None:
+        _refuse_vertex(state, outcome, facts)
+    error = unstacked(state, outcome, found, conflict)
+    _refuse_stacking(state, error, partial(_collapse_reason, state, target))
 
 
 def _refuse_vertex(
@@ -221,10 +237,7 @@ def along(
         for crease in creases
     ]
     edges = list(state.creases)
-    found = origamy_kernel.along(
-        kernel.tower(), [kernel.point(p) for p in state.vertices], edges, queries
-    )
-    return [[edges[index] for index in indices] for indices in found]
+    return [[edges[index] for index in found] for found in state.kernel.along(queries)]
 
 
 def flat_with(state: State, faces: Iterable[int]) -> set[int]:
@@ -245,11 +258,7 @@ def flat_with(state: State, faces: Iterable[int]) -> set[int]:
 
 def largest(state: State) -> int:
     """The face of largest area, the first of them when several tie."""
-    return origamy_kernel.largest(
-        kernel.tower(),
-        [kernel.point(p) for p in state.vertices],
-        [list(face.corners) for face in state.faces],
-    )
+    return state.kernel.largest()
 
 
 def turn_over(state: State) -> Outcome:

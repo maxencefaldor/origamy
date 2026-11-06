@@ -21,8 +21,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-import origamy_kernel
-from origamy import kernel
 from origamy.errors import OrigamyError
 from origamy.geometry import Point
 from origamy.state import Pair, State
@@ -72,10 +70,11 @@ def solve(
     keeps them where it can. It raises `NoStackingError` when no stacking exists, and
     `BudgetError` after ``budget`` dead ends. The state's own stacking plays no part.
     """
-    outcome, pairs, constraints, conflict = origamy_kernel.stack(
-        *kernel.sheet(state), list(fixed), list(prefer), budget
+    outcome, pairs, constraints, conflict = state.kernel.stack(
+        list(fixed), list(prefer), budget
     )
-    raise_unstacked(state, outcome, constraints, conflict)
+    if outcome != "stacked":
+        raise unstacked(state, outcome, constraints, conflict)
     return frozenset(pairs)
 
 
@@ -86,7 +85,7 @@ def violations(state: State) -> list[Constraint]:
     and that it stacks in a cycle, one such three for each region where the most faces
     meet. A valid stacking breaks none.
     """
-    found = origamy_kernel.violations(*kernel.sheet(state), sorted(state.above))
+    found = state.kernel.violations(sorted(state.above))
     return constraints(state, found)
 
 
@@ -105,21 +104,13 @@ def constraints(state: State, found: Iterable[ConstraintData]) -> list[Constrain
     ]
 
 
-def raise_unstacked(
+def unstacked(
     state: State,
     outcome: str,
     found: Iterable[ConstraintData],
     conflict: Sequence[Pair],
-) -> None:
-    """Raise the error the kernel's outcome names, if it found no stacking.
-
-    Raises:
-        NoStackingError: No stacking exists.
-        BudgetError: The search ran out of budget.
-    """
-    match outcome:
-        case "none":
-            raise NoStackingError(constraints(state, found), conflict)
-        case "budget":
-            msg = "the search for a stacking ran out of budget"
-            raise BudgetError(msg)
+) -> NoStackingError | BudgetError:
+    """The error a kernel's outcome names when it found no stacking."""
+    if outcome == "budget":
+        return BudgetError("the search for a stacking ran out of budget")
+    return NoStackingError(constraints(state, found), conflict)

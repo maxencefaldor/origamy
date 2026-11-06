@@ -3,7 +3,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::field::Tower;
+use crate::field::{Number, Tower};
 use crate::geometry::{Isometry, Point, Polygon, left_of};
 use crate::overlay::Overlay;
 
@@ -11,7 +11,7 @@ use crate::overlay::Overlay;
 pub type Pair = (u32, u32);
 
 /// Faces of paper, each where its place puts it.
-pub struct Sheet {
+pub struct Folded {
     /// The tower the numbers belong to.
     pub tower: Tower,
     /// The crease pattern's vertices.
@@ -46,8 +46,8 @@ pub struct Sheet {
     pub overlapping: Vec<Pair>,
 }
 
-impl Sheet {
-    /// The sheet of these faces, with everything their geometry gives once folded.
+impl Folded {
+    /// These faces folded, with everything their geometry gives.
     ///
     /// # Panics
     ///
@@ -59,7 +59,7 @@ impl Sheet {
         corners: Vec<Vec<u32>>,
         places: Vec<Isometry>,
         creases: Vec<([u32; 2], [u32; 2])>,
-    ) -> Sheet {
+    ) -> Folded {
         let (corner_images, images) = images_of(&tower, &vertices, &corners, &places, &creases);
         let flipped: Vec<bool> = places.iter().map(|place| place.flips(&tower)).collect();
         let folded: Vec<Polygon> = corner_images
@@ -92,7 +92,7 @@ impl Sheet {
         let overlay = Overlay::new(&footprints, &ends, &tower);
         let meeting = overlay.meeting();
         let overlapping = overlapping_of(&stacked, &footprint, &meeting);
-        Sheet {
+        Folded {
             tower,
             vertices,
             corners,
@@ -154,6 +154,49 @@ impl Sheet {
             .position(|&c| c == vertex)
             .expect("the face holds the vertex");
         &self.images[self.corner_images[face as usize][at] as usize]
+    }
+
+    /// The most layers of paper at one point once folded, and a point inside them: the
+    /// middle of a region where the most footprints meet, which is convex.
+    ///
+    /// The first such region wins a tie. Paper with no face has no layer, at the origin.
+    ///
+    /// # Panics
+    ///
+    /// When a region has 2⁶³ corners or more.
+    #[must_use]
+    pub fn thickest(&self) -> (usize, Point) {
+        let overlay = &self.overlay;
+        let layers = |cover: &[u32]| {
+            cover
+                .iter()
+                .map(|&k| self.stacked[k as usize].len())
+                .sum::<usize>()
+        };
+        let mut best: Option<(usize, usize)> = None;
+        for (r, cover) in overlay.regions.iter().enumerate() {
+            let count = layers(cover);
+            if best.is_none_or(|(most, _)| count > most) {
+                best = Some((count, r));
+            }
+        }
+        let Some((most, r)) = best else {
+            return (0, Point::new(Number::zero(), Number::zero(), &self.tower));
+        };
+        let arrangement = &overlay.arrangement;
+        let cycle = &arrangement.faces[overlay.region_faces[r] as usize];
+        let (mut x, mut y) = (Number::zero(), Number::zero());
+        for &h in cycle {
+            let corner = &arrangement.points[arrangement.tail(h) as usize];
+            x = x.plus(&corner.x);
+            y = y.plus(&corner.y);
+        }
+        let count = Number::integer(i128::try_from(cycle.len()).expect("corners fit in 64 bits"));
+        let tower = &self.tower;
+        (
+            most,
+            Point::new(x.over(&count, tower), y.over(&count, tower), tower),
+        )
     }
 
     /// Whether two faces lie in one place.
@@ -279,7 +322,6 @@ fn overlapping_of(stacked: &[Vec<u32>], footprint: &[u32], meeting: &[Pair]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field::Number;
     use crate::geometry::Line;
 
     fn point(x: i128, y: i128, tower: &Tower) -> Point {
@@ -305,16 +347,16 @@ mod tests {
             &Line::through(&point(1, 0, &tower), &point(1, 1, &tower), &tower),
             &tower,
         );
-        let sheet = Sheet::new(
+        let folded = Folded::new(
             tower.clone(),
             vertices,
             corners,
             vec![Isometry::identity(), mirror],
             vec![],
         );
-        assert_eq!(sheet.images.len(), 8);
-        assert_eq!(*sheet.image(1, 4), point(0, 0, &tower));
-        assert_eq!(*sheet.image(1, 1), point(1, 0, &tower));
+        assert_eq!(folded.images.len(), 8);
+        assert_eq!(*folded.image(1, 4), point(0, 0, &tower));
+        assert_eq!(*folded.image(1, 1), point(1, 0, &tower));
         // Across a crease, the two faces share their crease's ends.
         let tower = Tower::default();
         let vertices = vec![
@@ -330,14 +372,14 @@ mod tests {
             &Line::through(&point(1, 0, &tower), &point(1, 1, &tower), &tower),
             &tower,
         );
-        let sheet = Sheet::new(
+        let folded = Folded::new(
             tower.clone(),
             vertices,
             corners,
             vec![Isometry::identity(), mirror],
             vec![([1, 2], [0, 1])],
         );
-        assert_eq!(sheet.images.len(), 6);
-        assert_eq!(sheet.overlapping, vec![(0, 1)]);
+        assert_eq!(folded.images.len(), 6);
+        assert_eq!(folded.overlapping, vec![(0, 1)]);
     }
 }

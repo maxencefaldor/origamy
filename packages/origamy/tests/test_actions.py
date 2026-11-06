@@ -177,8 +177,6 @@ def test_every_fold_leaves_a_valid_state(sequence: list[Fold]) -> None:
             intersection(state.folded[f], state.folded[g]) for f, g in state.overlapping
         ]
         assert all(area(c).sign() > 0 for c in common)
-        for polygon, k in zip(state.folded, state.footprint, strict=True):
-            assert set(polygon) == set(state.footprints[k])
 
 
 @settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])

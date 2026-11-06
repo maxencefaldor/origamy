@@ -27,6 +27,8 @@ pub struct Overlay {
     pub covers: Vec<Vec<u32>>,
     /// The covers of the regions where the most footprints meet, each cover once.
     pub regions: Vec<Vec<u32>>,
+    /// The face of the arrangement each region is.
+    pub region_faces: Vec<u32>,
     /// For each crease, the footprints whose inside it runs through, sorted.
     pub crossed: Vec<Vec<u32>>,
     /// For each crease, its line, by index among the arrangement's lines.
@@ -73,6 +75,7 @@ impl Overlay {
         let covers = covers(&arrangement, &segments, footprints, tower);
         let mut found = FxHashSet::default();
         let mut regions = vec![];
+        let mut region_faces = vec![];
         for (face, cycle) in arrangement.faces.iter().enumerate() {
             if !arrangement.bounded[face] {
                 continue;
@@ -86,6 +89,7 @@ impl Overlay {
             });
             if most && found.insert(covers[face].clone()) {
                 regions.push(covers[face].clone());
+                region_faces.push(u32::try_from(face).expect("faces fit in 32 bits"));
             }
         }
         let mut crossed = vec![vec![]; creases.len()];
@@ -115,6 +119,7 @@ impl Overlay {
             arrangement,
             covers,
             regions,
+            region_faces,
             crossed,
             crease_lines,
         }
