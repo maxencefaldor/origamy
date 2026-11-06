@@ -278,7 +278,12 @@ mod tests {
     }
 
     fn square(tower: &Tower) -> (Vec<Point>, Vec<[u32; 2]>) {
-        let vertices = vec![point(0, 0, tower), point(2, 0, tower), point(2, 2, tower), point(0, 2, tower)];
+        let vertices = vec![
+            point(0, 0, tower),
+            point(2, 0, tower),
+            point(2, 2, tower),
+            point(0, 2, tower),
+        ];
         (vertices, vec![[0, 1], [1, 2], [2, 3], [0, 3]])
     }
 
@@ -294,7 +299,11 @@ mod tests {
         assert_eq!(all.len(), 5);
         assert_eq!(all[4], point(1, 1, &tower));
         assert_eq!(faces.len(), 4);
-        assert!(faces.iter().all(|face| face.len() == 3 && face.contains(&4)));
+        assert!(
+            faces
+                .iter()
+                .all(|face| face.len() == 3 && face.contains(&4))
+        );
     }
 
     #[test]
@@ -302,7 +311,10 @@ mod tests {
         let tower = Tower::default();
         let (vertices, edges) = square(&tower);
         let segments = [(point(0, 0, &tower), point(3, 3, &tower))];
-        assert_eq!(crease(&tower, &vertices, &edges, &vertices, &segments), Err(CreaseError::OffPaper(0)));
+        assert_eq!(
+            crease(&tower, &vertices, &edges, &vertices, &segments),
+            Err(CreaseError::OffPaper(0))
+        );
     }
 
     #[test]
@@ -310,6 +322,9 @@ mod tests {
         let tower = Tower::default();
         let (vertices, edges) = square(&tower);
         let segments = [(point(0, 1, &tower), point(1, 1, &tower))];
-        assert_eq!(crease(&tower, &vertices, &edges, &vertices, &segments), Err(CreaseError::Loose));
+        assert_eq!(
+            crease(&tower, &vertices, &edges, &vertices, &segments),
+            Err(CreaseError::Loose)
+        );
     }
 }

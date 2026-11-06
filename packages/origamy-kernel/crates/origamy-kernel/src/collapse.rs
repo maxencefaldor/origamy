@@ -384,24 +384,56 @@ mod tests {
     /// Open paper, a square of side 4 creased along segments.
     fn paper(segments: &[((i128, i128), (i128, i128))]) -> Paper {
         let tower = Tower::default();
-        let square = vec![point(0, 0, &tower), point(4, 0, &tower), point(4, 4, &tower), point(0, 4, &tower)];
-        let segments: Vec<(Point, Point)> =
-            segments.iter().map(|&((a, b), (c, d))| (point(a, b, &tower), point(c, d, &tower))).collect();
-        let (vertices, corners) = crease(&tower, &square, &[[0, 1], [1, 2], [2, 3], [0, 3]], &square, &segments).unwrap();
+        let square = vec![
+            point(0, 0, &tower),
+            point(4, 0, &tower),
+            point(4, 4, &tower),
+            point(0, 4, &tower),
+        ];
+        let segments: Vec<(Point, Point)> = segments
+            .iter()
+            .map(|&((a, b), (c, d))| (point(a, b, &tower), point(c, d, &tower)))
+            .collect();
+        let (vertices, corners) = crease(
+            &tower,
+            &square,
+            &[[0, 1], [1, 2], [2, 3], [0, 3]],
+            &square,
+            &segments,
+        )
+        .unwrap();
         let mut sides: FxHashMap<[u32; 2], Vec<u32>> = FxHashMap::default();
         for (f, face) in corners.iter().enumerate() {
             for (k, &u) in face.iter().enumerate() {
                 let v = face[(k + 1) % face.len()];
-                sides.entry([u.min(v), u.max(v)]).or_default().push(u32::try_from(f).unwrap());
+                sides
+                    .entry([u.min(v), u.max(v)])
+                    .or_default()
+                    .push(u32::try_from(f).unwrap());
             }
         }
-        let mut creases: Vec<([u32; 2], [u32; 2])> =
-            sides.iter().filter(|(_, faces)| faces.len() == 2).map(|(&edge, faces)| (edge, [faces[0], faces[1]])).collect();
+        let mut creases: Vec<([u32; 2], [u32; 2])> = sides
+            .iter()
+            .filter(|(_, faces)| faces.len() == 2)
+            .map(|(&edge, faces)| (edge, [faces[0], faces[1]]))
+            .collect();
         creases.sort_unstable();
-        let mut border: Vec<[u32; 2]> = sides.iter().filter(|(_, faces)| faces.len() == 1).map(|(&edge, _)| edge).collect();
+        let mut border: Vec<[u32; 2]> = sides
+            .iter()
+            .filter(|(_, faces)| faces.len() == 1)
+            .map(|(&edge, _)| edge)
+            .collect();
         border.sort_unstable();
         let places = vec![Isometry::identity(); corners.len()];
-        Paper { tower, vertices, corners, places, creases, border, above: vec![] }
+        Paper {
+            tower,
+            vertices,
+            corners,
+            places,
+            creases,
+            border,
+            above: vec![],
+        }
     }
 
     #[test]
@@ -425,13 +457,24 @@ mod tests {
             .iter()
             .map(|([u, v], _)| {
                 let (p, q) = (&paper.vertices[*u as usize], &paper.vertices[*v as usize]);
-                let left = p.x.compare(&two, &paper.tower).is_lt() || q.x.compare(&two, &paper.tower).is_lt();
-                if p.x == q.x || left { Kind::Valley } else { Kind::Mountain }
+                let left = p.x.compare(&two, &paper.tower).is_lt()
+                    || q.x.compare(&two, &paper.tower).is_lt();
+                if p.x == q.x || left {
+                    Kind::Valley
+                } else {
+                    Kind::Mountain
+                }
             })
             .collect();
         let done = collapse(&paper, &kinds, 0, 100).unwrap();
         assert_eq!(done.above.len(), 6);
-        let sheet = Sheet::new(paper.tower.clone(), paper.vertices.clone(), paper.corners.clone(), done.places, paper.creases.clone());
+        let sheet = Sheet::new(
+            paper.tower.clone(),
+            paper.vertices.clone(),
+            paper.corners.clone(),
+            done.places,
+            paper.creases.clone(),
+        );
         assert!(violations(&Problem::new(&sheet), &done.above).is_empty());
     }
 
@@ -440,14 +483,26 @@ mod tests {
         let paper = paper(&[((2, 0), (2, 4)), ((0, 2), (4, 2))]);
         let kinds = vec![Kind::Valley; paper.creases.len()];
         let refused = collapse(&paper, &kinds, 0, 100).err().unwrap();
-        assert!(matches!(refused, CollapseError::Count { mountains: 0, valleys: 4, .. }));
+        assert!(matches!(
+            refused,
+            CollapseError::Count {
+                mountains: 0,
+                valleys: 4,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn creases_meeting_at_uneven_angles_break_kawasaki() {
         let paper = paper(&[((2, 0), (2, 4)), ((0, 0), (2, 2)), ((2, 2), (4, 2))]);
-        let kinds: Vec<Kind> = (0..paper.creases.len()).map(|k| if k == 0 { Kind::Mountain } else { Kind::Valley }).collect();
+        let kinds: Vec<Kind> = (0..paper.creases.len())
+            .map(|k| if k == 0 { Kind::Mountain } else { Kind::Valley })
+            .collect();
         let refused = collapse(&paper, &kinds, 0, 100).err().unwrap();
-        assert!(matches!(refused, CollapseError::Angles { .. }), "{refused:?}");
+        assert!(
+            matches!(refused, CollapseError::Angles { .. }),
+            "{refused:?}"
+        );
     }
 }

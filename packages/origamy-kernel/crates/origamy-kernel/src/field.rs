@@ -550,9 +550,14 @@ mod tests {
 
     fn numbers() -> impl proptest::strategy::Strategy<Value = Number> {
         use proptest::prelude::*;
-        (proptest::collection::vec(-50i128..50, 4), 1i128..30).prop_map(|(coefficients, denominator)| {
-            Number::new(coefficients.into_iter().map(Int::Small).collect(), Int::Small(denominator))
-        })
+        (proptest::collection::vec(-50i128..50, 4), 1i128..30).prop_map(
+            |(coefficients, denominator)| {
+                Number::new(
+                    coefficients.into_iter().map(Int::Small).collect(),
+                    Int::Small(denominator),
+                )
+            },
+        )
     }
 
     proptest::proptest! {
