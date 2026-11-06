@@ -501,12 +501,13 @@ impl State {
         })
     }
 
-    /// The faces from the bottom up, each after every face below it, or `None` when
-    /// the stacking holds a cycle.
+    /// The faces from the bottom up, each after every face below it, and how many
+    /// layers lie under each face, as the longest run of faces stacked below it; or
+    /// `None` when the stacking holds a cycle.
     ///
     /// Faces with no face below come first, by number, and each face follows as soon
     /// as every face below it has come.
-    fn bottom_up(&self, py: Python<'_>) -> Option<Vec<u32>> {
+    fn bottom_up(&self, py: Python<'_>) -> Option<(Vec<u32>, Vec<u32>)> {
         py.detach(|| bottom_up_of(self.corners.len(), &self.above))
     }
 

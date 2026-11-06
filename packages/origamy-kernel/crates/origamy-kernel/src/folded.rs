@@ -266,8 +266,9 @@ pub fn polygons(
         .collect()
 }
 
-/// The faces from the bottom up, each after every face below it, or `None` when the
-/// stacking `above`, as `(upper, lower)`, holds a cycle.
+/// The faces from the bottom up, each after every face below it, and how many layers
+/// lie under each face, as the longest run of faces stacked below it; or `None` when
+/// the stacking `above`, as `(upper, lower)`, holds a cycle.
 ///
 /// Faces with no face below come first, by number, and each face follows as soon as
 /// every face below it has come.
@@ -276,7 +277,7 @@ pub fn polygons(
 ///
 /// When a pair names a face past `faces`, or the faces number 2³² or more.
 #[must_use]
-pub fn bottom_up(faces: usize, above: &[Pair]) -> Option<Vec<u32>> {
+pub fn bottom_up(faces: usize, above: &[Pair]) -> Option<(Vec<u32>, Vec<u32>)> {
     let mut below = vec![0u32; faces];
     let mut starts = vec![0usize; faces + 1];
     for &(upper, lower) in above {
@@ -297,18 +298,21 @@ pub fn bottom_up(faces: usize, above: &[Pair]) -> Option<Vec<u32>> {
         .filter(|&f| below[f] == 0)
         .map(|f| u32::try_from(f).expect("faces fit in 32 bits"))
         .collect();
+    let mut heights = vec![0u32; faces];
     let mut next = 0;
     while next < order.len() {
         let face = order[next] as usize;
         next += 1;
         for &upper in &uppers[starts[face]..starts[face + 1]] {
-            below[upper as usize] -= 1;
-            if below[upper as usize] == 0 {
-                order.push(upper);
+            let upper = upper as usize;
+            heights[upper] = heights[upper].max(heights[face] + 1);
+            below[upper] -= 1;
+            if below[upper] == 0 {
+                order.push(u32::try_from(upper).expect("faces fit in 32 bits"));
             }
         }
     }
-    (order.len() == faces).then_some(order)
+    (order.len() == faces).then_some((order, heights))
 }
 
 /// Where each face's corners lie once folded, each image found once.
@@ -435,8 +439,12 @@ mod tests {
 
     #[test]
     fn faces_come_from_the_bottom_up() {
-        assert_eq!(bottom_up(3, &[(0, 1), (1, 2)]), Some(vec![2, 1, 0]));
-        assert_eq!(bottom_up(3, &[(2, 0)]), Some(vec![0, 1, 2]));
+        let stacked = bottom_up(4, &[(0, 1), (1, 2), (0, 2), (3, 2)]);
+        assert_eq!(stacked, Some((vec![2, 1, 3, 0], vec![2, 1, 0, 1])));
+        assert_eq!(
+            bottom_up(3, &[(2, 0)]),
+            Some((vec![0, 1, 2], vec![0, 0, 1]))
+        );
         assert_eq!(bottom_up(2, &[(0, 1), (1, 0)]), None);
     }
 

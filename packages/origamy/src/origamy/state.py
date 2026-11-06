@@ -102,15 +102,16 @@ class State:
         return tuple(sorted(self.above))
 
     @cached_property
-    def bottom_up(self) -> tuple[int, ...] | None:
-        """The faces from the bottom up, each after every face below it.
+    def bottom_up(self) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+        """The faces from the bottom up, and how many layers lie under each face.
 
-        Faces with no face below come first, by number, and each face follows as soon
-        as every face below it has come. None comes back when the stacking holds a
-        cycle.
+        Each face comes after every face below it: faces with no face below come
+        first, by number, and each face follows as soon as every face below it has
+        come. The layers under a face are the longest run of faces stacked below it.
+        None comes back when the stacking holds a cycle.
         """
-        order = self.kernel.bottom_up()
-        return None if order is None else tuple(order)
+        found = self.kernel.bottom_up()
+        return None if found is None else (tuple(found[0]), tuple(found[1]))
 
     @override
     def __eq__(self, other: object) -> bool:
@@ -259,6 +260,8 @@ class State:
         Actions only ever cut faces, so each face of a later crease pattern lies inside
         exactly one face of an earlier one; a face no action cut is that face itself.
         """
+        if len(self.faces) == 1:
+            return [0] * len(later.faces)
         same = {pattern: f for f, pattern in enumerate(self.patterns)}
         return [
             same[pattern]
@@ -273,7 +276,11 @@ class State:
 
     def flips(self, face: int) -> bool:
         """Whether a face shows the paper's back."""
-        return self.faces[face].place.flips
+        return self._flips[face]
+
+    @cached_property
+    def _flips(self) -> tuple[bool, ...]:
+        return tuple(face.place.flips for face in self.faces)
 
     def assignment(self, edge: Edge) -> str:
         """What an edge is, as FOLD writes it, seen from the paper's front.

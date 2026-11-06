@@ -163,7 +163,14 @@ def crease_angles(
 
 
 def fold_angles(state: State, form: Form | None) -> dict[Edge, float]:
-    """Each crease's fold angle in degrees, as FOLD writes it: valleys positive."""
+    """Each crease's fold angle in degrees, as FOLD writes it: valleys positive.
+
+    On flat paper, a crease whose faces share a place lies flat, and any other folds
+    flat, by 180 degrees as its valley or mountain says.
+    """
+    if form is None:
+        turn = {"V": 180.0, "M": -180.0, "F": 0.0}
+        return {edge: turn[state.sense(f, g)] for edge, (f, g) in state.creases.items()}
     angles = crease_angles(state, placements(state, form))
     return {edge: degrees(angle) for edge, angle in angles.items()}
 

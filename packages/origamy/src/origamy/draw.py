@@ -9,6 +9,7 @@ space instead, seen tilted as the 3D viewer first shows it, nearer faces over fa
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
+from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
 from html import escape
 from math import atan2, ceil, cos, floor, hypot, sin, sqrt
@@ -44,14 +45,21 @@ class Canvas:
         x0, y0, x1, y1 = self.box
         return (self.size - 2 * self.margin) / max(x1 - x0, y1 - y0, 1e-9)
 
+    @cached_property
+    def _frame(self) -> tuple[float, float, float, float, float]:
+        """The scale, where the box's left and top lie, and the box's x0 and y1."""
+        x0, y0, x1, y1 = self.box
+        scale = self.scale
+        span = (self.size - 2 * self.margin) / scale
+        left = self.margin + ((span - (x1 - x0)) / 2) * scale
+        top = self.margin + ((span - (y1 - y0)) / 2) * scale
+        return scale, left, top, x0, y1
+
     def xy(self, point: Point | Flat) -> Flat:
         """Where a point of the plane is in the picture."""
         x, y = point.floats() if isinstance(point, Point) else point
-        x0, y0, x1, y1 = self.box
-        span = (self.size - 2 * self.margin) / self.scale
-        left = self.margin + ((span - (x1 - x0)) / 2) * self.scale
-        top = self.margin + ((span - (y1 - y0)) / 2) * self.scale
-        return left + (x - x0) * self.scale, top + (y1 - y) * self.scale
+        scale, left, top, x0, y1 = self._frame
+        return left + (x - x0) * scale, top + (y1 - y) * scale
 
     def polygon(self, points: Sequence[Point | Flat], **style: str | float) -> None:
         """Add a polygon."""
@@ -152,8 +160,8 @@ def stacking(state: State) -> Sequence[int]:
 
     A stacking with a cycle paints the faces with fewer faces below them first.
     """
-    if (order := state.bottom_up) is not None:
-        return order
+    if (found := state.bottom_up) is not None:
+        return found[0]
     below = [0] * len(state.faces)
     for upper, _ in state.above:
         below[upper] += 1
@@ -184,13 +192,18 @@ def layers(paper: Shaped) -> Layers:
     state = paper.state
     form = paper.form or Form.flat(len(state.faces))
     stacks = _stacks(form)
-    below: dict[int, set[int]] = {f: set() for f in range(len(state.faces))}
-    for upper, lower in state.above:
-        if stacks[upper] == stacks[lower]:
-            below[upper].add(lower)
-    height = [0] * len(state.faces)
-    for face in stacking(state):
-        height[face] = max((height[g] + 1 for g in below[face]), default=0)
+    found = state.bottom_up
+    if found is not None and len(set(stacks)) == 1:
+        # Paper in one plane stacks every face on every face below it.
+        height = list(found[1])
+    else:
+        below: dict[int, set[int]] = {f: set() for f in range(len(state.faces))}
+        for upper, lower in state.above:
+            if stacks[upper] == stacks[lower]:
+                below[upper].add(lower)
+        height = [0] * len(state.faces)
+        for face in stacking(state):
+            height[face] = max((height[g] + 1 for g in below[face]), default=0)
     lifts = [
         tuple(height[f] * c for c in rotate(form.motions[f], (0.0, 0.0, 1.0)))
         for f in range(len(state.faces))
