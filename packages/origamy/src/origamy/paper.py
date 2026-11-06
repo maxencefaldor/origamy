@@ -324,8 +324,8 @@ class Paper:
 
         def act(state: State) -> Outcome:
             assignments: dict[Edge, str] = {}
-            for crease, kind in changes:
-                edges = actions.along(state, crease)
+            found = actions.along(state, [crease for crease, _ in changes])
+            for (crease, kind), edges in zip(changes, found, strict=True):
                 if not edges:
                     msg = f"no crease of the paper lies along {_describe(crease)}"
                     raise RefusalError(msg, rule="no-crease", state=state)
@@ -392,8 +392,8 @@ class Paper:
         def act(paper: Shaped) -> Outcome:
             state = paper.state
             goals: dict[Edge, float] = {}
-            for crease, angle in targets:
-                edges = actions.along(state, crease)
+            found = actions.along(state, [crease for crease, _ in targets])
+            for (crease, angle), edges in zip(targets, found, strict=True):
                 if not edges:
                     msg = f"no crease of the paper lies along {_describe(crease)}"
                     raise RefusalError(msg, rule="no-crease", state=state)

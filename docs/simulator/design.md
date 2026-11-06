@@ -461,7 +461,8 @@ The simulator is a package of the origamy repository, as origamy-mcp is.
 | Package | Holds |
 | --- | --- |
 | origamy-sim | The simulator: a Rust core and its Python package |
-| origamy | The exact folding kernel, fold scripts, the command line and the viewer, depending on origamy-sim |
+| origamy-kernel | The exact folding kernel: a Rust core and its Python package |
+| origamy | Fold scripts, the command line and the viewer, depending on origamy-kernel and origamy-sim |
 | origamy-mcp | The MCP server |
 
 One commit can change the simulator and origamy together, under one CI and one lock file.

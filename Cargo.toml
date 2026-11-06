@@ -1,8 +1,12 @@
-# The Rust workspace holds the simulator's core and its Python bindings, in packages/origamy-sim.
+# The Rust workspace holds two cores and their Python bindings: origamy's exact kernel, in
+# packages/origamy-kernel, and the simulator's, in packages/origamy-sim.
 [workspace]
-members = ["packages/origamy-sim/crates/*"]
-# Plain cargo commands build the core alone; maturin builds the bindings against a Python.
-default-members = ["packages/origamy-sim/crates/origamy-sim"]
+members = ["packages/origamy-kernel/crates/*", "packages/origamy-sim/crates/*"]
+# Plain cargo commands build the cores alone; maturin builds the bindings against a Python.
+default-members = [
+  "packages/origamy-kernel/crates/origamy-kernel",
+  "packages/origamy-sim/crates/origamy-sim",
+]
 resolver = "3"
 
 [workspace.package]
@@ -18,11 +22,17 @@ repository = "https://github.com/maxencefaldor/origamy"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 faer = "0.24"
 nalgebra = "0.35"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
 numpy = "0.30"
+origamy-kernel = { path = "packages/origamy-kernel/crates/origamy-kernel" }
 origamy-sim = { path = "packages/origamy-sim/crates/origamy-sim" }
 proptest = "1.12"
 pyo3 = { version = "0.30", features = ["abi3-py314"] }
 rayon = "1.12"
+rustc-hash = "2"
+smallvec = "1"
 spade = "2.15"
 thiserror = "2"
 

@@ -18,7 +18,7 @@ from origamy.actions import (
 )
 from origamy.field import Number
 from origamy.geometry import Line, Point, area, bounds, intersection, overlaps
-from origamy.layers import Problem
+from origamy.layers import violations
 from origamy.rules import RefusalError
 from origamy.state import State
 
@@ -42,17 +42,7 @@ def assert_valid(state: State) -> None:
     pairs = {(min(pair), max(pair)) for pair in state.above}
     assert pairs == set(state.overlapping)
     assert len(pairs) == len(state.above)
-    problem = Problem(state)
-    literals = {problem.literal(*pair) for pair in state.above}
-    assert all(
-        any(x in literals for x in problem.literals(index))
-        for index in range(problem.size)
-    )
-    # No three faces stack in a cycle.
-    assert all(
-        not all(x in literals for x in problem.literals(index))
-        for index in range(len(problem.clauses), problem.size)
-    )
+    assert violations(state) == []
     assert sum(area(polygon) for polygon in state.patterns) == 1
 
 
@@ -202,19 +192,16 @@ def test_every_three_faces_that_share_area_stack_transitively(
             state = fold(state, line, flap, layers, sense).state
         except RefusalError:
             continue
-    problem = Problem(state)
-    found = {
-        problem.constraint(index).faces
-        for index in range(len(problem.clauses), problem.size)
-    }
+    # Stacking any three faces that share area in a cycle breaks transitivity.
     folded = state.folded
-    shared = {
-        (f, g, h)
-        for f, g, h in combinations(range(len(folded)), 3)
-        if {(f, g), (f, h), (g, h)} <= state.overlapping
-        and overlaps(intersection(folded[f], folded[g]), folded[h])
-    }
-    assert found == shared
+    for f, g, h in combinations(range(len(folded)), 3):
+        if {(f, g), (f, h), (g, h)} <= state.overlapping and overlaps(
+            intersection(folded[f], folded[g]), folded[h]
+        ):
+            cycle = {(f, g), (g, h), (h, f)}
+            above = {pair for pair in state.above if pair[::-1] not in cycle} | cycle
+            broken = violations(State(state.vertices, state.faces, frozenset(above)))
+            assert any(c.kind == "transitivity" for c in broken)
 
 
 @settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])
@@ -265,7 +252,7 @@ type Crease = Line | tuple[Point, Point]
 
 
 def creases_along(state: State, *creases: Crease) -> list[tuple[int, int]]:
-    return [edge for crease in creases for edge in along(state, crease)]
+    return [edge for edges in along(state, creases) for edge in edges]
 
 
 def test_a_collapse_folds_the_preliminary_base() -> None:
@@ -282,7 +269,7 @@ def test_a_collapse_folds_the_preliminary_base() -> None:
 
 def test_a_collapse_unfolds_too() -> None:
     state = book()
-    outcome = collapse(state, dict.fromkeys(along(state, SPINE), "F"), 1)
+    outcome = collapse(state, dict.fromkeys(along(state, [SPINE])[0], "F"), 1)
     assert not outcome.state.above
     assert outcome.moved == {0}
 

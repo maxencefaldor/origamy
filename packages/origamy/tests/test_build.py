@@ -18,7 +18,7 @@ from origamy import (
     service,
 )
 from origamy.geometry import PointLike
-from origamy.layers import BudgetError, NoStackingError, Problem, solve
+from origamy.layers import BudgetError, NoStackingError, solve
 from origamy.result import StepData
 from origamy.state import State
 
@@ -136,10 +136,10 @@ def test_the_solver_names_the_constraints_that_conflict() -> None:
     state = paper.state
     upper, lower = next(iter(state.above))
     with pytest.raises(NoStackingError) as error:
-        solve(Problem(state), [(upper, lower), (lower, upper)])
+        solve(state, [(upper, lower), (lower, upper)])
     assert error.value.fixed
     folded_in_four = State(state.vertices, state.faces)
-    stacks = solve(Problem(folded_in_four), sorted(state.above))
+    stacks = solve(folded_in_four, sorted(state.above))
     assert stacks == state.above
 
 
@@ -288,7 +288,9 @@ def test_a_squash_fold_spreads_a_flap_over_the_middle_line() -> None:
     state = paper.state
     # The flap's folded side lies open along the middle line, and the halves on top
     # of each side of it are the quarter's two halves next to that side.
-    side_crease = actions.along(state, (Point.of(("1/2", "1/2")), Point.of(("1/2", 0))))
+    side_crease = actions.along(
+        state, [(Point.of(("1/2", "1/2")), Point.of(("1/2", 0)))]
+    )[0]
     assert {state.assignment(edge) for edge in side_crease} == {"F"}
     for point in (("7/10", "17/20"), ("17/20", "7/10")):
         top = actions.stack_at(state, Point.of(point))[0]

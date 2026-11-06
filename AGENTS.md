@@ -1,12 +1,12 @@
 # Working on origamy
 
-The repository holds origamy, a compiler for origami, built for AI agents, and origamy-sim, the physical simulator of paper it builds on.
+The repository holds origamy, a compiler for origami, built for AI agents, and the two Rust cores it builds on: origamy-kernel, its exact kernel, and origamy-sim, the physical simulator of paper.
 The README says what origamy does; the rules below say how to change it.
 
 ## Commands
 
 ```sh
-uv sync                             # install Python 3.14 and every tool from uv.lock, and build the simulator's core
+uv sync                             # install Python 3.14 and every tool from uv.lock, and build the kernel's and the simulator's cores
 uv run playwright install chromium  # the browser origamy draws in, once per machine
 uv run pytest                       # tests; warnings are errors
 uv run pytest -m slow               # the moves the simulator cannot fold yet, minutes each
@@ -21,13 +21,13 @@ uv run python docs/patterns.py --folder <path>  # fold a folder of published cre
 uv run zensical serve               # the docs site, at http://localhost:8000
 uv run python packages/origamy-sim/codegen/generate.py  # the simulator's generated derivatives
 cargo fmt --all                     # format Rust
-cargo test                          # Rust tests of the simulator's core
+cargo test                          # Rust tests of the kernel's and the simulator's cores
 cargo bench                         # time steps of the simulator's benchmark scenes
 PYO3_PYTHON=$PWD/.venv/bin/python cargo clippy --workspace --all-targets -- -D warnings  # lint Rust
 ```
 
 A change is done when every check above passes.
-Plain cargo commands build the simulator's core alone; its bindings compile against Python 3.14, which `PYO3_PYTHON` names.
+Plain cargo commands build the two cores alone; their bindings compile against Python 3.14, which `PYO3_PYTHON` names.
 To draw with a Chromium you already have, set `ORIGAMY_RENDER_BROWSER` to its executable instead of installing Playwright's.
 
 ## Architecture
@@ -38,7 +38,8 @@ Each module imports only from the modules listed before it:
 1. `errors`: the errors front ends show as messages.
 1. `field`, `geometry`, `constructions`: exact numbers in a tower of square roots, points, lines, isometries and convex polygons, and the Huzita-Justin constructions.
 1. `state`, `space`: the crease pattern, each face's place, and the stacking; and the form shaping gives paper in space.
-1. `layers`: the layer solver's constraints, propagation and search.
+1. `kernel`: the bridge to the exact kernel, `origamy_kernel`, which reads numbers, points and places as data.
+1. `layers`: the layer solver, which the kernel runs, and its errors and constraints.
 1. `rules`, `checks`: every fact a build states, and the checks that warn.
 1. `actions`: fold, unfold, precrease, collapse and turn over, each a function from one state to the next.
 1. `moves`, `shape`, `flex`: named moves, such as reverse and petal folds, which compute their creases and collapse; shape steps and tilts; and rigid flexes.
@@ -49,6 +50,16 @@ Each module imports only from the modules listed before it:
 1. `service`, `cli`: every command defined once, and the command line that adapts it.
 
 The MCP server, `origamy_mcp` in `packages/origamy-mcp`, makes a tool of each service command, with the same arguments.
+
+The exact kernel, `packages/origamy-kernel`, is a Rust core with Python bindings:
+
+| Path | Holds |
+| --- | --- |
+| `crates/origamy-kernel` | The core, with no Python: exact numbers and geometry, the overlay of footprints, creasing, collapsing and the layer solver |
+| `crates/origamy-kernel-py` | The bindings, which make the core the module `origamy_kernel._core` |
+| `src/origamy_kernel` | The Python package: the core's functions, typed by `_core.pyi`, and the data they read and return |
+
+The kernel reads the numbers of `origamy.field`, in the same tower, and numbers the vertices and faces it makes as `origamy.state` expects.
 
 The simulator, `packages/origamy-sim`, is a Rust core with Python bindings, designed in `docs/simulator/design.md`:
 
@@ -65,7 +76,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 
 - **Tools:** the standard, official tool in each category: uv, ruff, ty, rumdl, pytest with Hypothesis, pydantic and pydantic-settings, and Playwright.
   Add a dependency only when it is high-quality and used well.
-  The exact kernel uses the standard library alone, and numpy serves the numeric solvers that shape paper in space.
+  The exact kernel's Rust uses num-bigint, rustc-hash and smallvec alone, and numpy serves the numeric solvers that shape paper in space.
 - **Format and lint:** [maxencefaldor/toolchain](https://github.com/maxencefaldor/toolchain): ruff's default format, every ruff rule, every ty rule as an error, and Markdown one sentence per line.
   A rule is switched off only in `pyproject.toml`, as narrowly as it can be, with its reason beside it.
 - **Python:** 3.14 or newer, with modern syntax: PEP 695 generics and `type` aliases.
@@ -92,7 +103,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   The viewer draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
   The viewer loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
 - **Rust:** `rust-toolchain.toml` pins the toolchain, and `Cargo.lock` every crate.
-  The code is formatted by rustfmt and linted by clippy's pedantic group as errors, and the core forbids unsafe code.
+  The code is formatted by rustfmt and linted by clippy's pedantic group as errors, and the cores forbid unsafe code.
   PyO3 and maturin build the bindings, and proptest tests properties.
 - **Physics:** SI units and 64-bit floats.
   Every physical and numerical quantity is an input with a documented default, and a preset, such as kami, is a named set of values.
@@ -105,8 +116,8 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 - **Bindings stay thin:** they convert arrays and parameter models, call the core and convert back.
   Their doc comments are the Python docstrings, in Google style.
   A core error is a typed value naming the element at fault, and Python sees it as a `ValueError` with the same message.
-  `_core.pyi` types every class of `_core`, and a test holds the two together.
-- **Indices:** 32-bit in the core, and 64-bit integer arrays in Python, so arithmetic on them never wraps.
+  Each `_core.pyi` types every class and function of its `_core`, and a test holds the two together.
+- **Indices:** 32-bit in the cores, and 64-bit integer arrays in Python, so arithmetic on them never wraps.
 - **Tests:** every rule gets a case that states it.
   A move the simulator cannot fold yet is a strict expected failure and a slow test, so the main tests stay fast.
   Geometry and folding get property tests.

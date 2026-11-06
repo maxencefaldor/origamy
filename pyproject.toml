@@ -3,6 +3,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 origamy = { workspace = true }
+origamy-kernel = { workspace = true }
 origamy-mcp = { workspace = true }
 origamy-sim = { workspace = true }
 
@@ -11,6 +12,7 @@ origamy-sim = { workspace = true }
 dev = [
   "hypothesis",
   "origamy",
+  "origamy-kernel",
   "origamy-mcp",
   "origamy-sim",
   "pytest",
@@ -27,7 +29,12 @@ docs = ["mkdocstrings-python", "zensical"]
 [tool.ruff]
 # The workspace root has no [project] table, so ruff cannot read requires-python here.
 target-version = "py314"
-src = ["packages/origamy/src", "packages/origamy-mcp/src", "packages/origamy-sim/src"]
+src = [
+  "packages/origamy/src",
+  "packages/origamy-kernel/src",
+  "packages/origamy-mcp/src",
+  "packages/origamy-sim/src",
+]
 
 [tool.ruff.lint]
 select = ["ALL"]

@@ -1,0 +1,24 @@
+[package]
+name = "origamy-kernel"
+description = "The exact kernel of origamy: numbers in towers of square roots, geometry, and the layer solver."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["origami", "exact", "geometry", "folding", "crease-pattern"]
+categories = ["mathematics", "science"]
+
+[dependencies]
+num-bigint.workspace = true
+num-integer.workspace = true
+num-traits.workspace = true
+rustc-hash.workspace = true
+smallvec.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

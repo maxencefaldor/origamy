@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "origamy",
+    "origamy-kernel",
     "origamy-mcp",
     "origamy-sim",
 ]
@@ -14,6 +15,7 @@ dev = [
     { name = "hypothesis" },
     { name = "mkdocstrings-python" },
     { name = "origamy", editable = "packages/origamy" },
+    { name = "origamy-kernel", editable = "packages/origamy-kernel" },
     { name = "origamy-mcp", editable = "packages/origamy-mcp" },
     { name = "origamy-sim", editable = "packages/origamy-sim" },
     { name = "pytest" },
@@ -738,6 +740,7 @@ version = "0.0.0"
 source = { editable = "packages/origamy" }
 dependencies = [
     { name = "numpy" },
+    { name = "origamy-kernel" },
     { name = "origamy-sim" },
     { name = "playwright" },
     { name = "pydantic" },
@@ -747,11 +750,16 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.3" },
+    { name = "origamy-kernel", editable = "packages/origamy-kernel" },
     { name = "origamy-sim", editable = "packages/origamy-sim" },
     { name = "playwright", specifier = ">=1.64" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.15" },
 ]
+
+[[package]]
+name = "origamy-kernel"
+source = { editable = "packages/origamy-kernel" }
 
 [[package]]
 name = "origamy-mcp"

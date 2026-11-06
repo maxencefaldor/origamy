@@ -11,13 +11,15 @@ mountain fold lands it underneath. An action the paper cannot take raises
 `RefusalError`, with the facts of why.
 """
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cmp_to_key, partial
 from itertools import permutations
-from math import atan2, degrees
+from typing import NoReturn
 
+import origamy_kernel
+from origamy import kernel
 from origamy.geometry import (
     IDENTITY,
     Isometry,
@@ -28,7 +30,14 @@ from origamy.geometry import (
     crosses,
     inside,
 )
-from origamy.layers import BudgetError, Constraint, NoStackingError, Problem, solve
+from origamy.layers import (
+    BUDGET,
+    BudgetError,
+    Constraint,
+    NoStackingError,
+    raise_unstacked,
+    solve,
+)
 from origamy.rules import RefusalError
 from origamy.space import Form, Turn
 from origamy.state import Edge, Face, Pair, State, sides_of
@@ -118,67 +127,64 @@ def collapse(state: State, changes: Mapping[Edge, str], fixed: int) -> Outcome:
 
     Assignments read as on the crease pattern, from the paper's front. Every other
     crease keeps its assignment. Face ``fixed`` stays where it lies, and each other
-    face lies where the creases between it and ``fixed`` put it.
+    face lies where the creases between it and ``fixed`` put it. The faces that move
+    land as near their old order as a valid stacking allows.
     """
     target = {edge: changes.get(edge, state.assignment(edge)) for edge in state.creases}
-    _check_vertices(state, target)
-    places = _places(state, target, fixed)
+    outcome, places, above, moved, facts, found, conflict = origamy_kernel.collapse(
+        *kernel.sheet(state),
+        sorted(state.border),
+        sorted(state.above),
+        "".join(target.values()),
+        fixed,
+        BUDGET,
+    )
+    if facts is not None:
+        _refuse_vertex(state, outcome, facts)
+    try:
+        raise_unstacked(state, outcome, found, conflict)
+    except (NoStackingError, BudgetError) as error:
+        _refuse_stacking(state, error, partial(_collapse_reason, state, target))
     faces = tuple(
-        Face(f.corners, place) for f, place in zip(state.faces, places, strict=True)
+        Face(face.corners, kernel.from_place(place))
+        for face, place in zip(state.faces, places, strict=True)
     )
-    moved = frozenset(
-        f
-        for f, (old, new) in enumerate(zip(state.faces, faces, strict=True))
-        if old.place != new.place
-    )
-    collapsed = State(state.vertices, faces)
-    required = {
-        (upper, lower): f"face {upper} stays above face {lower}"
-        for upper, lower in state.above
-        if upper not in moved and lower not in moved
-    }
-    for edge, kind in target.items():
-        if kind in "MV":
-            f, g = state.creases[edge]
-            front, back = (g, f) if collapsed.flips(f) else (f, g)
-            # A valley folds the front inward: the face showing its back lies above.
-            upper, lower = (back, front) if kind == "V" else (front, back)
-            name = "valley" if kind == "V" else "mountain"
-            required[upper, lower] = (
-                f"the {name} between faces {f} and {g} puts face {upper} above"
-            )
-    change = [
-        new.place @ old.place.inverse()
-        for old, new in zip(state.faces, faces, strict=True)
-    ]
-    above = _stack(collapsed, required, _least_motion(state, target, change), state)
-    return Outcome(State(collapsed.vertices, collapsed.faces, above), moved)
+    return Outcome(State(state.vertices, faces, frozenset(above)), frozenset(moved))
 
 
-def _least_motion(
-    state: State, target: Mapping[Edge, str], change: Sequence[Isometry]
-) -> list[Pair]:
-    """The orders that move the paper least through itself, for the solver to try first.
+def _refuse_vertex(
+    state: State, rule: str, facts: tuple[int, int, int, float, float]
+) -> NoReturn:
+    """Refuse an assignment that no flat fold meets at a vertex.
 
-    Each face that turns about a fold lands beside the face across it. Faces that
-    overlapped keep their order, reversed where they moved together and the move turned
-    them over.
+    Raises:
+        RefusalError: Always.
     """
-    turns = [
-        (turned, partner)
-        for edge, kind in target.items()
-        if kind in "MV"
-        for turned, partner in permutations(state.creases[edge])
-        if change[turned] != change[partner]
-    ]
-    kept = [
-        (lower, upper)
-        if change[upper] == change[lower] and change[upper].flips
-        else (upper, lower)
-        for upper, lower in state.above
-        if change[upper] != IDENTITY or change[lower] != IDENTITY
-    ]
-    return _beside(state, turns, change) + kept
+    vertex, mountains, valleys, odd, even = facts
+    point = state.vertices[vertex]
+    faces = tuple(f for f, face in enumerate(state.faces) if vertex in face.corners)
+    if rule == "count":
+        msg = f"{mountains} mountains and {valleys} valleys meet at {point}"
+        raise RefusalError(msg, rule="mountain-valley-count", faces=faces, state=state)
+    msg = (
+        f"the alternate angles between the folds at {point} sum to "
+        f"{odd:.4g}° and {even:.4g}°"
+    )
+    raise RefusalError(msg, rule="unbalanced-angles", faces=faces, state=state)
+
+
+def _collapse_reason(state: State, target: Mapping[Edge, str], pair: Pair) -> str:
+    """Why a collapse requires an order.
+
+    The fold between the two faces sets it, or else the two faces keep it.
+    """
+    upper, lower = pair
+    for edge, faces in state.creases.items():
+        if set(faces) == {upper, lower} and target[edge] in "MV":
+            name = "valley" if target[edge] == "V" else "mountain"
+            f, g = faces
+            return f"the {name} between faces {f} and {g} puts face {upper} above"
+    return f"face {upper} stays above face {lower}"
 
 
 def _beside(
@@ -201,17 +207,25 @@ def _beside(
     ]
 
 
-def along(state: State, crease: Line | tuple[Point, Point]) -> list[Edge]:
-    """The creases inside the paper along a line or segment of the crease pattern."""
-    if isinstance(crease, Line):
-        line, ends = crease, None
-    else:
-        line, ends = Line.through(*crease), crease
-    return [
-        edge
-        for edge in state.lines.get(line, ())
-        if ends is None or all(_within(ends, state.vertices[v]) for v in edge)
+def along(
+    state: State, creases: Iterable[Line | tuple[Point, Point]]
+) -> list[list[Edge]]:
+    """The creases inside the paper along each line or segment of the crease pattern."""
+    queries = [
+        (
+            kernel.point(crease.point),
+            kernel.point(crease.point + crease.direction),
+            False,
+        )
+        if isinstance(crease, Line)
+        else (kernel.point(crease[0]), kernel.point(crease[1]), True)
+        for crease in creases
     ]
+    edges = list(state.creases)
+    found = origamy_kernel.along(
+        kernel.tower(), [kernel.point(p) for p in state.vertices], edges, queries
+    )
+    return [[edges[index] for index in indices] for indices in found]
 
 
 def flat_with(state: State, faces: Iterable[int]) -> set[int]:
@@ -234,110 +248,6 @@ def largest(state: State) -> int:
     """The face of largest area, the first of them when several tie."""
     areas = [area(polygon) for polygon in state.patterns]
     return max(range(len(areas)), key=lambda f: (areas[f], -f))
-
-
-def _within(ends: tuple[Point, Point], point: Point) -> bool:
-    start, end = ends
-    return (point - start).dot(point - end).sign() <= 0
-
-
-def _around(state: State) -> dict[int, list[Edge]]:
-    """Each vertex inside the paper, with its creases in counterclockwise order."""
-    border = {v for edge in state.border for v in edge}
-    creases: dict[int, list[Edge]] = {}
-    for edge in state.creases:
-        for vertex in edge:
-            if vertex not in border:
-                creases.setdefault(vertex, []).append(edge)
-    for vertex, edges in creases.items():
-        edges.sort(key=cmp_to_key(partial(_compare, state, vertex)))
-    return creases
-
-
-def _compare(state: State, vertex: int, first: Edge, second: Edge) -> int:
-    """Order two creases at a vertex by their direction, counterclockwise from east."""
-    center = state.vertices[vertex]
-    a, b = _away(state, first, vertex) - center, _away(state, second, vertex) - center
-    if (half := _half(a) - _half(b)) != 0:
-        return half
-    return -a.cross(b).sign()
-
-
-def _away(state: State, edge: Edge, vertex: int) -> Point:
-    return state.vertices[edge[0] if edge[1] == vertex else edge[1]]
-
-
-def _half(vector: Point) -> int:
-    return 0 if vector.y.sign() > 0 or (not vector.y and vector.x.sign() > 0) else 1
-
-
-def _check_vertices(state: State, target: Mapping[Edge, str]) -> None:
-    """Refuse an assignment that no flat fold meets at some vertex."""
-
-    def at(vertex: int) -> tuple[int, ...]:
-        return tuple(f for f, face in enumerate(state.faces) if vertex in face.corners)
-
-    for vertex, edges in _around(state).items():
-        folds = [edge for edge in edges if target[edge] in "MV"]
-        if not folds:
-            continue
-        point = state.vertices[vertex]
-        mountains = sum(target[edge] == "M" for edge in folds)
-        valleys = len(folds) - mountains
-        if abs(mountains - valleys) != 2:  # noqa: PLR2004 - Maekawa's theorem
-            msg = f"{mountains} mountains and {valleys} valleys meet at {point}"
-            raise RefusalError(
-                msg, rule="mountain-valley-count", faces=at(vertex), state=state
-            )
-        turn = IDENTITY
-        for edge in folds:
-            turn = (
-                Isometry.reflection(Line.through(*(state.vertices[v] for v in edge)))
-                @ turn
-            )
-        if turn != IDENTITY:
-            odd, even = _alternate_sums(state, vertex, folds)
-            msg = (
-                f"the alternate angles between the folds at {point} sum to "
-                f"{odd:.4g}° and {even:.4g}°"
-            )
-            raise RefusalError(
-                msg, rule="unbalanced-angles", faces=at(vertex), state=state
-            )
-
-
-def _alternate_sums(
-    state: State, vertex: int, folds: list[Edge]
-) -> tuple[float, float]:
-    center = state.vertices[vertex].floats()
-    angles = []
-    for edge in folds:
-        x, y = _away(state, edge, vertex).floats()
-        angles.append(degrees(atan2(y - center[1], x - center[0])) % 360)
-    gaps = [(angles[(i + 1) % len(angles)] - a) % 360 for i, a in enumerate(angles)]
-    return sum(gaps[0::2]), sum(gaps[1::2])
-
-
-def _places(state: State, target: Mapping[Edge, str], fixed: int) -> list[Isometry]:
-    """Where each face lies, from the creases between it and the fixed face."""
-    places: dict[int, Isometry] = {fixed: state.faces[fixed].place}
-    queue = [fixed]
-    while queue:
-        face = queue.pop()
-        for edge in sides_of(state.faces[face].corners):
-            if edge not in state.creases:
-                continue
-            f, g = state.creases[edge]
-            other = f if g == face else g
-            if other in places:
-                continue
-            place = places[face]
-            if target[edge] in "MV":
-                crease = Line.through(*(state.vertices[v] for v in edge))
-                place = place @ Isometry.reflection(crease)
-            places[other] = place
-            queue.append(other)
-    return [places[f] for f in range(len(state.faces))]
 
 
 def turn_over(state: State) -> Outcome:
@@ -547,19 +457,34 @@ def _stack(
     ``before`` is the paper just before the move, with the same faces.
     """
     try:
-        return solve(Problem(state), required, prefer)
-    except NoStackingError as error:
-        facts = [_constraint(c) for c in dict.fromkeys(error.constraints)]
-        facts += [required[pair] for pair in error.fixed if pair in required]
-        message = "no stacking keeps paper from passing through paper"
-        if facts:
-            message += ": " + "; ".join(facts)
+        return solve(state, required, prefer, BUDGET)
+    except (NoStackingError, BudgetError) as error:
+        _refuse_stacking(before, error, required.__getitem__)
+
+
+def _refuse_stacking(
+    state: State, error: NoStackingError | BudgetError, reason: Callable[[Pair], str]
+) -> NoReturn:
+    """Refuse a move no stacking allows, naming what conflicts.
+
+    The facts name the constraints and the orders, and ``reason`` says why each order
+    was required.
+
+    Raises:
+        RefusalError: Always.
+    """
+    if isinstance(error, BudgetError):
         raise RefusalError(
-            message, rule="layer-crossing", faces=_faces(error), state=before
+            str(error), rule="layer-order-unknown", state=state
         ) from None
-    except BudgetError as error:
-        message = str(error)
-        raise RefusalError(message, rule="layer-order-unknown", state=before) from None
+    facts = [_constraint(c) for c in dict.fromkeys(error.constraints)]
+    facts += [reason(pair) for pair in error.fixed]
+    message = "no stacking keeps paper from passing through paper"
+    if facts:
+        message += ": " + "; ".join(facts)
+    raise RefusalError(
+        message, rule="layer-crossing", faces=_faces(error), state=state
+    ) from None
 
 
 def _constraint(constraint: Constraint) -> str:

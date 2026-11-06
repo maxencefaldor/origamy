@@ -18,7 +18,7 @@ The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each examp
 
 ## Install
 
-Python 3.14 or newer runs origamy, a Rust toolchain builds its simulator, and a Chromium draws its pictures.
+Python 3.14 or newer runs origamy, a Rust toolchain builds its exact kernel and its simulator, and a Chromium draws its pictures.
 
 ```sh
 uv init --bare --pin-python --python 3.14 my-models  # a project for your fold scripts
@@ -166,6 +166,7 @@ The command `uv run origamy explain` lists every rule with its level and exact c
 The state of the paper is its crease pattern, where each face lies, and which face is above wherever two overlap.
 Coordinates are exact numbers in a tower of square roots, so every crease a construction finds is exact.
 Float estimates with error bounds decide most signs fast, and exact arithmetic decides the rest.
+The exact kernel, in Rust, creases crease patterns, collapses them and solves the stacking.
 A fold reflects the faces it moves across its line.
 A collapse places each face by the reflections across the folds between it and a fixed face.
 The layer solver then finds how the faces stack, after the constraints of [Flat-Folder](https://erikdemaine.org/papers/FlatFolder_OSME2024/paper.pdf): taco-taco, taco-tortilla, tortilla-tortilla and transitivity.

@@ -104,6 +104,8 @@ Four kinds of constraint, after Akitaya, Demaine and Ku's [Flat-Folder](https://
 | `transitivity` | Three faces that share area stack with no cycle |
 
 The solver propagates these constraints and searches, keeping the reason for each deduction.
+Three faces share area exactly when they meet in a region where the most footprints overlap.
+Each such region keeps the orders among its faces closed under transitivity, so one order adds every order it implies there at once.
 The paper refuses an action that leaves no valid stacking (`layer-crossing`), and the message names the constraints and orders that conflict.
 The solver gives up after 100,000 dead ends, and the paper then refuses the action (`layer-order-unknown`).
 

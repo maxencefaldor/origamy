@@ -15,19 +15,20 @@ angles, with golden ratios, and on crossings of their creases all read exactly.
 
 import json
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cmp_to_key
-from itertools import pairwise
 from math import floor, hypot, inf, sqrt
 from pathlib import Path
 from typing import Final
 
+import origamy_kernel
+from origamy import kernel
 from origamy.field import ONE, ZERO, Number
-from origamy.geometry import Line, Point, area, covers, orientation
+from origamy.geometry import Line, Point, orientation
 from origamy.rules import RefusalError
-from origamy.state import Edge, Face, State
+from origamy.state import Face, State
 
 type Segment = tuple[Point, Point]
 """A crease of the unfolded paper, from one end to the other."""
@@ -513,33 +514,27 @@ def crease(state: State, segments: Iterable[Segment]) -> State:
         msg = "a crease pattern creases paper that lies open in one layer"
         raise RefusalError(msg, rule="paper-folded", state=state)
     (place,) = places
-    outline = _outline(state)
-    lines = [(state.vertices[u], state.vertices[v]) for u, v in state.edges]
-    for p, q in segments:
-        if p == q:
-            continue
-        if not (covers(outline, p) and covers(outline, q)):
+    segments = list(segments)
+    outcome, added, faces, index = origamy_kernel.crease(
+        kernel.tower(),
+        [kernel.point(p) for p in state.vertices],
+        list(state.edges),
+        [kernel.point(p) for p in _outline(state)],
+        [(kernel.point(p), kernel.point(q)) for p, q in segments],
+    )
+    match outcome, index:
+        case "off-paper", int():
+            p, q = segments[index]
             msg = f"the crease from {p} to {q} runs off the paper"
             raise RefusalError(msg, rule="crease-off-paper", state=state)
-        lines.append((p, q))
-    vertices = list(state.vertices)
-    index = {p: i for i, p in enumerate(vertices)}
-
-    def vertex(p: Point) -> int:
-        if p not in index:
-            index[p] = len(vertices)
-            vertices.append(p)
-        return index[p]
-
-    edges: set[Edge] = set()
-    for p, q, points in _split(lines):
-        direction = q - p
-        ordered = sorted({p, q, *points}, key=lambda r: (r - p).dot(direction))
-        for a, b in pairwise(ordered):
-            u, v = vertex(a), vertex(b)
-            edges.add((min(u, v), max(u, v)))
-    faces = _faces(vertices, edges, state)
-    return State(tuple(vertices), tuple(Face(corners, place) for corners in faces))
+        case "loose", _:
+            msg = "a crease ends inside the paper, meeting no other crease"
+            raise RefusalError(msg, rule="loose-crease", state=state)
+        case "concave", _:
+            msg = "a crease ends inside the paper, leaving a face that is not convex"
+            raise RefusalError(msg, rule="loose-crease", state=state)
+    vertices = (*state.vertices, *(kernel.from_point(p) for p in added))
+    return State(vertices, tuple(Face(tuple(corners), place) for corners in faces))
 
 
 def _outline(state: State) -> tuple[Point, ...]:
@@ -556,129 +551,6 @@ def _outline(state: State) -> tuple[Point, ...]:
             hull.pop()
         hull.append(p)
     return tuple(hull)
-
-
-def _split(
-    lines: Sequence[Segment],
-) -> list[tuple[Point, Point, set[Point]]]:
-    """Each segment with the points where other segments cross it or end on it."""
-    boxes = [_box(p, q) for p, q in lines]
-    points: list[set[Point]] = [set() for _ in lines]
-    for i, (p, q) in enumerate(lines):
-        for j in range(i + 1, len(lines)):
-            if not _boxes_meet(boxes[i], boxes[j]):
-                continue
-            r, s = lines[j]
-            for point in _meeting(p, q, r, s):
-                points[i].add(point)
-                points[j].add(point)
-    return [(p, q, found) for (p, q), found in zip(lines, points, strict=True)]
-
-
-def _meeting(p: Point, q: Point, r: Point, s: Point) -> list[Point]:
-    """Where two segments meet: a crossing, an end on the other, or shared stretches."""
-    d, e = q - p, s - r
-    denominator = d.cross(e)
-    if not denominator:
-        if (r - p).cross(d):
-            return []
-        # Collinear: each end that lies on the other segment splits it.
-        return [a for a in (p, q) if _on(r, s, a)] + [a for a in (r, s) if _on(p, q, a)]
-    t = (r - p).cross(e) / denominator
-    u = (r - p).cross(d) / denominator
-    if ZERO <= t <= ONE and ZERO <= u <= ONE:
-        return [p + d * t]
-    return []
-
-
-def _on(p: Point, q: Point, point: Point) -> bool:
-    """Whether a point lies on a segment, ends included."""
-    d = q - p
-    offset = point - p
-    return not d.cross(offset) and ZERO <= offset.dot(d) <= d.dot(d)
-
-
-def _box(p: Point, q: Point) -> tuple[float, float, float, float]:
-    (px, py), (qx, qy) = p.floats(), q.floats()
-    return min(px, qx), min(py, qy), max(px, qx), max(py, qy)
-
-
-def _boxes_meet(
-    first: tuple[float, float, float, float], second: tuple[float, float, float, float]
-) -> bool:
-    slack = 1e-9
-    return (
-        first[0] <= second[2] + slack
-        and second[0] <= first[2] + slack
-        and first[1] <= second[3] + slack
-        and second[1] <= first[3] + slack
-    )
-
-
-def _faces(
-    vertices: Sequence[Point], edges: set[Edge], state: State
-) -> list[tuple[int, ...]]:
-    """The faces the edges divide the paper into, each counterclockwise.
-
-    Each face lies to the left of its edges, walked in turn: at each corner, the walk
-    turns onto the next edge clockwise from the one it came along.
-    """
-    around: dict[int, list[int]] = {}
-    for u, v in edges:
-        around.setdefault(u, []).append(v)
-        around.setdefault(v, []).append(u)
-    for v, others in around.items():
-        others.sort(key=cmp_to_key(_by_angle(vertices[v], vertices)))
-    position = {(v, w): i for v, others in around.items() for i, w in enumerate(others)}
-    seen: set[tuple[int, int]] = set()
-    faces: list[tuple[int, ...]] = []
-    for u, v in sorted(edges):
-        for start in ((u, v), (v, u)):
-            if start in seen:
-                continue
-            walk = []
-            here = start
-            while here not in seen:
-                seen.add(here)
-                walk.append(here[0])
-                a, b = here
-                others = around[b]
-                here = (b, others[(position[b, a] - 1) % len(others)])
-            polygon = tuple(vertices[i] for i in walk)
-            if area(polygon).sign() > 0:
-                _check(polygon, state)
-                faces.append(tuple(walk))
-    return faces
-
-
-def _check(polygon: Sequence[Point], state: State) -> None:
-    """Refuse a face a loose crease leaves: one it borders twice, or one not convex."""
-    if len(set(polygon)) < len(polygon):
-        msg = "a crease ends inside the paper, meeting no other crease"
-        raise RefusalError(msg, rule="loose-crease", state=state)
-    n = len(polygon)
-    if any(
-        orientation(polygon[i - 1], polygon[i], polygon[(i + 1) % n]) < 0
-        for i in range(n)
-    ):
-        msg = "a crease ends inside the paper, leaving a face that is not convex"
-        raise RefusalError(msg, rule="loose-crease", state=state)
-
-
-def _by_angle(center: Point, vertices: Sequence[Point]) -> Callable[[int, int], int]:
-    """Compare neighbors of a vertex counterclockwise, from the positive x axis on."""
-
-    def half(vector: Point) -> int:
-        return 0 if vector.y.sign() > 0 or (not vector.y and vector.x.sign() > 0) else 1
-
-    def compare(a: int, b: int) -> int:
-        va, vb = vertices[a] - center, vertices[b] - center
-        ha, hb = half(va), half(vb)
-        if ha != hb:
-            return ha - hb
-        return -va.cross(vb).sign()
-
-    return compare
 
 
 def _fold(text: str) -> list[tuple[str, tuple[float, float], tuple[float, float]]]:

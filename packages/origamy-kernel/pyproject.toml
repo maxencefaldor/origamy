@@ -1,0 +1,46 @@
+[project]
+name = "origamy-kernel"
+description = "The exact kernel of origamy: numbers in towers of square roots, geometry, and the layer solver."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Maxence Faldor" }]
+keywords = ["origami", "exact", "geometry", "folding", "crease-pattern"]
+requires-python = ">=3.14"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Typing :: Typed",
+]
+# The version is the Rust workspace's, in the repository's Cargo.toml.
+dynamic = ["version"]
+
+[project.urls]
+Source = "https://github.com/maxencefaldor/origamy"
+Issues = "https://github.com/maxencefaldor/origamy/issues"
+
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "crates/origamy-kernel-py/Cargo.toml"
+python-source = "src"
+module-name = "origamy_kernel._core"
+
+[tool.uv]
+# uv rebuilds the compiled kernel whenever its Rust sources or manifests change.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "crates/**/Cargo.toml" },
+  { file = "crates/**/*.rs" },
+  { file = "../../Cargo.toml" },
+  { file = "../../Cargo.lock" },
+]
