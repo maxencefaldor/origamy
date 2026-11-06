@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 
 use num_bigint::BigInt;
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use smallvec::smallvec;
 
 use crate::field::{Number, Tower};
@@ -44,12 +45,23 @@ pub struct Unexplained {
     pub corner: (f64, f64),
 }
 
-/// The exact point of each corner, in the tower grown by the roots they need.
+/// Where a file's floats lie: the lowest leftmost corner of the box around them, and
+/// the box's longer side, which reading scales to 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Frame {
+    /// The box's lowest leftmost corner.
+    pub origin: (f64, f64),
+    /// The box's longer side.
+    pub side: f64,
+}
+
+/// The exact point of each corner of some segments given as floats, in the tower grown
+/// by the roots they need, and each segment's two corners.
 ///
-/// `keys` are the corners as floats rounded so that one corner written twice reads as
-/// one, and `floats` are the corners as the file first gives them. `edges` are the
-/// creases between corners, as indices. Straight runs and crossings measure keys, and
-/// snapping explains floats.
+/// Each end scales to the frame. Its key, rounded to ten decimal places as Python's
+/// `round` rounds, makes one corner written twice read as one, and corners number in
+/// the order the segments first meet them. Straight runs and crossings measure keys,
+/// and snapping explains each corner's floats as first met.
 ///
 /// # Errors
 ///
@@ -58,21 +70,21 @@ pub struct Unexplained {
 ///
 /// # Panics
 ///
-/// When `keys` and `floats` differ in length, or an edge names no corner.
+/// When the corners number 2³² or more.
 pub fn read(
-    keys: &[(f64, f64)],
-    floats: &[(f64, f64)],
-    edges: &[(u32, u32)],
+    segments: &[[(f64, f64); 2]],
+    frame: &Frame,
     reading: &Reading,
     tower: &mut Tower,
-) -> Result<Vec<Point>, Unexplained> {
-    assert_eq!(keys.len(), floats.len(), "each corner has a key and floats");
+) -> Result<(Vec<Point>, Vec<[u32; 2]>), Unexplained> {
+    let (keys, floats, ends) = corners(segments, frame);
     let mut order: Vec<usize> = (0..keys.len()).collect();
     order.sort_by(|&a, &b| by_floats(keys[a], keys[b]));
+    let edges: Vec<(u32, u32)> = ends.iter().map(|&[u, v]| (u, v)).collect();
     let mut reader = Reader::new(
         order.iter().map(|&i| keys[i]).collect(),
         order.iter().map(|&i| floats[i]).collect(),
-        &ranked(&order, edges),
+        &ranked(&order, &edges),
         reading,
         tower,
     );
@@ -81,7 +93,79 @@ pub fn read(
     for (point, &i) in exact.into_iter().zip(&order) {
         points[i] = Some(point);
     }
-    Ok(points.into_iter().flatten().collect())
+    Ok((points.into_iter().flatten().collect(), ends))
+}
+
+/// Each corner's key and first floats, scaled to the frame, and each segment's corners.
+fn corners(segments: &[[(f64, f64); 2]], frame: &Frame) -> CornerData {
+    let ((left, bottom), side) = (frame.origin, frame.side);
+    let mut index: FxHashMap<(u64, u64), u32> = FxHashMap::default();
+    let (mut keys, mut floats) = (vec![], vec![]);
+    let ends = segments
+        .iter()
+        .map(|segment| {
+            segment.map(|(x, y)| {
+                let float = ((x - left) / side, (y - bottom) / side);
+                // Adding 0 turns -0 into 0, which Python's keys take as one.
+                let key = (rounded(float.0) + 0.0, rounded(float.1) + 0.0);
+                *index
+                    .entry((key.0.to_bits(), key.1.to_bits()))
+                    .or_insert_with(|| {
+                        keys.push(key);
+                        floats.push(float);
+                        u32::try_from(keys.len() - 1).expect("corners fit in 32 bits")
+                    })
+            })
+        })
+        .collect();
+    (keys, floats, ends)
+}
+
+/// Corners' keys and floats, and segments' corners.
+type CornerData = (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<[u32; 2]>);
+
+/// A float rounded to ten decimal places, as Python's `round(x, 10)` rounds it: to the
+/// nearest decimal, ties to even, then to the nearest float.
+fn rounded(value: f64) -> f64 {
+    const SCALE: u128 = 10_000_000_000;
+    if !value.is_finite() {
+        return value;
+    }
+    let bits = value.abs().to_bits();
+    let exponent = i64::try_from(bits >> 52).expect("eleven bits");
+    let fraction = bits & ((1 << 52) - 1);
+    let (mantissa, power) = if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | 1 << 52, exponent - 1075)
+    };
+    // A whole float, past 2^52, rounds to itself.
+    if power >= 0 {
+        return value;
+    }
+    let shift = power.unsigned_abs();
+    let scaled = u128::from(mantissa) * SCALE;
+    let nearest = if shift >= 128 {
+        // The float lies under 2^-75, so it rounds to 0.
+        0
+    } else {
+        let (whole, rest, half) = (
+            scaled >> shift,
+            scaled & ((1 << shift) - 1),
+            1 << (shift - 1),
+        );
+        whole + u128::from(rest > half || (rest == half && whole & 1 == 1))
+    };
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "the integers are exact under 2^53"
+    )]
+    let magnitude = if nearest < 1 << 53 {
+        nearest as f64 / SCALE as f64
+    } else {
+        crate::snap::ratio(&BigInt::from(nearest), &BigInt::from(SCALE))
+    };
+    magnitude.copysign(value)
 }
 
 /// Floats in order by x, then by y.
@@ -459,16 +543,35 @@ mod tests {
         Number::new(smallvec![Int::from(numerator)], Int::from(denominator))
     }
 
+    const UNIT: Frame = Frame {
+        origin: (0.0, 0.0),
+        side: 1.0,
+    };
+
     #[test]
     fn corners_snap_and_add_the_roots_they_need() {
         let half = 2f64.sqrt() / 2.0;
-        let keys = [(0.0, 0.0), (half, 0.5), (1.0, 1.0)];
+        let segments = [[(0.0, 0.0), (half, 0.5)], [(half, 0.5), (1.0, 1.0)]];
         let mut tower = Tower::new(vec![]);
-        let points = read(&keys, &keys, &[(0, 1), (1, 2)], &reading(), &mut tower).unwrap();
+        let (points, ends) = read(&segments, &UNIT, &reading(), &mut tower).unwrap();
+        assert_eq!(ends, [[0, 1], [1, 2]]);
         assert_eq!(tower.radicands(), &[Number::integer(2)]);
         let root_half = Number::new(smallvec![Int::ZERO, Int::ONE], Int::from(2i64));
         assert_eq!(points[1], Point::new(root_half, rational(1, 2), &tower));
         assert_eq!(points[2], Point::new(Number::one(), Number::one(), &tower));
+    }
+
+    #[test]
+    fn a_corner_written_twice_reads_as_one() {
+        let segments = [[(0.0, 0.0), (2.0, 1.0)], [(2.0 + 1e-12, 1.0), (2.0, 2.0)]];
+        let frame = Frame {
+            origin: (0.0, 0.0),
+            side: 2.0,
+        };
+        let mut tower = Tower::new(vec![]);
+        let (points, ends) = read(&segments, &frame, &reading(), &mut tower).unwrap();
+        assert_eq!(ends, [[0, 1], [1, 2]]);
+        assert_eq!(points[1], Point::new(Number::one(), rational(1, 2), &tower));
     }
 
     #[test]
@@ -478,8 +581,8 @@ mod tests {
         // many fractions; a pinch of noise leaves the snapped fraction unsure.
         let (a, b) = (1.0 / 7.0, 1.0 / 7.0 + 1.0 / 3.0);
         let middle = (1.0 / 7.0 + 1.0 / 6.0 + 3e-10, 1.0 / 6.0 + 3e-10);
-        let keys = [(a, 0.0), (b, 1.0 / 3.0), (b, 0.0), (a, 1.0 / 3.0), middle];
-        let edges = [(0, 4), (4, 1), (2, 4), (4, 3)];
+        let corners = [(a, 0.0), (b, 1.0 / 3.0), (b, 0.0), (a, 1.0 / 3.0)];
+        let segments = corners.map(|corner| [corner, middle]);
         let mut tower = Tower::new(vec![]);
         let reading = Reading {
             bounds: Bounds {
@@ -488,16 +591,17 @@ mod tests {
             },
             ..reading()
         };
-        let points = read(&keys, &keys, &edges, &reading, &mut tower).unwrap();
+        let (points, ends) = read(&segments, &UNIT, &reading, &mut tower).unwrap();
         let x = rational(1, 7).plus(&rational(1, 6));
-        assert_eq!(points[4], Point::new(x, rational(1, 6), &tower));
+        assert_eq!(ends[0], [0, 1]);
+        assert_eq!(points[1], Point::new(x, rational(1, 6), &tower));
     }
 
     #[test]
     fn a_corner_nothing_explains_is_named() {
-        let keys = [(0.0, 0.0), (0.123_456_789, 0.5)];
+        let segments = [[(0.0, 0.0), (0.123_456_789, 0.5)]];
         let mut tower = Tower::new(vec![]);
-        let outcome = read(&keys, &keys, &[(0, 1)], &reading(), &mut tower);
+        let outcome = read(&segments, &UNIT, &reading(), &mut tower);
         assert_eq!(
             outcome,
             Err(Unexplained {
@@ -505,5 +609,46 @@ mod tests {
                 corner: (0.123_456_789, 0.5)
             })
         );
+    }
+
+    #[test]
+    fn keys_round_as_python_rounds() {
+        // Python's round(x, 10) for each float, ties among them to even.
+        let cases = [
+            (0.000_488_281_25, 0.000_488_281_2),
+            (0.001_464_843_75, 0.001_464_843_8),
+            (0.1 + 0.2, 0.3),
+            (2.0 / 3.0, 0.666_666_666_7),
+            (0.123_456_789_012_345, 0.123_456_789),
+            (1e-11, 0.0),
+            (5e-11, 1e-10),
+            (1.5e-10, 1e-10),
+            (2.5e-10, 3e-10),
+            (0.999_999_999_95, 0.999_999_999_9),
+            (0.299_999_999_95, 0.299_999_999_9),
+            (0.123_456_789_05, 0.123_456_789_1),
+            (0.618_033_988_749_894_9, 0.618_033_988_7),
+            (1.0, 1.0),
+            (1e300, 1e300),
+            (-2.0 / 3.0, -0.666_666_666_7),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(rounded(value).to_bits(), f64::to_bits(expected), "{value}");
+        }
+        assert_eq!(rounded(-1e-12).to_bits(), (-0.0f64).to_bits());
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn rounding_matches_exact_arithmetic(value in 0.0f64..2e6) {
+            let (n, d) = crate::snap::exact(value);
+            let scaled = n * BigInt::from(10_000_000_000u64);
+            let (whole, rest) = num_integer::Integer::div_rem(&scaled, &d);
+            let twice = rest * 2;
+            let up = twice > d || (twice == d && num_integer::Integer::is_odd(&whole));
+            let nearest = whole + BigInt::from(u8::from(up));
+            let expected = crate::snap::ratio(&nearest, &BigInt::from(10_000_000_000u64));
+            proptest::prop_assert_eq!(rounded(value).to_bits(), expected.to_bits());
+        }
     }
 }

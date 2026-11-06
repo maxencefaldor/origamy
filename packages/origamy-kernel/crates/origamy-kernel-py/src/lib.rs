@@ -22,7 +22,7 @@ use origamy_kernel::folded::{Folded, Pair, creases as creases_of, edges as edges
 use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
 use origamy_kernel::lines::{Along, along as creases_along};
-use origamy_kernel::reading::{Reading, Unexplained, read};
+use origamy_kernel::reading::{Frame, Reading, Unexplained, read};
 use origamy_kernel::snap::{Bounds, explain as explain_float};
 use origamy_kernel::stacking::{
     Constraint, Problem, StackError, stack as solve, violations as broken,
@@ -228,10 +228,21 @@ fn explain(
 type Explained = (f64, (BigInt, BigInt), (BigInt, BigInt), u32);
 
 /// What reading corners came to: the radicands of the levels their roots added, each
-/// corner's exact point, and the coordinate and floats of a corner nothing explains.
-type ReadData = (Vec<NumberData>, Vec<PointData>, Option<(f64, f64, f64)>);
+/// corner's exact point, each segment's two corners, and the coordinate and floats of a
+/// corner nothing explains.
+type ReadData = (
+    Vec<NumberData>,
+    Vec<PointData>,
+    Vec<Pair>,
+    Option<(f64, f64, f64)>,
+);
 
 /// The exact point each corner of a crease pattern stands for, read from floats.
+///
+/// Each end of a segment scales so that the box around the paper, from `origin`, has
+/// a longer side of 1. Rounded to ten decimal places, as `round` rounds, it gives the
+/// key that makes one corner written twice read as one. Corners number in the order
+/// the segments first meet them.
 ///
 /// A corner whose coordinates both snap surely takes them. Any other corner lies where
 /// two lines of creases cross, each through exact corners. Snapping within a looser fit
@@ -241,10 +252,9 @@ type ReadData = (Vec<NumberData>, Vec<PointData>, Option<(f64, f64, f64)>);
 ///
 /// Args:
 ///     radicands: The tower's radicands, level 1 first.
-///     keys: Each corner's floats rounded, so that one corner written twice reads as
-///         one, which straight runs and crossings measure.
-///     floats: Each corner's floats as the file first gives them, which snap.
-///     edges: The creases between corners, as indices into `keys`.
+///     segments: The segments, each as its two ends' floats.
+///     origin: The lowest leftmost corner of the box around the paper's edges.
+///     length: The box's longer side.
 ///     tolerance: How far a coordinate may lie from the number it snaps to.
 ///     sure: The fit reading takes first, under which a fraction explains a float
 ///         surely, so that no root is tried.
@@ -257,13 +267,13 @@ type ReadData = (Vec<NumberData>, Vec<PointData>, Option<(f64, f64, f64)>);
 ///
 /// Returns:
 ///     The radicands of the levels the reading added, level by level; each corner's
-///     exact point, none when a corner is unexplained; and for the first corner, in
-///     order by key, that snaps to no exact point where no two lines of creases cross,
-///     its coordinate that snaps to none and its floats.
+///     exact point and each segment's two corners, none when a corner is unexplained;
+///     and for the first corner, in order by key, that snaps to no exact point where no
+///     two lines of creases cross, its coordinate that snaps to none and its floats.
 ///
 /// Raises:
-///     ValueError: A float is not finite, the keys and floats differ in number, an
-///         edge names no corner, or a root, the scale or the size is not positive.
+///     ValueError: A float is not finite, the length is not positive, or a root,
+///         the scale or the size is not positive.
 #[pyfunction]
 #[allow(
     clippy::too_many_arguments,
@@ -273,9 +283,9 @@ type ReadData = (Vec<NumberData>, Vec<PointData>, Option<(f64, f64, f64)>);
 fn read_corners(
     py: Python<'_>,
     radicands: Vec<NumberData>,
-    keys: Vec<(f64, f64)>,
-    floats: Vec<(f64, f64)>,
-    edges: Vec<(u32, u32)>,
+    segments: Vec<[(f64, f64); 2]>,
+    origin: (f64, f64),
+    length: f64,
     tolerance: f64,
     sure: f64,
     fit: f64,
@@ -286,17 +296,16 @@ fn read_corners(
     size: i64,
 ) -> PyResult<ReadData> {
     let finite = |&(x, y): &(f64, f64)| x.is_finite() && y.is_finite();
-    let count = u32::try_from(keys.len()).unwrap_or(u32::MAX);
-    if !(keys.iter().all(finite) && floats.iter().all(finite))
-        || keys.len() != floats.len()
-        || edges.iter().any(|&(u, v)| u >= count || v >= count)
-        || roots.contains(&0)
-        || scale <= 0
-        || size <= 0
-    {
+    let valid = segments.iter().flatten().all(finite)
+        && finite(&origin)
+        && length.is_finite()
+        && length > 0.0
+        && !roots.contains(&0)
+        && scale > 0
+        && size > 0;
+    if !valid {
         return Err(PyValueError::new_err(
-            "reading needs finite floats, a key and floats for each corner, edges between \
-             corners, and positive roots, scale and size",
+            "reading needs finite floats, a positive length, and positive roots, scale and size",
         ));
     }
     let mut tower = tower(radicands)?;
@@ -313,14 +322,23 @@ fn read_corners(
         fit,
         near,
     };
-    let outcome = py.detach(|| read(&keys, &floats, &edges, &reading, &mut tower));
+    let frame = Frame {
+        origin,
+        side: length,
+    };
+    let outcome = py.detach(|| read(&segments, &frame, &reading, &mut tower));
     let added = tower.radicands()[known..].iter().map(number_data).collect();
     Ok(match outcome {
-        Ok(points) => (added, points.iter().map(point_data).collect(), None),
+        Ok((points, ends)) => (
+            added,
+            points.iter().map(point_data).collect(),
+            ends.iter().map(|&[u, v]| (u, v)).collect(),
+            None,
+        ),
         Err(Unexplained {
             value,
             corner: (x, y),
-        }) => (added, vec![], Some((value, x, y))),
+        }) => (added, vec![], vec![], Some((value, x, y))),
     })
 }
 

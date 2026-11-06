@@ -135,7 +135,7 @@ fn convergents(value: f64, bound: u64) -> Vec<(BigInt, BigInt)> {
 }
 
 /// A finite float as an exact fraction, its denominator a positive power of two.
-fn exact(value: f64) -> (BigInt, BigInt) {
+pub(crate) fn exact(value: f64) -> (BigInt, BigInt) {
     let bits = value.to_bits();
     let sign = if bits >> 63 == 1 {
         Sign::Minus
@@ -163,7 +163,7 @@ fn exact(value: f64) -> (BigInt, BigInt) {
 }
 
 /// A fraction with a positive denominator as the nearest float, ties to even.
-fn ratio(n: &BigInt, d: &BigInt) -> f64 {
+pub(crate) fn ratio(n: &BigInt, d: &BigInt) -> f64 {
     let limit = BigInt::one() << 53;
     if n.abs() <= limit && *d <= limit {
         return n.to_f64().expect("exact") / d.to_f64().expect("exact");

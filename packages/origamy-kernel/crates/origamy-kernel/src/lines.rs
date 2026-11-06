@@ -6,6 +6,7 @@
 
 use std::cmp::Ordering;
 
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::field::{Number, Tower};
@@ -22,7 +23,8 @@ pub enum Along {
 /// The creases along each line or segment, by their indices in `edges`, in order.
 ///
 /// `edges` are the creases, each as two vertices. A line or segment with two equal
-/// points has no crease along it.
+/// points has no crease along it. The edges find their lines, and the queries their
+/// creases, on every core.
 ///
 /// # Panics
 ///
@@ -34,27 +36,28 @@ pub fn along(
     edges: &[[u32; 2]],
     queries: &[Along],
 ) -> Vec<Vec<u32>> {
+    let placed: Vec<(Line, Number, Number)> = edges
+        .par_iter()
+        .map(|&[u, v]| {
+            let (p, q) = (&vertices[u as usize], &vertices[v as usize]);
+            let line = Line::through(p, q, tower);
+            let (a, b) = (place(&line, p), place(&line, q));
+            if a.compare(&b, tower) == Ordering::Greater {
+                (line, b, a)
+            } else {
+                (line, a, b)
+            }
+        })
+        .collect();
     let mut groups: FxHashMap<Line, Vec<(Number, Number, u32)>> = FxHashMap::default();
-    for (index, &[u, v]) in edges.iter().enumerate() {
-        let (p, q) = (&vertices[u as usize], &vertices[v as usize]);
-        let line = Line::through(p, q, tower);
-        let (a, b) = (place(&line, p), place(&line, q));
-        let (low, high) = if a.compare(&b, tower) == Ordering::Greater {
-            (b, a)
-        } else {
-            (a, b)
-        };
-        groups.entry(line).or_default().push((
-            low,
-            high,
-            u32::try_from(index).expect("edges fit in 32 bits"),
-        ));
+    for (index, (line, low, high)) in (0u32..).zip(placed) {
+        groups.entry(line).or_default().push((low, high, index));
     }
-    for group in groups.values_mut() {
-        group.sort_by(|x, y| x.0.compare(&y.0, tower));
-    }
+    groups
+        .par_iter_mut()
+        .for_each(|(_, group)| group.sort_by(|x, y| x.0.compare(&y.0, tower)));
     queries
-        .iter()
+        .par_iter()
         .map(|query| {
             let (p, q, segment) = match query {
                 Along::Line(p, q) => (p, q, false),

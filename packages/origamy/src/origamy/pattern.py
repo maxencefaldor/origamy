@@ -32,7 +32,7 @@ type Segment = tuple[Point, Point]
 """A crease of the unfolded paper, from one end to the other."""
 
 type _Float = tuple[float, float]
-"""A point as a file gives it, scaled to the paper whose longer side measures 1."""
+"""A point as a file gives it, in floats."""
 
 TOLERANCE: Final = 1e-9
 """How far, as a share of the paper's longer side, a coordinate may lie from the exact
@@ -121,27 +121,13 @@ class CreasePattern:
         ys = [y for _, p, q in lines for y in (p[1], q[1])]
         left, bottom = min(xs), min(ys)
         size = max(max(xs) - left, max(ys) - bottom)
-
-        def scaled(point: tuple[float, float]) -> _Float:
-            return ((point[0] - left) / size, (point[1] - bottom) / size)
-
-        index: dict[_Float, int] = {}
-        floats: list[_Float] = []
-        edges: list[tuple[int, int]] = []
-        for _, p, q in lines:
-            ends = []
-            for end in (scaled(p), scaled(q)):
-                key = _key(end)
-                if key not in index:
-                    index[key] = len(floats)
-                    floats.append(end)
-                ends.append(index[key])
-            edges.append((ends[0], ends[1]))
-        exact = _exact(list(index), floats, edges, tolerance)
+        exact, ends = _exact(
+            [(p, q) for _, p, q in lines], (left, bottom), size, tolerance
+        )
         width = snap((max(xs) - left) / size, tolerance)
         height = snap((max(ys) - bottom) / size, tolerance)
         kinds: dict[str, list[Segment]] = {"B": [], "V": [], "M": [], "F": []}
-        for (kind, _, _), (u, v) in zip(lines, edges, strict=True):
+        for (kind, _, _), (u, v) in zip(lines, ends, strict=True):
             kinds[kind].append((exact[u], exact[v]))
         corners = {end for edge in kinds["B"] for end in edge} or {
             Point(x, y) for x in (ZERO, width) for y in (ZERO, height)
@@ -176,18 +162,18 @@ def _by_place(p: Point, q: Point) -> int:
     return (p.y > q.y) - (p.y < q.y)
 
 
-def _key(point: _Float) -> _Float:
-    """A float point rounded, so that one corner written twice reads as one."""
-    return (round(point[0], 10), round(point[1], 10))
-
-
 def _exact(
-    keys: list[_Float],
-    floats: list[_Float],
-    edges: list[tuple[int, int]],
+    segments: list[tuple[_Float, _Float]],
+    origin: _Float,
+    length: float,
     tolerance: float,
-) -> list[Point]:
-    """The exact point of each corner, which the kernel reads.
+) -> tuple[list[Point], list[tuple[int, int]]]:
+    """The exact point of each corner, which the kernel reads, and each segment's ends.
+
+    Each end scales so that the box from ``origin``, its longer side ``length``, has a
+    longer side of 1. Rounded to
+    ten decimal places, it gives the key that makes one corner written twice read as
+    one, and corners number in the order the segments first meet them.
 
     A corner whose coordinates both snap surely, within `SURE`, takes them. Any other
     corner lies where two lines of creases cross, each through exact corners; corners
@@ -201,11 +187,11 @@ def _exact(
         ValueError: A corner snaps to no exact point, and no two lines of creases
             through exact corners cross there.
     """
-    radicands, points, unexplained = origamy_kernel.read_corners(
+    radicands, points, ends, unexplained = origamy_kernel.read_corners(
         kernel.tower(),
-        keys,
-        floats,
-        edges,
+        segments,
+        origin,
+        length,
         tolerance,
         SURE,
         FIT,
@@ -223,7 +209,7 @@ def _exact(
             f"and no two lines of creases cross at ({x!r}, {y!r})"
         )
         raise ValueError(msg)
-    return [kernel.from_point(point) for point in points]
+    return [kernel.from_point(point) for point in points], ends
 
 
 def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number:
