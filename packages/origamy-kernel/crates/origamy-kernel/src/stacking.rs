@@ -2,11 +2,15 @@
 //! `origamy.layers` defines it.
 //!
 //! Each pair of overlapping faces is a variable: positive puts the lesser face above.
-//! Folds and flat creases give clauses, and transitivity forbids any three faces that
-//! share area from stacking in a cycle. Three faces share area exactly when they meet
-//! in a region of the footprints' overlay where the most footprints meet, so each such
-//! region keeps the orders among its faces as rows of bits, closed under transitivity:
-//! learning that one face lies above another adds every order it implies there at once.
+//! Folds and flat creases give parity rules: an even number of a rule's literals hold.
+//! A taco-taco rule has four literals, and the others have two, which then agree.
+//!
+//! Transitivity forbids any three faces that share area from stacking in a cycle. Three
+//! faces share area exactly when they meet in a region of the footprints' overlay where
+//! the most footprints meet. Each such region keeps the orders among its faces as rows
+//! of bits. An order that holds marks every region holding its two faces at once, and
+//! each region closes its new orders under transitivity a row of bits at a time. The
+//! solver looks up the literal of a closed order only when no region knew it.
 
 #![allow(
     clippy::many_single_char_names,
@@ -88,7 +92,8 @@ struct Crease {
     side: i32,
 }
 
-/// The stacking constraints of folded paper: clauses, and transitivity found on demand.
+/// The stacking constraints of folded paper: parity rules, and transitivity found on
+/// demand.
 pub struct Problem<'a> {
     paper: &'a Folded,
     /// Where each face's neighbors start in `neighbors`.
@@ -96,15 +101,24 @@ pub struct Problem<'a> {
     /// Each face's overlapping faces, sorted, each with the literal that puts the face
     /// above it.
     neighbors: Vec<(u32, i32)>,
-    clause_starts: Vec<u32>,
-    clause_literals: Vec<i32>,
-    origins: Vec<u32>,
+    /// Where each rule's literals start in `rule_literals`.
+    rule_starts: Vec<u32>,
+    rule_literals: Vec<i32>,
+    /// Each rule's constraint.
     constraints: Vec<Origin>,
-    /// The faces of each region where the most footprints meet, sorted.
+    /// The faces of each region where the most footprints meet, footprint by footprint
+    /// in order, each footprint's faces as it stacks them.
     regions: Vec<Vec<u32>>,
-    /// The regions holding each face, sorted, each with the face's place among the
-    /// region's faces.
-    holding: Vec<Vec<(u32, u32)>>,
+    /// Each face's place among its footprint's faces.
+    rank: Vec<u32>,
+    /// Each pair's bucket, by its variable: the regions its two footprints share, or
+    /// `u32::MAX` when they share none.
+    bucket: Vec<u32>,
+    /// Where each bucket starts in `buckets`.
+    bucket_starts: Vec<u32>,
+    /// Each bucket's regions, with where each footprint's faces start among the
+    /// region's faces, the footprint of lesser index first.
+    buckets: Vec<[u32; 3]>,
 }
 
 impl<'a> Problem<'a> {
@@ -137,37 +151,51 @@ impl<'a> Problem<'a> {
         for f in 0..paper.folded.len() {
             neighbors[rows[f] as usize..rows[f + 1] as usize].sort_unstable_by_key(|&(g, _)| g);
         }
-        let regions: Vec<Vec<u32>> = paper
+        let covers: Vec<Vec<u32>> = paper
             .overlay
             .regions
             .iter()
             .map(|cover| {
-                let mut faces: Vec<u32> = cover
+                let mut cover = cover.clone();
+                cover.sort_unstable();
+                cover
+            })
+            .filter(|cover| {
+                cover
+                    .iter()
+                    .map(|&k| paper.stacked[k as usize].len())
+                    .sum::<usize>()
+                    > 2
+            })
+            .collect();
+        let regions: Vec<Vec<u32>> = covers
+            .iter()
+            .map(|cover| {
+                cover
                     .iter()
                     .flat_map(|&k| paper.stacked[k as usize].iter().copied())
-                    .collect();
-                faces.sort_unstable();
-                faces
+                    .collect()
             })
-            .filter(|faces| faces.len() > 2)
             .collect();
-        let mut holding = vec![vec![]; paper.folded.len()];
-        for (r, faces) in regions.iter().enumerate() {
-            let r = u32::try_from(r).expect("regions fit in 32 bits");
+        let mut rank = vec![0; paper.folded.len()];
+        for faces in &paper.stacked {
             for (k, &f) in faces.iter().enumerate() {
-                holding[f as usize].push((r, u32::try_from(k).expect("faces fit in 32 bits")));
+                rank[f as usize] = u32::try_from(k).expect("faces fit in 32 bits");
             }
         }
+        let (bucket, bucket_starts, buckets) = buckets(paper, &covers, &rows, &neighbors);
         let mut problem = Problem {
             paper,
             rows,
             neighbors,
-            clause_starts: vec![0],
-            clause_literals: vec![],
-            origins: vec![],
+            rule_starts: vec![0],
+            rule_literals: vec![],
             constraints: vec![],
             regions,
-            holding,
+            rank,
+            bucket,
+            bucket_starts,
+            buckets,
         };
         let creases = problem.creases();
         problem.folds_and_flats(&creases);
@@ -204,26 +232,24 @@ impl<'a> Problem<'a> {
         if literal > 0 { (f, g) } else { (g, f) }
     }
 
-    fn clause(&self, index: u32) -> &[i32] {
-        &self.clause_literals[self.clause_starts[index as usize] as usize
-            ..self.clause_starts[index as usize + 1] as usize]
+    /// A rule's literals, by index: an even number of them hold.
+    fn rule(&self, index: u32) -> &[i32] {
+        &self.rule_literals[self.rule_starts[index as usize] as usize
+            ..self.rule_starts[index as usize + 1] as usize]
     }
 
-    fn add(&mut self, origin: Origin, clauses: &[&[i32]]) {
-        let index = u32::try_from(self.constraints.len()).expect("constraints fit in 32 bits");
+    fn add(&mut self, origin: Origin, literals: &[i32]) {
         self.constraints.push(origin);
-        for clause in clauses {
-            self.clause_literals.extend_from_slice(clause);
-            self.clause_starts
-                .push(u32::try_from(self.clause_literals.len()).expect("literals fit in 32 bits"));
-            self.origins.push(index);
-        }
+        self.rule_literals.extend_from_slice(literals);
+        self.rule_starts
+            .push(u32::try_from(self.rule_literals.len()).expect("literals fit in 32 bits"));
     }
 
+    /// Two literals that agree: an even number of them hold.
     fn equal(&mut self, origin: Origin, x: Option<i32>, y: Option<i32>) {
         if let (Some(x), Some(y)) = (x, y) {
             if x != y {
-                self.add(origin, &[&[-x, y], &[x, -y]]);
+                self.add(origin, &[x, y]);
             }
         }
     }
@@ -313,25 +339,11 @@ impl<'a> Problem<'a> {
         ) else {
             return;
         };
-        let known = [ca, cb, da, db];
         // c lies between a and b when exactly one of a and b is below it; so does d.
         // Nesting or stacking puts both or neither between: the parity is even.
-        let clauses: Vec<[i32; 4]> = (0..16u32)
-            .filter(|bits| bits.count_ones() % 2 == 1)
-            .map(|bits| {
-                std::array::from_fn(|i| {
-                    if bits & (8 >> i) != 0 {
-                        -known[i]
-                    } else {
-                        known[i]
-                    }
-                })
-            })
-            .collect();
-        let slices: Vec<&[i32]> = clauses.iter().map(<[i32; 4]>::as_slice).collect();
         self.add(
             Origin::new("taco-taco", &[a, b, c, d], first.index),
-            &slices,
+            &[ca, cb, da, db],
         );
     }
 
@@ -381,21 +393,23 @@ impl<'a> Problem<'a> {
         }
     }
 
-    /// The regions holding both faces of a pair, each with the two faces' places among
-    /// its faces.
-    fn shared(&self, (f, g): Pair, out: &mut Vec<(u32, u32, u32)>) {
+    /// The regions holding both faces of a pair, by its variable, each with the faces'
+    /// places among its faces, `upper` first.
+    fn shared(&self, variable: usize, (upper, lower): Pair, out: &mut Vec<(u32, u32, u32)>) {
         out.clear();
-        let (a, b) = (&self.holding[f as usize], &self.holding[g as usize]);
-        // A merge whose steps take no branch: each side moves on when it is not ahead.
-        let (mut i, mut j) = (0, 0);
-        while i < a.len() && j < b.len() {
-            let ((x, k), (y, m)) = (a[i], b[j]);
-            if x == y {
-                out.push((x, k, m));
-            }
-            i += usize::from(x <= y);
-            j += usize::from(y <= x);
+        let index = self.bucket[variable - 1];
+        if index == u32::MAX {
+            return;
         }
+        let (u, l) = (upper as usize, lower as usize);
+        let first = self.paper.footprint[u] <= self.paper.footprint[l];
+        let (ru, rl) = (self.rank[u], self.rank[l]);
+        let entries = &self.buckets[self.bucket_starts[index as usize] as usize
+            ..self.bucket_starts[index as usize + 1] as usize];
+        out.extend(entries.iter().map(|&[r, a, b]| {
+            let (at_u, at_l) = if first { (a, b) } else { (b, a) };
+            (r, at_u + ru, at_l + rl)
+        }));
     }
 
     /// A cycle's three literals, putting f above g, g above h and h above f, with
@@ -412,8 +426,8 @@ impl<'a> Problem<'a> {
 enum Reason {
     /// A choice, or a required order.
     Given,
-    /// A clause, by index.
-    Clause(u32),
+    /// A rule, by index.
+    Rule(u32),
     /// A cycle of three faces, f < g < h.
     Cycle([u32; 3]),
 }
@@ -424,18 +438,24 @@ struct Solver<'p, 'a> {
     values: Vec<i8>,
     reasons: Vec<Reason>,
     trail: Vec<i32>,
+    /// Where each variable's rules start in `containing`.
     containing_starts: Vec<u32>,
     containing: Vec<u32>,
     orders: Vec<Orders>,
+    /// The regions with orders known but not closed yet, and whether each region is.
+    dirty: Vec<u32>,
+    is_dirty: Vec<bool>,
     scratch: Vec<(u32, u32, u32)>,
     lowers: Vec<u64>,
-    uppers: Vec<usize>,
+    raised: Vec<u64>,
 }
 
-/// The orders known among a region's faces, closed under transitivity, as bits: row
-/// `x` of `below` holds the faces below face `x`, and of `above` those above it.
+/// The orders among a region's faces, as bits. Row `x` of `known` holds the faces below
+/// face `x` whose orders hold; `below` and `above` hold those closed under transitivity.
+/// The two agree once propagation ends.
 struct Orders {
     words: usize,
+    known: Vec<u64>,
     above: Vec<u64>,
     below: Vec<u64>,
 }
@@ -445,6 +465,7 @@ impl Orders {
         let words = size.div_ceil(64);
         Orders {
             words,
+            known: vec![0; size * words],
             above: vec![0; size * words],
             below: vec![0; size * words],
         }
@@ -454,30 +475,43 @@ impl Orders {
         self.below[x * self.words + y / 64] >> (y % 64) & 1 == 1
     }
 
-    fn set(&mut self, x: usize, y: usize) {
-        self.below[x * self.words + y / 64] |= 1 << (y % 64);
-        self.above[y * self.words + x / 64] |= 1 << (x % 64);
-    }
-
     fn clear(&mut self, x: usize, y: usize) {
-        self.below[x * self.words + y / 64] &= !(1 << (y % 64));
+        let bit = !(1 << (y % 64));
+        self.known[x * self.words + y / 64] &= bit;
+        self.below[x * self.words + y / 64] &= bit;
         self.above[y * self.words + x / 64] &= !(1 << (x % 64));
     }
 }
 
 /// The set bits of some words, in increasing order.
-fn bits(words: &[u64]) -> impl Iterator<Item = usize> + '_ {
-    words.iter().enumerate().flat_map(|(w, &word)| {
-        let mut rest = word;
-        std::iter::from_fn(move || {
-            if rest == 0 {
-                return None;
-            }
-            let bit = rest.trailing_zeros() as usize;
-            rest &= rest - 1;
-            Some(w * 64 + bit)
-        })
-    })
+struct Bits<'w> {
+    words: &'w [u64],
+    word: usize,
+    rest: u64,
+}
+
+impl<'w> Bits<'w> {
+    fn new(words: &'w [u64]) -> Bits<'w> {
+        Bits {
+            words,
+            word: 0,
+            rest: words.first().copied().unwrap_or(0),
+        }
+    }
+}
+
+impl Iterator for Bits<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.rest == 0 {
+            self.word += 1;
+            self.rest = *self.words.get(self.word)?;
+        }
+        let bit = self.rest.trailing_zeros() as usize;
+        self.rest &= self.rest - 1;
+        Some(self.word * 64 + bit)
+    }
 }
 
 /// A variable as a positive literal.
@@ -485,27 +519,23 @@ fn signed(variable: usize) -> i32 {
     i32::try_from(variable).expect("variables fit in 31 bits")
 }
 
-fn slot(literal: i32) -> usize {
-    2 * literal.unsigned_abs() as usize + usize::from(literal < 0)
-}
-
 impl<'p, 'a> Solver<'p, 'a> {
     fn new(problem: &'p Problem<'a>) -> Self {
         let variables = problem.variables() + 1;
-        let mut starts = vec![0u32; 2 * variables + 1];
-        for &literal in &problem.clause_literals {
-            starts[slot(literal) + 1] += 1;
+        let mut starts = vec![0u32; variables + 1];
+        for &literal in &problem.rule_literals {
+            starts[literal.unsigned_abs() as usize + 1] += 1;
         }
-        for i in 0..2 * variables {
-            starts[i + 1] += starts[i];
+        for v in 0..variables {
+            starts[v + 1] += starts[v];
         }
         let mut fill = starts.clone();
-        let mut containing = vec![0u32; problem.clause_literals.len()];
-        for index in 0..u32::try_from(problem.origins.len()).expect("clauses fit in 32 bits") {
-            for &literal in problem.clause(index) {
-                let s = slot(literal);
-                containing[fill[s] as usize] = index;
-                fill[s] += 1;
+        let mut containing = vec![0u32; problem.rule_literals.len()];
+        for index in 0..u32::try_from(problem.constraints.len()).expect("rules fit in 32 bits") {
+            for &literal in problem.rule(index) {
+                let v = literal.unsigned_abs() as usize;
+                containing[fill[v] as usize] = index;
+                fill[v] += 1;
             }
         }
         Solver {
@@ -520,9 +550,11 @@ impl<'p, 'a> Solver<'p, 'a> {
                 .iter()
                 .map(|faces| Orders::new(faces.len()))
                 .collect(),
+            dirty: vec![],
+            is_dirty: vec![false; problem.regions.len()],
             scratch: vec![],
             lowers: vec![],
-            uppers: vec![],
+            raised: vec![],
         }
     }
 
@@ -531,83 +563,125 @@ impl<'p, 'a> Solver<'p, 'a> {
         if literal > 0 { value } else { -value }
     }
 
+    /// Make a literal hold, and mark its order in every region holding its two faces.
     fn assign(&mut self, literal: i32, reason: Reason) {
         let variable = literal.unsigned_abs() as usize;
         self.values[variable] = if literal > 0 { 1 } else { -1 };
         self.reasons[variable] = reason;
         self.trail.push(literal);
-    }
-
-    /// Deduce from the trail after `start`; return a constraint that fails, if any.
-    fn propagate(&mut self, start: usize) -> Option<Reason> {
-        let mut head = start;
         let mut regions = std::mem::take(&mut self.scratch);
-        let mut conflict = None;
-        'trail: while head < self.trail.len() {
-            let falsified = -self.trail[head];
-            head += 1;
-            let s = slot(falsified);
-            for k in self.containing_starts[s]..self.containing_starts[s + 1] {
-                let index = self.containing[k as usize];
-                let mut open = None;
-                let mut satisfied = false;
-                for &literal in self.problem.clause(index) {
-                    let value = self.value(literal);
-                    if value > 0 || (value == 0 && open.is_some()) {
-                        satisfied = true; // satisfied, or two literals still open
-                        break;
-                    }
-                    if value == 0 {
-                        open = Some(literal);
-                    }
-                }
-                if !satisfied {
-                    match open {
-                        None => {
-                            conflict = Some(Reason::Clause(index));
-                            break 'trail;
-                        }
-                        Some(literal) => self.assign(literal, Reason::Clause(index)),
-                    }
-                }
-            }
-            let (upper, lower) = self.problem.pair(-falsified);
-            self.problem.shared((upper, lower), &mut regions);
-            for &(r, u, l) in &regions {
-                if let Some(found) =
-                    self.close(r as usize, (upper, u as usize), (lower, l as usize))
-                {
-                    conflict = Some(found);
-                    break 'trail;
-                }
+        self.problem
+            .shared(variable, self.problem.pair(literal), &mut regions);
+        for &(r, u, l) in &regions {
+            let orders = &mut self.orders[r as usize];
+            orders.known[u as usize * orders.words + l as usize / 64] |= 1 << (l % 64);
+            if !self.is_dirty[r as usize] {
+                self.is_dirty[r as usize] = true;
+                self.dirty.push(r);
             }
         }
         self.scratch = regions;
-        conflict
     }
 
-    /// Add to a region that `upper` lies above `lower`, with every order it implies
-    /// there; return a cycle that closes, if any.
-    fn close(
-        &mut self,
-        r: usize,
-        (upper, u): (u32, usize),
-        (lower, l): (u32, usize),
-    ) -> Option<Reason> {
-        let faces = &self.problem.regions[r];
+    /// Deduce from the trail after `start` and the orders known but not closed; return
+    /// a constraint that fails, if any.
+    fn propagate(&mut self, start: usize) -> Option<Reason> {
+        let mut head = start;
+        loop {
+            while head < self.trail.len() {
+                let variable = self.trail[head].unsigned_abs() as usize;
+                head += 1;
+                if let Some(conflict) = self.rules(variable) {
+                    return Some(conflict);
+                }
+            }
+            let r = self.dirty.pop()?;
+            let r = r as usize;
+            self.is_dirty[r] = false;
+            let words = self.orders[r].words;
+            for u in 0..self.problem.regions[r].len() {
+                for w in 0..words {
+                    let at = u * words + w;
+                    let orders = &self.orders[r];
+                    let mut open = orders.known[at] & !orders.below[at];
+                    while open != 0 {
+                        let l = w * 64 + open.trailing_zeros() as usize;
+                        open &= open - 1;
+                        if let Some(conflict) = self.close(r, u, l) {
+                            return Some(conflict);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Propagation through the rules that a variable just assigned appears in: a rule
+    /// with one literal open sets it to make the parity even.
+    fn rules(&mut self, variable: usize) -> Option<Reason> {
+        for k in self.containing_starts[variable]..self.containing_starts[variable + 1] {
+            let index = self.containing[k as usize];
+            let mut open = None;
+            let mut odd = false;
+            let mut several = false;
+            for &literal in self.problem.rule(index) {
+                match self.value(literal) {
+                    0 => {
+                        several = open.is_some();
+                        if several {
+                            break;
+                        }
+                        open = Some(literal);
+                    }
+                    value => odd ^= value > 0,
+                }
+            }
+            if several {
+                continue;
+            }
+            match open {
+                None if odd => return Some(Reason::Rule(index)),
+                None => {}
+                Some(literal) => {
+                    let literal = if odd { literal } else { -literal };
+                    self.assign(literal, Reason::Rule(index));
+                }
+            }
+        }
+        None
+    }
+
+    /// Close a region's orders under a known one, face `u` above face `l` by their
+    /// places; return a cycle that closes, if any.
+    ///
+    /// The closed orders hold, so a new order that closes a cycle shows as a literal
+    /// already false. Every other new order is either known or a new literal.
+    fn close(&mut self, r: usize, u: usize, l: usize) -> Option<Reason> {
         if self.orders[r].holds(u, l) {
             return None;
         }
+        let problem = self.problem;
+        let faces = &problem.regions[r];
         let words = self.orders[r].words;
-        // Every face at or above `upper` goes above every face at or below `lower`.
+        // Every face at or above `u` and not yet above `l` goes above every face at or
+        // below `l` and not yet below `u`; the other orders hold already.
         let mut lowers = std::mem::take(&mut self.lowers);
-        let mut uppers = std::mem::take(&mut self.uppers);
+        let mut raised = std::mem::take(&mut self.raised);
         lowers.clear();
-        lowers.extend_from_slice(&self.orders[r].below[l * words..(l + 1) * words]);
-        lowers[l / 64] |= 1 << (l % 64);
-        uppers.clear();
-        uppers.push(u);
-        uppers.extend(bits(&self.orders[r].above[u * words..(u + 1) * words]));
+        raised.clear();
+        {
+            let orders = &self.orders[r];
+            let (row_l, row_u) = (l * words, u * words);
+            lowers.extend_from_slice(&orders.below[row_l..row_l + words]);
+            lowers[l / 64] |= 1 << (l % 64);
+            raised.extend_from_slice(&orders.above[row_u..row_u + words]);
+            raised[u / 64] |= 1 << (u % 64);
+            for w in 0..words {
+                lowers[w] &= !orders.below[row_u + w];
+                raised[w] &= !orders.above[row_l + w];
+            }
+        }
+        let (upper, lower) = (faces[u], faces[l]);
         let triple = |x: usize, y: usize| {
             let mut t = if x == u {
                 [upper, lower, faces[y]]
@@ -620,70 +694,66 @@ impl<'p, 'a> Solver<'p, 'a> {
             t
         };
         let mut found = None;
-        'uppers: for &x in &uppers {
+        // Face `u` comes first: each other face's new orders cite `u`'s, which must hold
+        // before them.
+        let rest = Bits::new(&raised).filter(|&x| x != u);
+        'uppers: for x in std::iter::once(u).chain(rest) {
             let row = x * words;
             for (w, &low) in lowers.iter().enumerate() {
-                let orders = &self.orders[r];
-                let mut new = low & !orders.below[row + w];
-                while new != 0 {
-                    let y = w * 64 + new.trailing_zeros() as usize;
-                    new &= new - 1;
-                    if y == x || orders.holds(y, x) {
+                let orders = &mut self.orders[r];
+                let new = low & !orders.below[row + w];
+                orders.below[row + w] |= new;
+                let mut unknown = new & !orders.known[row + w];
+                while unknown != 0 {
+                    let y = w * 64 + unknown.trailing_zeros() as usize;
+                    unknown &= unknown - 1;
+                    let literal = problem
+                        .literal(faces[x], faces[y])
+                        .expect("faces of a region overlap");
+                    if self.value(literal) == 0 {
+                        self.assign(literal, Reason::Cycle(triple(x, y)));
+                    } else {
+                        // Every order set must hold for undoing to clear it: drop the
+                        // ones not reached.
+                        self.orders[r].below[row + w] &= !(unknown | 1 << (y % 64));
                         found = Some(Reason::Cycle(triple(x, y)));
                         break 'uppers;
                     }
                 }
             }
-            // The faces below come in order, so the search for each resumes where the
-            // last one ended among the neighbors of face x.
-            let neighbors = self.problem.neighbors_of(faces[x]);
-            let mut start = 0;
-            for (w, &low) in lowers.iter().enumerate() {
-                let mut new = low & !self.orders[r].below[row + w];
-                while new != 0 {
-                    let y = w * 64 + new.trailing_zeros() as usize;
-                    new &= new - 1;
-                    self.orders[r].set(x, y);
-                    if x == u && y == l {
-                        continue;
-                    }
-                    start = gallop(neighbors, start, faces[y]);
-                    let literal = neighbors[start].1;
-                    match self.value(literal) {
-                        0 => self.assign(literal, Reason::Cycle(triple(x, y))),
-                        -1 => {
-                            found = Some(Reason::Cycle(triple(x, y)));
-                            break 'uppers;
-                        }
-                        _ => {}
-                    }
+        }
+        if found.is_none() {
+            let above = &mut self.orders[r].above;
+            for y in Bits::new(&lowers) {
+                for (word, &bits) in above[y * words..(y + 1) * words].iter_mut().zip(&raised) {
+                    *word |= bits;
                 }
             }
         }
         self.lowers = lowers;
-        self.uppers = uppers;
+        self.raised = raised;
         found
     }
 
     fn literals(&self, reason: Reason) -> Vec<i32> {
         match reason {
             Reason::Given => vec![],
-            Reason::Clause(index) => self.problem.clause(index).to_vec(),
+            Reason::Rule(index) => self.problem.rule(index).to_vec(),
             Reason::Cycle(faces) => self.problem.cycle(faces).to_vec(),
         }
     }
 
     /// The constraints and required literals behind a conflict at the root.
     fn explain(&self, conflict: Reason) -> (Vec<Constraint>, Vec<Pair>) {
-        let mut clauses = BTreeSet::new();
+        let mut rules = BTreeSet::new();
         let mut cycles = BTreeSet::new();
         let mut required = BTreeSet::new();
         let mut seen = FxHashSet::default();
         let mut pending = vec![conflict];
         while let Some(reason) = pending.pop() {
             match reason {
-                Reason::Clause(index) => {
-                    clauses.insert(index);
+                Reason::Rule(index) => {
+                    rules.insert(index);
                 }
                 Reason::Cycle(faces) => {
                     cycles.insert(faces);
@@ -695,6 +765,10 @@ impl<'p, 'a> Solver<'p, 'a> {
                 if !seen.insert(variable) {
                     continue;
                 }
+                debug_assert!(
+                    self.values[variable] != 0,
+                    "a reason cites an open variable"
+                );
                 match self.reasons[variable] {
                     Reason::Given => {
                         required.insert(signed(variable) * i32::from(self.values[variable]));
@@ -704,11 +778,9 @@ impl<'p, 'a> Solver<'p, 'a> {
             }
         }
         let problem = self.problem;
-        let mut constraints: Vec<Constraint> = clauses
+        let mut constraints: Vec<Constraint> = rules
             .iter()
-            .map(|&index| {
-                problem.constraints[problem.origins[index as usize] as usize].constraint()
-            })
+            .map(|&index| problem.constraints[index as usize].constraint())
             .collect();
         constraints.extend(cycles.iter().map(|faces| Constraint {
             kind: "transitivity",
@@ -732,7 +804,7 @@ impl<'p, 'a> Solver<'p, 'a> {
             self.values[variable] = 0;
             self.reasons[variable] = Reason::Given;
             let pair = self.problem.paper.overlapping[variable - 1];
-            self.problem.shared(pair, &mut regions);
+            self.problem.shared(variable, pair, &mut regions);
             for &(r, a, b) in &regions {
                 let (a, b) = (a as usize, b as usize);
                 self.orders[r as usize].clear(a, b);
@@ -741,6 +813,10 @@ impl<'p, 'a> Solver<'p, 'a> {
         }
         self.trail.truncate(mark);
         self.scratch = regions;
+        // Orders known but not closed past a conflict belong to literals just undone.
+        for r in self.dirty.drain(..) {
+            self.is_dirty[r as usize] = false;
+        }
     }
 
     /// Complete the assignment, choosing preferred literals first; `None` when the
@@ -857,36 +933,44 @@ pub fn stack(
     }
 }
 
-/// The constraints a stacking breaks: each clause it meets with no order, and three
-/// faces of a region that it stacks in a cycle, one cycle for each region.
+/// The constraints a stacking breaks: each rule with a pair it leaves out or an odd
+/// number of literals that hold, and three faces of a region that it stacks in a cycle,
+/// one cycle for each region.
 ///
-/// `above` lists orders as `(upper, lower)`. A pair it leaves out takes neither order.
+/// `above` lists orders as `(upper, lower)`. A pair it leaves out takes neither order,
+/// and a pair it lists both ways breaks no rule.
 ///
 /// # Panics
 ///
-/// When the clauses number 2³² or more.
+/// When the rules number 2³² or more.
 #[must_use]
 pub fn violations(problem: &Problem<'_>, above: &[Pair]) -> Vec<Constraint> {
     let given: FxHashSet<i32> = above
         .iter()
         .filter_map(|&(u, l)| problem.literal(u, l))
         .collect();
-    let mut origins = BTreeSet::new();
-    for index in 0..u32::try_from(problem.origins.len()).expect("clauses fit in 32 bits") {
-        if !problem
-            .clause(index)
-            .iter()
-            .any(|literal| given.contains(literal))
-        {
-            origins.insert(problem.origins[index as usize]);
+    let mut found: Vec<Constraint> = vec![];
+    for index in 0..u32::try_from(problem.constraints.len()).expect("rules fit in 32 bits") {
+        let mut odd = false;
+        let mut open = false;
+        let mut both = false;
+        for literal in problem.rule(index) {
+            match (given.contains(literal), given.contains(&-literal)) {
+                (true, true) => both = true,
+                (true, false) => odd = !odd,
+                (false, false) => open = true,
+                (false, true) => {}
+            }
+        }
+        if !both && (open || odd) {
+            found.push(problem.constraints[index as usize].constraint());
         }
     }
-    let mut found: Vec<Constraint> = origins
-        .into_iter()
-        .map(|origin| problem.constraints[origin as usize].constraint())
-        .collect();
     let mut cycles = BTreeSet::new();
-    for faces in &problem.regions {
+    for region in &problem.regions {
+        let mut faces = region.clone();
+        faces.sort_unstable();
+        let faces = &faces;
         let beats = |f: u32, g: u32| {
             problem
                 .literal(f, g)
@@ -947,19 +1031,6 @@ fn cycle_among(faces: &[u32], beats: impl Fn(u32, u32) -> bool) -> Option<[u32; 
     None
 }
 
-/// The first place at or after `start` among sorted neighbors whose face is not below
-/// `face`: steps that double from `start`, then a binary search within the last step.
-fn gallop(neighbors: &[(u32, i32)], start: usize, face: u32) -> usize {
-    let mut step = 1;
-    let mut low = start;
-    while low + step < neighbors.len() && neighbors[low + step].0 < face {
-        low += step;
-        step *= 2;
-    }
-    let high = (low + step + 1).min(neighbors.len());
-    low + neighbors[low..high].partition_point(|&(g, _)| g < face)
-}
-
 /// Whether some face repeats among four.
 fn repeats(faces: &[u32; 4]) -> bool {
     (0..4).any(|i| (i + 1..4).any(|j| faces[i] == faces[j]))
@@ -1000,6 +1071,121 @@ fn overlapping_stretches(
         pairs.extend(active.iter().map(|&j| (i.min(j), i.max(j))));
         active.push(i);
     }
-    pairs.sort_unstable();
-    pairs
+    sorted_pairs(&pairs, group.len())
+}
+
+/// Pairs of indices below `size`, sorted: a counting sort by the second, then a stable
+/// one by the first.
+fn sorted_pairs(pairs: &[(usize, usize)], size: usize) -> Vec<(usize, usize)> {
+    let mut order = pairs.to_vec();
+    for key in [|p: &(usize, usize)| p.1, |p: &(usize, usize)| p.0] {
+        let mut starts = vec![0usize; size + 1];
+        for p in pairs {
+            starts[key(p) + 1] += 1;
+        }
+        for k in 0..size {
+            starts[k + 1] += starts[k];
+        }
+        let from = order.clone();
+        for p in &from {
+            order[starts[key(p)]] = *p;
+            starts[key(p)] += 1;
+        }
+    }
+    order
+}
+
+/// The regions that faces share, in a bucket for each pair of their footprints: each
+/// pair of overlapping faces' bucket, where each bucket starts, and the buckets. An entry
+/// is a region and where each footprint's faces start among its faces.
+fn buckets(
+    paper: &Folded,
+    covers: &[Vec<u32>],
+    rows: &[u32],
+    neighbors: &[(u32, i32)],
+) -> (Vec<u32>, Vec<u32>, Vec<[u32; 3]>) {
+    let count = paper.stacked.len();
+    let index = |n: usize| u32::try_from(n).expect("entries fit in 32 bits");
+    // Each footprint's regions, with where its faces start among each region's faces.
+    let mut starts = vec![0u32; count + 1];
+    for cover in covers {
+        for &k in cover {
+            starts[k as usize + 1] += 1;
+        }
+    }
+    for k in 0..count {
+        starts[k + 1] += starts[k];
+    }
+    let mut fill = starts.clone();
+    let mut holding = vec![(0u32, 0u32); starts[count] as usize];
+    let mut offsets: Vec<Vec<u32>> = Vec::with_capacity(covers.len());
+    for (r, cover) in covers.iter().enumerate() {
+        let mut at = 0;
+        let mut offset = Vec::with_capacity(cover.len());
+        for &k in cover {
+            holding[fill[k as usize] as usize] = (index(r), at);
+            fill[k as usize] += 1;
+            offset.push(at);
+            at += index(paper.stacked[k as usize].len());
+        }
+        offsets.push(offset);
+    }
+    let mut bucket = vec![u32::MAX; paper.overlapping.len()];
+    let mut starts_of = vec![0u32];
+    let mut entries: Vec<[u32; 3]> = vec![];
+    // Each footprint's partners of no lesser index, by the order they first appear.
+    let mut slot = vec![u32::MAX; count];
+    let mut partners: Vec<u32> = vec![];
+    let mut sizes: Vec<u32> = vec![];
+    for k in 0..count {
+        let regions = &holding[starts[k] as usize..starts[k + 1] as usize];
+        partners.clear();
+        sizes.clear();
+        for &(r, _) in regions {
+            let cover = &covers[r as usize];
+            for &m in &cover[cover.partition_point(|&m| (m as usize) < k)..] {
+                if slot[m as usize] == u32::MAX {
+                    slot[m as usize] = index(partners.len());
+                    partners.push(m);
+                    sizes.push(0);
+                }
+                sizes[slot[m as usize] as usize] += 1;
+            }
+        }
+        let base = index(starts_of.len() - 1);
+        let first = entries.len();
+        let mut fill: Vec<usize> = Vec::with_capacity(sizes.len());
+        let mut end = first;
+        for &size in &sizes {
+            fill.push(end);
+            end += size as usize;
+            starts_of.push(index(end));
+        }
+        entries.resize(end, [0; 3]);
+        for &(r, at) in regions {
+            let cover = &covers[r as usize];
+            let from = cover.partition_point(|&m| (m as usize) < k);
+            for (j, &m) in cover.iter().enumerate().skip(from) {
+                let s = slot[m as usize] as usize;
+                entries[fill[s]] = [r, at, offsets[r as usize][j]];
+                fill[s] += 1;
+            }
+        }
+        for &f in &paper.stacked[k] {
+            for &(g, literal) in
+                &neighbors[rows[f as usize] as usize..rows[f as usize + 1] as usize]
+            {
+                // A pair within the footprint, or with one of greater index: either way
+                // its bucket is this footprint's.
+                let m = paper.footprint[g as usize];
+                if slot[m as usize] != u32::MAX {
+                    bucket[literal.unsigned_abs() as usize - 1] = base + slot[m as usize];
+                }
+            }
+        }
+        for &m in &partners {
+            slot[m as usize] = u32::MAX;
+        }
+    }
+    (bucket, starts_of, entries)
 }

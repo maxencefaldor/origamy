@@ -425,12 +425,17 @@ mod tests {
 
     /// Open paper, a square of side 4 creased along segments.
     fn paper(segments: &[Ends]) -> Paper {
+        square(4, segments)
+    }
+
+    /// Open paper, a square of some side creased along segments.
+    fn square(side: i128, segments: &[Ends]) -> Paper {
         let tower = Tower::default();
         let square = vec![
             point(0, 0, &tower),
-            point(4, 0, &tower),
-            point(4, 4, &tower),
-            point(0, 4, &tower),
+            point(side, 0, &tower),
+            point(side, side, &tower),
+            point(0, side, &tower),
         ];
         let segments: Vec<(Point, Point)> = segments
             .iter()
@@ -559,5 +564,103 @@ mod tests {
             matches!(refused, CollapseError::Angles { .. }),
             "{refused:?}"
         );
+    }
+
+    /// A grid of unit squares, `size` by `size`, with every crease of the grid.
+    fn grid(size: i128) -> Paper {
+        let lines: Vec<Ends> = (1..size)
+            .flat_map(|k| [((k, 0), (k, size)), ((0, k), (size, k))])
+            .collect();
+        square(size, &lines)
+    }
+
+    /// Assignments of the grid that meet Maekawa's theorem at every vertex: the bits
+    /// set the horizontal creases and the bottom row of vertical ones, and each vertex
+    /// then sets the vertical crease above it.
+    fn maekawa(paper: &Paper, size: i128, bits: &[bool]) -> Vec<Kind> {
+        let at = |n: &Number| (0..=size).find(|&k| *n == Number::integer(k)).unwrap();
+        let ends: Vec<((i128, i128), (i128, i128))> = paper
+            .creases
+            .iter()
+            .map(|([u, v], _)| {
+                let (p, q) = (&paper.vertices[*u as usize], &paper.vertices[*v as usize]);
+                let (a, b) = ((at(&p.x), at(&p.y)), (at(&q.x), at(&q.y)));
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        let crease =
+            |a: (i128, i128), b: (i128, i128)| ends.iter().position(|&e| e == (a, b)).unwrap();
+        let kind = |bit: bool| if bit { Kind::Mountain } else { Kind::Valley };
+        let mut kinds = vec![Kind::Flat; paper.creases.len()];
+        let mut bits = bits.iter().copied();
+        for j in 1..size {
+            for i in 0..size {
+                kinds[crease((i, j), (i + 1, j))] = kind(bits.next().unwrap());
+            }
+        }
+        for i in 1..size {
+            kinds[crease((i, 0), (i, 1))] = kind(bits.next().unwrap());
+            for j in 1..size {
+                let mountains = [
+                    crease((i - 1, j), (i, j)),
+                    crease((i, j), (i + 1, j)),
+                    crease((i, j - 1), (i, j)),
+                ]
+                .iter()
+                .filter(|&&k| kinds[k] == Kind::Mountain)
+                .count();
+                // Three mountains and a valley, or three valleys and a mountain.
+                kinds[crease((i, j), (i, j + 1))] = kind(mountains % 2 == 0);
+            }
+        }
+        kinds
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn grids_stack_validly_or_refuse(
+            bits in proptest::collection::vec(proptest::bool::ANY, 15),
+            fixed in 0u32..16,
+        ) {
+            let paper = grid(4);
+            let kinds = maekawa(&paper, 4, &bits);
+            match collapse(&paper, &kinds, fixed, 100_000) {
+                Ok(done) => {
+                    let folded = Folded::new(
+                        paper.tower.clone(),
+                        paper.vertices.clone(),
+                        paper.corners.clone(),
+                        done.folded.places.clone(),
+                        paper.creases.clone(),
+                    );
+                    proptest::prop_assert!(violations(&Problem::new(&folded), &done.above).is_empty());
+                }
+                Err(refused) => proptest::prop_assert!(
+                    matches!(refused, CollapseError::Stack(StackError::NoStacking { .. })),
+                    "{refused:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn a_dead_end_inside_a_closing_leaves_no_order_behind() {
+        // A six by six grid whose search meets a cycle partway through closing a row,
+        // then folds once it turns back.
+        let paper = grid(6);
+        let bits: Vec<bool> = "01011110000111110001001011011001110"
+            .chars()
+            .map(|c| c == '1')
+            .collect();
+        let kinds = maekawa(&paper, 6, &bits);
+        let done = collapse(&paper, &kinds, 25, 100_000).unwrap();
+        let folded = Folded::new(
+            paper.tower.clone(),
+            paper.vertices.clone(),
+            paper.corners.clone(),
+            done.folded.places.clone(),
+            paper.creases.clone(),
+        );
+        assert!(violations(&Problem::new(&folded), &done.above).is_empty());
     }
 }
