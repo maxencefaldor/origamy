@@ -55,7 +55,7 @@ The exact kernel, `packages/origamy-kernel`, is a Rust core with Python bindings
 
 | Path | Holds |
 | --- | --- |
-| `crates/origamy-kernel` | The core, with no Python: exact numbers and geometry, the overlay of footprints, creasing, collapsing and the layer solver |
+| `crates/origamy-kernel` | The core, with no Python: exact numbers and geometry, reading crease patterns, the overlay of footprints, creasing, collapsing and the layer solver |
 | `crates/origamy-kernel-py` | The bindings, which make the core the module `origamy_kernel._core` |
 | `src/origamy_kernel` | The Python package: the core's `State` and functions, typed by `_core.pyi`, and the data they read and return |
 

@@ -22,6 +22,7 @@ use origamy_kernel::folded::{Folded, Pair, creases as creases_of, edges as edges
 use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
 use origamy_kernel::lines::{Along, along as creases_along};
+use origamy_kernel::reading::{Reading, Unexplained, read};
 use origamy_kernel::snap::{Bounds, explain as explain_float};
 use origamy_kernel::stacking::{
     Constraint, Problem, StackError, stack as solve, violations as broken,
@@ -225,6 +226,103 @@ fn explain(
 /// What explains a float: its fit, its rational part and its root's coefficient, and
 /// the integer under the root.
 type Explained = (f64, (BigInt, BigInt), (BigInt, BigInt), u32);
+
+/// What reading corners came to: the radicands of the levels their roots added, each
+/// corner's exact point, and the coordinate and floats of a corner nothing explains.
+type ReadData = (Vec<NumberData>, Vec<PointData>, Option<(f64, f64, f64)>);
+
+/// The exact point each corner of a crease pattern stands for, read from floats.
+///
+/// A corner whose coordinates both snap surely takes them. Any other corner lies where
+/// two lines of creases cross, each through exact corners. Snapping within a looser fit
+/// then finds the corners left, and lets crossings find more, until none is left. A
+/// root that no level of the tower holds adds a level, in the order reading meets it.
+/// Explaining and crossings run on every core.
+///
+/// Args:
+///     radicands: The tower's radicands, level 1 first.
+///     keys: Each corner's floats rounded, so that one corner written twice reads as
+///         one, which straight runs and crossings measure.
+///     floats: Each corner's floats as the file first gives them, which snap.
+///     edges: The creases between corners, as indices into `keys`.
+///     tolerance: How far a coordinate may lie from the number it snaps to.
+///     sure: The fit reading takes first, under which a fraction explains a float
+///         surely, so that no root is tried.
+///     fit: The fit reading loosens to, and the fit a snapped slope needs.
+///     near: How far apart two float points may lie and still be one.
+///     denominator: The largest denominator of a fraction.
+///     roots: The integers whose square roots a number may hold.
+///     scale: The weight of a relation's error against its integers.
+///     size: The largest integer of a number with a root.
+///
+/// Returns:
+///     The radicands of the levels the reading added, level by level; each corner's
+///     exact point, none when a corner is unexplained; and for the first corner, in
+///     order by key, that snaps to no exact point where no two lines of creases cross,
+///     its coordinate that snaps to none and its floats.
+///
+/// Raises:
+///     ValueError: A float is not finite, the keys and floats differ in number, an
+///         edge names no corner, or a root, the scale or the size is not positive.
+#[pyfunction]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each bound is a documented input"
+)]
+#[allow(clippy::needless_pass_by_value)]
+fn read_corners(
+    py: Python<'_>,
+    radicands: Vec<NumberData>,
+    keys: Vec<(f64, f64)>,
+    floats: Vec<(f64, f64)>,
+    edges: Vec<(u32, u32)>,
+    tolerance: f64,
+    sure: f64,
+    fit: f64,
+    near: f64,
+    denominator: u64,
+    roots: Vec<u32>,
+    scale: i64,
+    size: i64,
+) -> PyResult<ReadData> {
+    let finite = |&(x, y): &(f64, f64)| x.is_finite() && y.is_finite();
+    let count = u32::try_from(keys.len()).unwrap_or(u32::MAX);
+    if !(keys.iter().all(finite) && floats.iter().all(finite))
+        || keys.len() != floats.len()
+        || edges.iter().any(|&(u, v)| u >= count || v >= count)
+        || roots.contains(&0)
+        || scale <= 0
+        || size <= 0
+    {
+        return Err(PyValueError::new_err(
+            "reading needs finite floats, a key and floats for each corner, edges between \
+             corners, and positive roots, scale and size",
+        ));
+    }
+    let mut tower = tower(radicands)?;
+    let known = tower.radicands().len();
+    let reading = Reading {
+        bounds: Bounds {
+            tolerance,
+            sure,
+            denominator,
+            roots,
+            scale,
+            size,
+        },
+        fit,
+        near,
+    };
+    let outcome = py.detach(|| read(&keys, &floats, &edges, &reading, &mut tower));
+    let added = tower.radicands()[known..].iter().map(number_data).collect();
+    Ok(match outcome {
+        Ok(points) => (added, points.iter().map(point_data).collect(), None),
+        Err(Unexplained {
+            value,
+            corner: (x, y),
+        }) => (added, vec![], Some((value, x, y))),
+    })
+}
 
 /// What a stacking came to: an outcome's name, the stacking, and the facts of a
 /// refusal.
@@ -625,5 +723,6 @@ impl State {
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<State>()?;
     module.add_function(wrap_pyfunction!(explain, module)?)?;
+    module.add_function(wrap_pyfunction!(read_corners, module)?)?;
     Ok(())
 }

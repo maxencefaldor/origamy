@@ -14,19 +14,17 @@ angles, with golden ratios, and on crossings of their creases all read exactly.
 """
 
 import json
-from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cmp_to_key
-from math import hypot, inf
 from pathlib import Path
 from typing import Final, NoReturn
 
 import origamy_kernel
 from origamy import kernel
-from origamy.field import ONE, ZERO, Number, remembered
-from origamy.geometry import Line, Point, orientation
+from origamy.field import ZERO, Number, extend, remembered
+from origamy.geometry import Point, orientation
 from origamy.rules import RefusalError
 from origamy.state import State
 
@@ -127,14 +125,24 @@ class CreasePattern:
         def scaled(point: tuple[float, float]) -> _Float:
             return ((point[0] - left) / size, (point[1] - bottom) / size)
 
-        segments = [(scaled(p), scaled(q)) for _, p, q in lines]
-        keys = [(_key(p), _key(q)) for p, q in segments]
-        exact = _exact(segments, keys, tolerance)
+        index: dict[_Float, int] = {}
+        floats: list[_Float] = []
+        edges: list[tuple[int, int]] = []
+        for _, p, q in lines:
+            ends = []
+            for end in (scaled(p), scaled(q)):
+                key = _key(end)
+                if key not in index:
+                    index[key] = len(floats)
+                    floats.append(end)
+                ends.append(index[key])
+            edges.append((ends[0], ends[1]))
+        exact = _exact(list(index), floats, edges, tolerance)
         width = snap((max(xs) - left) / size, tolerance)
         height = snap((max(ys) - bottom) / size, tolerance)
         kinds: dict[str, list[Segment]] = {"B": [], "V": [], "M": [], "F": []}
-        for (kind, _, _), (p, q) in zip(lines, keys, strict=True):
-            kinds[kind].append((exact[p], exact[q]))
+        for (kind, _, _), (u, v) in zip(lines, edges, strict=True):
+            kinds[kind].append((exact[u], exact[v]))
         corners = {end for edge in kinds["B"] for end in edge} or {
             Point(x, y) for x in (ZERO, width) for y in (ZERO, height)
         }
@@ -174,162 +182,48 @@ def _key(point: _Float) -> _Float:
 
 
 def _exact(
-    segments: list[tuple[_Float, _Float]],
-    keys: list[tuple[_Float, _Float]],
+    keys: list[_Float],
+    floats: list[_Float],
+    edges: list[tuple[int, int]],
     tolerance: float,
-) -> dict[_Float, Point]:
-    """The exact point of each segment's ends, keyed by `_key`, as `keys` gives them.
+) -> list[Point]:
+    """The exact point of each corner, which the kernel reads.
 
     A corner whose coordinates both snap surely, within `SURE`, takes them. Any other
     corner lies where two lines of creases cross, each through exact corners; corners
-    found so let more be found. Snapping within `FIT` then finds the corners left, and
-    lets crossings find more, until none is left.
+    found so let more be found. A line runs from the corner along creases that continue
+    straight, in both directions, through two exact corners on its way. Failing two such
+    lines, a crease to an exact corner gives a line too, when its slope snaps to an
+    exact number. Snapping within `FIT` then finds the corners left, and lets crossings
+    find more, until none is left.
 
     Raises:
         ValueError: A corner snaps to no exact point, and no two lines of creases
             through exact corners cross there.
     """
-    candidates = _explanations((x for p, q in segments for x in (*p, *q)), tolerance)
-    explanations: dict[float, tuple[float, Number] | None] = {}
-
-    def snapped(value: float, fit: float) -> Number | None:
-        if value not in explanations:
-            explanations[value] = _number(candidates[value])
-        found = explanations[value]
-        return found[1] if found is not None and found[0] <= fit else None
-
-    near: dict[_Float, set[_Float]] = defaultdict(set)
-    floats: dict[_Float, _Float] = {}
-    for (p, q), (kp, kq) in zip(segments, keys, strict=True):
-        near[kp].add(kq)
-        near[kq].add(kp)
-        floats.setdefault(kp, p)
-        floats.setdefault(kq, q)
-    exact: dict[_Float, Point] = {}
-    fit = SURE
-    while left := sorted(floats.keys() - exact.keys()):
-        found: dict[_Float, Point] = {}
-        for key in left:
-            x, y = floats[key]
-            if (sx := snapped(x, fit)) is not None and (
-                sy := snapped(y, fit)
-            ) is not None:
-                found[key] = Point(sx, sy)
-        if not found:
-            found = {
-                key: point
-                for key in left
-                if (point := _crossing(key, near, exact, tolerance)) is not None
-            }
-        if found:
-            exact |= found
-        elif fit < FIT:
-            fit = FIT
-        else:
-            x, y = floats[left[0]]
-            value = x if snapped(x, fit) is None else y
-            msg = (
-                f"the coordinate {value!r} lies within {tolerance} of no exact number, "
-                f"and no two lines of creases cross at ({x!r}, {y!r})"
-            )
-            raise ValueError(msg)
-    return exact
-
-
-def _crossing(
-    key: _Float,
-    near: dict[_Float, set[_Float]],
-    exact: dict[_Float, Point],
-    tolerance: float,
-) -> Point | None:
-    """Where two lines of creases through exact corners cross at a corner.
-
-    A line runs from the corner along creases that continue straight, in both
-    directions, through two exact corners on its way. Failing two such lines, a crease
-    to an exact corner gives a line too, when its slope snaps to an exact number.
-    """
-    lines: list[Line] = []
-    for line in _lines_through(key, near, exact, tolerance):
-        if any(line.parallel(other) for other in lines):
-            continue
-        lines.append(line)
-        if len(lines) == 2:  # noqa: PLR2004 - two lines make a point
-            point = lines[0].meet(lines[1])
-            x, y = point.floats() if point else (inf, inf)
-            if max(abs(x - key[0]), abs(y - key[1])) <= _NEAR:
-                return point
-            return None
-    return None
-
-
-def _lines_through(
-    key: _Float,
-    near: dict[_Float, set[_Float]],
-    exact: dict[_Float, Point],
-    tolerance: float,
-) -> Iterator[Line]:
-    """The lines of creases through a corner, those through two exact corners first."""
-    for start in sorted(near[key]):
-        known = {
-            exact[corner]
-            for direction in (start, _opposite(key, start, near[key]))
-            if direction is not None
-            for corner in _straight(key, direction, near)
-            if corner in exact
-        }
-        if len(known) >= 2:  # noqa: PLR2004 - two points make a line
-            yield Line.through(*sorted(known, key=Point.floats)[:2])
-    for start in sorted(near[key] & exact.keys()):
-        dx, dy = key[0] - start[0], key[1] - start[1]
-        steep = abs(dy) > abs(dx)
-        try:
-            slope = snap(dx / dy if steep else dy / dx, tolerance / hypot(dx, dy))
-        except ValueError:
-            continue
-        step = Point(slope, ONE) if steep else Point(ONE, slope)
-        yield Line.through(exact[start], exact[start] + step)
-
-
-def _opposite(key: _Float, start: _Float, near: set[_Float]) -> _Float | None:
-    """The neighbor of a corner straight across it from another, if any."""
-    return next(
-        (other for other in sorted(near) if _straight_on(start, key, other)), None
+    radicands, points, unexplained = origamy_kernel.read_corners(
+        kernel.tower(),
+        keys,
+        floats,
+        edges,
+        tolerance,
+        SURE,
+        FIT,
+        _NEAR,
+        _DENOMINATOR,
+        list(_ROOTS),
+        _SCALE,
+        _SIZE,
     )
-
-
-def _straight(
-    key: _Float, start: _Float, near: dict[_Float, set[_Float]]
-) -> list[_Float]:
-    """The corners from a corner's neighbor on, while the creases run straight."""
-    corners: list[_Float] = []
-    previous: _Float = key
-    current: _Float | None = start
-    while current is not None:
-        corners.append(current)
-        previous, current = (
-            current,
-            next(
-                (
-                    n
-                    for n in sorted(near[current])
-                    if _straight_on(previous, current, n)
-                ),
-                None,
-            ),
+    extend(kernel.from_number(radicand) for radicand in radicands)
+    if unexplained is not None:
+        value, x, y = unexplained
+        msg = (
+            f"the coordinate {value!r} lies within {tolerance} of no exact number, "
+            f"and no two lines of creases cross at ({x!r}, {y!r})"
         )
-    return corners
-
-
-def _straight_on(a: _Float, b: _Float, c: _Float) -> bool:
-    """Whether the path from a through b to c runs straight on at b."""
-    ux, uy = b[0] - a[0], b[1] - a[1]
-    vx, vy = c[0] - b[0], c[1] - b[1]
-    lengths = hypot(ux, uy) * hypot(vx, vy)
-    return (
-        lengths > 0
-        and ux * vx + uy * vy > 0
-        and abs(ux * vy - uy * vx) <= _NEAR * lengths
-    )
+        raise ValueError(msg)
+    return [kernel.from_point(point) for point in points]
 
 
 def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number:

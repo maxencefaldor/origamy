@@ -421,14 +421,7 @@ fn meet(
         (_, 0, _, _) => d.clone(),
         (_, _, 0, _) => a.clone(),
         (_, _, _, 0) => b.clone(),
-        _ => {
-            // Where the two lines meet: Cramer's rule on their equations.
-            let ((a, b), (c, d)) = (&l.normal, &m.normal);
-            let det = a.times(d, tower).minus(&b.times(c, tower)).inverse(tower);
-            let x = l.offset.times(d, tower).minus(&m.offset.times(b, tower));
-            let y = a.times(&m.offset, tower).minus(&c.times(&l.offset, tower));
-            Point::new(x.times(&det, tower), y.times(&det, tower), tower)
-        }
+        _ => l.meet(m, tower)?,
     })
 }
 

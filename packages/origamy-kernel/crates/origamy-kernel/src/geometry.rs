@@ -190,6 +190,30 @@ impl Line {
     pub fn parallel(&self, other: &Line) -> bool {
         self.normal == other.normal
     }
+
+    /// The point where two lines cross, or `None` when they run parallel: Cramer's rule
+    /// on their equations.
+    #[must_use]
+    pub fn meet(&self, other: &Line, tower: &Tower) -> Option<Point> {
+        let ((a, b), (c, d)) = (&self.normal, &other.normal);
+        let determinant = a.times(d, tower).minus(&b.times(c, tower));
+        if determinant.is_zero() {
+            return None;
+        }
+        let inverse = determinant.inverse(tower);
+        let x = self
+            .offset
+            .times(d, tower)
+            .minus(&other.offset.times(b, tower));
+        let y = a
+            .times(&other.offset, tower)
+            .minus(&c.times(&self.offset, tower));
+        Some(Point::new(
+            x.times(&inverse, tower),
+            y.times(&inverse, tower),
+            tower,
+        ))
+    }
 }
 
 /// The side of the line from `p` to `q`, as [`Line::side`] gives it, that lies on the

@@ -15,6 +15,9 @@
 
 use std::cmp::Ordering;
 
+use num_bigint::BigInt;
+use num_integer::Integer;
+use num_traits::{One, Zero};
 use smallvec::{SmallVec, smallvec};
 
 use crate::int::Int;
@@ -339,6 +342,37 @@ impl Number {
         self.times(&other.inverse(tower), tower)
     }
 
+    /// The square root, adding a level to the tower when no level holds it.
+    ///
+    /// # Panics
+    ///
+    /// When the number is negative.
+    #[must_use]
+    pub fn sqrt(&self, tower: &mut Tower) -> Number {
+        let sign = self.sign(tower);
+        assert!(sign >= 0, "a negative number has no real square root");
+        if sign == 0 {
+            return self.clone();
+        }
+        if let Some(found) = self.root(tower) {
+            return found;
+        }
+        let (radicand, factor) = reduced(self, tower);
+        tower.add(radicand);
+        joined(&Number::zero(), &factor, tower.radicands.len())
+    }
+
+    /// The square root of a number at least zero, when a level of the tower holds it.
+    #[must_use]
+    pub fn root(&self, tower: &Tower) -> Option<Number> {
+        let found = root(self, tower.radicands.len(), tower)?;
+        Some(if found.sign(tower) < 0 {
+            found.negated()
+        } else {
+            found
+        })
+    }
+
     /// The sign, -1, 0 or 1, decided exactly.
     #[must_use]
     pub fn sign(&self, tower: &Tower) -> i32 {
@@ -464,7 +498,12 @@ impl Tower {
         &self.radicands
     }
 
-    fn add(&mut self, radicand: Number) {
+    /// Add a level above the others, whose root is the square root of `radicand`.
+    ///
+    /// # Panics
+    ///
+    /// When the radicand has a denominator other than 1, or lies above its own level.
+    pub fn add(&mut self, radicand: Number) {
         let level = self.radicands.len();
         assert!(
             radicand.denominator == Int::ONE,
@@ -713,6 +752,95 @@ fn sparse_product(x: &[Int], y: &[Int], factors: &[Int]) -> Coefficients {
     out
 }
 
+/// A square root of a number within the tower's levels up to `level`.
+///
+/// A root of `a + b√d` is `u + v√d` with `u² + v²d = a` and `2uv = b`, so `u²` is half
+/// of `a` plus or minus the root of `a² - b²d`, one level down.
+fn root(number: &Number, level: usize, tower: &Tower) -> Option<Number> {
+    if level == 0 {
+        return rational_root(number);
+    }
+    let d = &tower.radicands[level - 1];
+    if number.level() < level {
+        if let Some(found) = root(number, level - 1, tower) {
+            return Some(found);
+        }
+        let scaled = root(&number.over(d, tower), level - 1, tower)?;
+        return Some(joined(&Number::zero(), &scaled, level));
+    }
+    let (a, b) = number.halves();
+    let norm = root(
+        &a.times(&a, tower)
+            .minus(&b.times(&b, tower).times(d, tower)),
+        level - 1,
+        tower,
+    )?;
+    let half = Number::new(smallvec![Int::ONE], Int::from(2i64));
+    for square in [a.plus(&norm), a.minus(&norm)] {
+        let square = square.times(&half, tower);
+        if square.sign(tower) > 0
+            && let Some(part) = root(&square, level - 1, tower)
+        {
+            let twice = part.plus(&part);
+            return Some(joined(&part, &b.over(&twice, tower), level));
+        }
+    }
+    None
+}
+
+/// The square root of a rational that is a square, at least zero.
+fn rational_root(number: &Number) -> Option<Number> {
+    if !number.is_rational() || number.numerators[0].signum() < 0 {
+        return None;
+    }
+    let (n, d) = (number.numerators[0].to_big(), number.denominator.to_big());
+    let (rn, rd) = (n.sqrt(), d.sqrt());
+    (&rn * &rn == n && &rd * &rd == d)
+        .then(|| Number::new(smallvec![Int::from_big(rn)], Int::from_big(rd)))
+}
+
+/// A positive number as `f²·y`, so that its square root is `f√y`.
+///
+/// The coefficients of `y` are integers with no square factor in common, so a rational
+/// `y` is a square-free integer.
+fn reduced(number: &Number, tower: &Tower) -> (Number, Number) {
+    let common = number
+        .numerators
+        .iter()
+        .fold(BigInt::zero(), |g, n| g.gcd(&n.to_big()));
+    let content = common * number.denominator.to_big();
+    let factor = Number::new(
+        smallvec![Int::from_big(square_root_part(&content))],
+        number.denominator.clone(),
+    );
+    (number.over(&factor.times(&factor, tower), tower), factor)
+}
+
+/// The largest integer whose square divides a positive integer.
+///
+/// Trial division removes every prime up to the cube root of what remains; what then
+/// remains is 1, a prime, a product of two primes, or a prime's square.
+fn square_root_part(n: &BigInt) -> BigInt {
+    let (mut root, mut rest, mut p) = (BigInt::one(), n.clone(), BigInt::from(2));
+    while &p * &p * &p <= rest {
+        let square = &p * &p;
+        while rest.is_multiple_of(&square) {
+            rest /= &square;
+            root *= &p;
+        }
+        if rest.is_multiple_of(&p) {
+            rest /= &p;
+        }
+        p += 1;
+    }
+    let last = rest.sqrt();
+    if &last * &last == rest {
+        root * last
+    } else {
+        root
+    }
+}
+
 /// The number `a + b√d` at a level, from `a` and `b` below it.
 fn joined(a: &Number, b: &Number, level: usize) -> Number {
     let half = 1 << (level - 1);
@@ -832,6 +960,26 @@ mod tests {
                 proptest::prop_assert_eq!(x.times(&x.inverse(&tower), &tower), Number::one());
             }
         }
+    }
+
+    #[test]
+    fn square_roots_find_their_level_or_add_one() {
+        let mut tower = Tower::new(vec![]);
+        let root_two = Number::integer(8).sqrt(&mut tower);
+        assert_eq!(root_two, n(&[0, 2], 1));
+        assert_eq!(tower.radicands(), &[Number::integer(2)]);
+        let root_three = Number::integer(3).sqrt(&mut tower);
+        assert_eq!(root_three, n(&[0, 0, 1, 0], 1));
+        // √6 = √2·√3 needs no level of its own.
+        assert_eq!(Number::integer(6).sqrt(&mut tower), n(&[0, 0, 0, 1], 1));
+        assert_eq!(tower.radicands().len(), 2);
+        // √(3 + 2√2) = 1 + √2.
+        assert_eq!(n(&[3, 2], 1).sqrt(&mut tower), n(&[1, 1], 1));
+        assert_eq!(n(&[1], 4).sqrt(&mut tower), n(&[1], 2));
+        // √(2 + √2) adds a third level.
+        let nested = n(&[2, 1], 1).sqrt(&mut tower);
+        assert_eq!(tower.radicands().len(), 3);
+        assert_eq!(nested.times(&nested, &tower), n(&[2, 1], 1));
     }
 
     #[test]

@@ -470,6 +470,17 @@ def radicands() -> tuple[Number, ...]:
     return tuple(_tower().radicands)
 
 
+def extend(levels: Iterable[Number]) -> None:
+    """Add levels above the current tower's, as the kernel's square roots added them.
+
+    Each radicand has integer coefficients below its own level, and its root lies in no
+    level below.
+    """
+    current = _tower()
+    for radicand in levels:
+        current.add(radicand)
+
+
 @contextmanager
 def tower(levels: Iterable[Number]) -> Generator[None]:
     """Use the tower of these radicands, level 1 first, until the block ends."""
