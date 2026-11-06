@@ -166,34 +166,46 @@ class Problem:
         self._equal(constraint, self.literal(p1, p2), self.literal(n1, n2))
 
     def _crossings(self, creases: list[Crease]) -> None:
-        folded = self.state.folded
-        boxes = [box(polygon) for polygon in folded]
+        shapes, stacked = self.state.footprints, self.state.stacked
+        boxes = [box(polygon) for polygon in shapes]
         for crease in creases:
             low_x, low_y, high_x, high_y = bounds(crease.ends)
-            for face, (x0, y0, x1, y1) in enumerate(boxes):
-                if face in crease.faces or not (
+            for k, (x0, y0, x1, y1) in enumerate(boxes):
+                if not (
                     x0 <= high_x and low_x <= x1 and y0 <= high_y and low_y <= y1
-                ):
+                ) or not through_inside(shapes[k], *crease.ends):
                     continue
-                if through_inside(folded[face], *crease.ends):
-                    a, b = crease.faces
-                    kind = "taco-tortilla" if crease.side else "tortilla-tortilla"
-                    constraint = Constraint(kind, (a, b, face), crease.ends)
-                    self._equal(
-                        constraint, self.literal(face, a), self.literal(face, b)
-                    )
+                a, b = crease.faces
+                kind = "taco-tortilla" if crease.side else "tortilla-tortilla"
+                for face in stacked[k]:
+                    if face not in crease.faces:
+                        constraint = Constraint(kind, (a, b, face), crease.ends)
+                        self._equal(
+                            constraint, self.literal(face, a), self.literal(face, b)
+                        )
 
     def _transitivity(self) -> None:
-        folded = self.state.folded
-        overlapping = self.state.overlapping
+        # Three faces share area when their footprints do, so each triple of
+        # footprints is measured once, however many faces stack on each.
+        shapes, footprint = self.state.footprints, self.state.footprint
         neighbors: dict[int, set[int]] = defaultdict(set)
-        for f, g in overlapping:
+        for f, g in self.pairs:
             neighbors[f].add(g)
             neighbors[g].add(f)
+        shared: dict[tuple[int, ...], bool] = {}
         for f, g in self.pairs:
-            common = intersection(folded[f], folded[g])
             for h in sorted(neighbors[f] & neighbors[g]):
-                if h <= g or not overlaps(common, folded[h]):
+                if h <= g:
+                    continue
+                key = tuple(sorted({footprint[f], footprint[g], footprint[h]}))
+                if key not in shared:
+                    common = shapes[key[0]]
+                    for k in key[1:-1]:
+                        common = intersection(common, shapes[k])
+                    shared[key] = (
+                        overlaps(common, shapes[key[-1]]) if len(key) > 1 else True
+                    )
+                if not shared[key]:
                     continue
                 x, y, z = self.literal(f, g), self.literal(g, h), self.literal(h, f)
                 if x is None or y is None or z is None:

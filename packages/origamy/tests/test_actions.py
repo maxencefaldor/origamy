@@ -179,6 +179,35 @@ def test_every_fold_leaves_a_valid_state(sequence: list[Fold]) -> None:
             intersection(state.folded[f], state.folded[g]) for f, g in state.overlapping
         ]
         assert all(area(c).sign() > 0 for c in common)
+        for polygon, k in zip(state.folded, state.footprint, strict=True):
+            assert set(polygon) == set(state.footprints[k])
+
+
+@settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(st.lists(folds(), min_size=1, max_size=4))
+def test_every_three_faces_that_share_area_stack_transitively(
+    sequence: list[Fold],
+) -> None:
+    state = SHEET
+    for line, flap, layers, sense in sequence:
+        try:
+            state = fold(state, line, flap, layers, sense).state
+        except RefusalError:
+            continue
+    problem = Problem(state)
+    found = {
+        constraint.faces
+        for constraint in problem.origins
+        if constraint.kind == "transitivity"
+    }
+    folded = state.folded
+    shared = {
+        (f, g, h)
+        for f, g, h in combinations(range(len(folded)), 3)
+        if {(f, g), (f, h), (g, h)} <= state.overlapping
+        and overlaps(intersection(folded[f], folded[g]), folded[h])
+    }
+    assert found == shared
 
 
 @settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])

@@ -121,6 +121,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | face | A convex region of the paper bounded by creases and the paper's edges |
 | place | Where a face lies once folded: an isometry of the plane |
 | stacking | Which face is above, wherever two faces overlap |
+| footprint | The region a face covers once folded; faces stacked exactly share one |
 | layer | One face at a point; the layers at a point are the faces that cover it |
 | crease, fold | An edge between two faces, and a crease whose faces lie on one side of it |
 | valley, mountain | A fold toward the viewer, and away from the viewer |

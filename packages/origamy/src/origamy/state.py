@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
+from itertools import combinations
 
 from origamy.geometry import (
     IDENTITY,
@@ -92,41 +93,89 @@ class State:
         }
 
     @cached_property
+    def lines(self) -> Mapping[Line, tuple[Edge, ...]]:
+        """The creases along each line of the crease pattern."""
+        found: dict[Line, list[Edge]] = defaultdict(list)
+        for edge in self.creases:
+            found[Line.through(*(self.vertices[v] for v in edge))].append(edge)
+        return {line: tuple(edges) for line, edges in found.items()}
+
+    @cached_property
     def border(self) -> frozenset[Edge]:
         """The edges along the paper's own edge."""
         return frozenset(self.edges.keys() - self.creases.keys())
 
     @cached_property
-    def overlapping(self) -> frozenset[Pair]:
-        """Every pair of faces that share area once folded, the lesser id first."""
-        folded = self.folded
+    def footprints(self) -> tuple[Polygon, ...]:
+        """Each region a face covers once folded, faces stacked exactly sharing one."""
+        found: dict[frozenset[Point], Polygon] = {}
+        for polygon in self.folded:
+            found.setdefault(frozenset(polygon), polygon)
+        return tuple(found.values())
+
+    @cached_property
+    def footprint(self) -> tuple[int, ...]:
+        """The index of each face's footprint."""
+        index = {frozenset(polygon): k for k, polygon in enumerate(self.footprints)}
+        return tuple(index[frozenset(polygon)] for polygon in self.folded)
+
+    @cached_property
+    def stacked(self) -> tuple[tuple[int, ...], ...]:
+        """The faces on each footprint, in order."""
+        faces: list[list[int]] = [[] for _ in self.footprints]
+        for f, k in enumerate(self.footprint):
+            faces[k].append(f)
+        return tuple(tuple(group) for group in faces)
+
+    @cached_property
+    def meeting(self) -> frozenset[Pair]:
+        """Every pair of footprints that share area, the lesser index first."""
+        shapes = self.footprints
         return frozenset(
-            (f, g)
-            for f in range(len(folded))
-            for g in range(f + 1, len(folded))
-            if overlaps(folded[f], folded[g])
+            (a, b)
+            for a in range(len(shapes))
+            for b in range(a + 1, len(shapes))
+            if overlaps(shapes[a], shapes[b])
         )
+
+    @cached_property
+    def overlapping(self) -> frozenset[Pair]:
+        """Every pair of faces that share area once folded, the lesser id first.
+
+        Faces on one footprint all overlap, and faces on two footprints overlap when
+        the footprints do.
+        """
+        stacked = self.stacked
+        pairs = {pair for group in stacked for pair in combinations(group, 2)}
+        for a, b in self.meeting:
+            pairs.update((min(f, g), max(f, g)) for f in stacked[a] for g in stacked[b])
+        return frozenset(pairs)
 
     @cached_property
     def thickest(self) -> tuple[int, Point]:
         """The most layers of paper at one point once folded, and a point inside them.
 
-        Cutting a face along the sides of every face that overlaps it leaves cells that
-        each of those faces covers whole or misses. A cell's center then counts the
-        layers over the whole cell.
+        Cutting a footprint along the sides of every footprint that overlaps it leaves
+        cells that each of those footprints covers whole or misses. A cell's center then
+        counts the layers over the whole cell, each footprint's faces all at once.
         """
-        folded = self.folded
+        shapes, stacked = self.footprints, self.stacked
         near: dict[int, set[int]] = defaultdict(set)
-        for f, g in self.overlapping:
-            near[f].add(g)
-            near[g].add(f)
-        most, where = 1, center(folded[0])
-        for f in sorted(range(len(folded)), key=lambda f: -len(near[f])):
-            if len(near[f]) < most:
+        for a, b in self.meeting:
+            near[a].add(b)
+            near[b].add(a)
+        depth = [len(group) for group in stacked]
+        most, where = depth[0], center(shapes[0])
+
+        def bound(a: int) -> int:
+            return depth[a] + sum(depth[b] for b in near[a])
+
+        for a in sorted(range(len(shapes)), key=lambda a: -bound(a)):
+            if bound(a) <= most:
                 break
-            cells = [folded[f]]
-            for p, q in (side for g in near[f] for side in sides(folded[g])):
-                line = Line.through(p, q)
+            cells = [shapes[a]]
+            lines = {Line.through(p, q) for b in near[a] for p, q in sides(shapes[b])}
+            for line in sorted(lines, key=str):
                 cells = [
                     part
                     for cell in cells
@@ -139,7 +188,9 @@ class State:
                 ]
             for cell in cells:
                 point = center(cell)
-                count = 1 + sum(inside(folded[g], point) for g in near[f])
+                count = depth[a] + sum(
+                    depth[b] for b in near[a] if inside(shapes[b], point)
+                )
                 if count > most:
                     most, where = count, point
         return most, where

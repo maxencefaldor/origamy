@@ -207,14 +207,11 @@ def along(state: State, crease: Line | tuple[Point, Point]) -> list[Edge]:
         line, ends = crease, None
     else:
         line, ends = Line.through(*crease), crease
-    found = []
-    for edge in state.creases:
-        p, q = (state.vertices[v] for v in edge)
-        if not (line.contains(p) and line.contains(q)):
-            continue
-        if ends is None or (_within(ends, p) and _within(ends, q)):
-            found.append(edge)
-    return found
+    return [
+        edge
+        for edge in state.lines.get(line, ())
+        if ends is None or all(_within(ends, state.vertices[v]) for v in edge)
+    ]
 
 
 def flat_with(state: State, faces: Iterable[int]) -> set[int]:
