@@ -10,12 +10,11 @@
     reason = "the geometry names segments' ends p to s, as the formulas do"
 )]
 
-use std::cmp::Ordering;
-
 use rustc_hash::FxHashMap;
 
+use crate::arrangement::{Segment, Stretches};
 use crate::field::{Number, Tower};
-use crate::geometry::{Point, float_box, orientation};
+use crate::geometry::{Point, orientation};
 
 /// Why creasing refuses.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,7 +65,27 @@ pub fn crease(
         }
         lines.push((p.clone(), q.clone()));
     }
-    let splits = split(&lines, tower);
+    let segments: Vec<Segment> = (0u32..)
+        .zip(&lines)
+        .map(|(tag, (p, q))| Segment {
+            start: p.clone(),
+            end: q.clone(),
+            tag,
+            side: 0,
+        })
+        .collect();
+    let stretches = Stretches::new(&segments, tower);
+    // Each line's edges come in order along it, so each segment's points do too.
+    let mut along: Vec<Vec<u32>> = vec![vec![]; lines.len()];
+    for edge in &stretches.edges {
+        for &s in &edge.segments {
+            let points = &mut along[s as usize];
+            if points.is_empty() {
+                points.push(edge.ends[0]);
+            }
+            points.push(edge.ends[1]);
+        }
+    }
     let mut all = vertices.to_vec();
     let mut index: FxHashMap<Point, u32> = all
         .iter()
@@ -78,21 +97,22 @@ pub fn crease(
             )
         })
         .collect();
+    let mut number: Vec<Option<u32>> = vec![None; stretches.points.len()];
     let mut found: Vec<[u32; 2]> = vec![];
-    for ((p, q), points) in lines.iter().zip(splits) {
-        let direction = q.minus(p, tower);
-        let mut ordered: Vec<(Number, Point)> = points
+    for ((p, _), mut points) in lines.iter().zip(along) {
+        // A segment's vertices number from its start on.
+        if stretches.points[points[0] as usize] != *p {
+            points.reverse();
+        }
+        let ids: Vec<u32> = points
             .into_iter()
-            .map(|r| (r.minus(p, tower).dot(&direction, tower), r))
-            .collect();
-        ordered.sort_by(|(a, _), (b, _)| a.compare(b, tower));
-        ordered.dedup_by(|(_, a), (_, b)| a == b);
-        let ids: Vec<u32> = ordered
-            .into_iter()
-            .map(|(_, r)| {
-                *index.entry(r.clone()).or_insert_with(|| {
-                    all.push(r);
-                    u32::try_from(all.len() - 1).expect("vertices fit in 32 bits")
+            .map(|k| {
+                *number[k as usize].get_or_insert_with(|| {
+                    let r = &stretches.points[k as usize];
+                    *index.entry(r.clone()).or_insert_with(|| {
+                        all.push(r.clone());
+                        u32::try_from(all.len() - 1).expect("vertices fit in 32 bits")
+                    })
                 })
             })
             .collect();
@@ -104,80 +124,6 @@ pub fn crease(
     found.dedup();
     let faces = faces(&all, &found, tower)?;
     Ok((all, faces))
-}
-
-/// Each line's points: its ends, and where other lines cross it, end on it, or
-/// overlap it.
-fn split(lines: &[(Point, Point)], tower: &Tower) -> Vec<Vec<Point>> {
-    let mut points: Vec<Vec<Point>> = lines
-        .iter()
-        .map(|(p, q)| vec![p.clone(), q.clone()])
-        .collect();
-    let boxes: Vec<[f64; 4]> = lines
-        .iter()
-        .map(|(p, q)| float_box(&[p.clone(), q.clone()]))
-        .collect();
-    let mut order: Vec<usize> = (0..lines.len()).collect();
-    order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
-    let mut active: Vec<usize> = vec![];
-    for &i in &order {
-        active.retain(|&j| boxes[j][2] >= boxes[i][0]);
-        for &j in &active {
-            if boxes[j][1] > boxes[i][3] || boxes[i][1] > boxes[j][3] {
-                continue;
-            }
-            let (p, q) = &lines[i];
-            let (r, s) = &lines[j];
-            for point in meeting(p, q, r, s, tower) {
-                points[i].push(point.clone());
-                points[j].push(point);
-            }
-        }
-        active.push(i);
-    }
-    points
-}
-
-/// Where two segments meet: a crossing, an end on the other, or shared stretches.
-fn meeting(p: &Point, q: &Point, r: &Point, s: &Point, tower: &Tower) -> Vec<Point> {
-    let (o1, o2) = (orientation(p, q, r, tower), orientation(p, q, s, tower));
-    if o1 * o2 > 0 {
-        return vec![];
-    }
-    let (o3, o4) = (orientation(r, s, p, tower), orientation(r, s, q, tower));
-    if o3 * o4 > 0 {
-        return vec![];
-    }
-    if o1 == 0 && o2 == 0 {
-        // Collinear: each end that lies on the other segment splits it.
-        let on = |a: &Point, b: &Point, x: &Point| {
-            let d = b.minus(a, tower);
-            let t = x.minus(a, tower).dot(&d, tower);
-            t.sign(tower) >= 0 && t.compare(&d.dot(&d, tower), tower) != Ordering::Greater
-        };
-        let mut found: Vec<Point> = [p, q]
-            .into_iter()
-            .filter(|a| on(r, s, a))
-            .cloned()
-            .collect();
-        found.extend([r, s].into_iter().filter(|a| on(p, q, a)).cloned());
-        return found;
-    }
-    vec![match (o1, o2, o3, o4) {
-        (0, _, _, _) => r.clone(),
-        (_, 0, _, _) => s.clone(),
-        (_, _, 0, _) => p.clone(),
-        (_, _, _, 0) => q.clone(),
-        _ => {
-            let d = q.minus(p, tower);
-            let e = s.minus(r, tower);
-            let t = r
-                .minus(p, tower)
-                .cross(&e, tower)
-                .over(&d.cross(&e, tower), tower);
-            p.plus(&d.scaled(&t, tower), tower)
-        }
-    }]
 }
 
 /// The faces the edges divide the paper into, each counterclockwise, in the order the

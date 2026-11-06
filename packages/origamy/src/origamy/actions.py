@@ -25,7 +25,6 @@ from origamy.geometry import (
     Isometry,
     Line,
     Point,
-    area,
     bounds,
     crosses,
     inside,
@@ -246,8 +245,11 @@ def flat_with(state: State, faces: Iterable[int]) -> set[int]:
 
 def largest(state: State) -> int:
     """The face of largest area, the first of them when several tie."""
-    areas = [area(polygon) for polygon in state.patterns]
-    return max(range(len(areas)), key=lambda f: (areas[f], -f))
+    return origamy_kernel.largest(
+        kernel.tower(),
+        [kernel.point(p) for p in state.vertices],
+        [list(face.corners) for face in state.faces],
+    )
 
 
 def turn_over(state: State) -> Outcome:

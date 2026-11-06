@@ -17,7 +17,7 @@ use rustc_hash::FxHashSet;
 
 use crate::arrangement::{Arrangement, Segment};
 use crate::field::{Number, Tower};
-use crate::geometry::{Line, Point, Polygon, orientation, sides};
+use crate::geometry::{Point, Polygon, left_of, orientation, sides};
 
 /// The overlay of some footprints, with the creases that lie along their sides.
 pub struct Overlay {
@@ -29,6 +29,8 @@ pub struct Overlay {
     pub regions: Vec<Vec<u32>>,
     /// For each crease, the footprints whose inside it runs through, sorted.
     pub crossed: Vec<Vec<u32>>,
+    /// For each crease, its line, by index among the arrangement's lines.
+    pub crease_lines: Vec<u32>,
 }
 
 impl Overlay {
@@ -43,14 +45,10 @@ impl Overlay {
     pub fn new(footprints: &[Polygon], creases: &[(Point, Point)], tower: &Tower) -> Overlay {
         let count = u32::try_from(footprints.len()).expect("footprints fit in 32 bits");
         let mut segments = vec![];
+        // A footprint runs counterclockwise, so its inside lies left of each side.
         for (k, shape) in (0..count).zip(footprints) {
             for (p, q) in sides(shape) {
-                let line = Line::through(p, q, tower);
-                let side = shape
-                    .iter()
-                    .map(|r| line.side(r, tower))
-                    .find(|&s| s != 0)
-                    .unwrap_or(0);
+                let side = left_of(p, q, tower);
                 segments.push(Segment {
                     start: p.clone(),
                     end: q.clone(),
@@ -70,6 +68,8 @@ impl Overlay {
             });
         }
         let arrangement = Arrangement::new(&segments, tower);
+        let first = segments.len() - creases.len();
+        let crease_lines = arrangement.segment_lines[first..].to_vec();
         let covers = covers(&arrangement, &segments, footprints, tower);
         let mut found = FxHashSet::default();
         let mut regions = vec![];
@@ -116,20 +116,41 @@ impl Overlay {
             covers,
             regions,
             crossed,
+            crease_lines,
         }
     }
 
     /// Every pair of footprints that share area, the lesser first, sorted.
     #[must_use]
     pub fn meeting(&self) -> Vec<(u32, u32)> {
-        let mut pairs = vec![];
-        for cover in &self.regions {
-            for (i, &a) in cover.iter().enumerate() {
-                pairs.extend(cover[i + 1..].iter().map(|&b| (a, b)));
+        let count = self
+            .regions
+            .iter()
+            .flatten()
+            .max()
+            .map_or(0, |&k| k as usize + 1);
+        let mut holding: Vec<Vec<u32>> = vec![vec![]; count];
+        for (r, cover) in (0u32..).zip(&self.regions) {
+            for &k in cover {
+                holding[k as usize].push(r);
             }
         }
-        pairs.sort_unstable();
-        pairs.dedup();
+        // Each footprint gathers the greater footprints of its regions, once each.
+        let mut seen = vec![u32::MAX; count];
+        let (mut pairs, mut greater) = (vec![], vec![]);
+        for (a, regions) in (0u32..).zip(&holding) {
+            greater.clear();
+            for &r in regions {
+                for &b in &self.regions[r as usize] {
+                    if b > a && seen[b as usize] != a {
+                        seen[b as usize] = a;
+                        greater.push(b);
+                    }
+                }
+            }
+            greater.sort_unstable();
+            pairs.extend(greater.iter().map(|&b| (a, b)));
+        }
         pairs
     }
 }

@@ -9,6 +9,7 @@
     reason = "an isometry's entries are a to f, as its matrix writes them"
 )]
 
+use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 use crate::field::{Estimate, Number, Tower};
@@ -180,6 +181,24 @@ impl Line {
     #[must_use]
     pub fn parallel(&self, other: &Line) -> bool {
         self.normal == other.normal
+    }
+}
+
+/// The side of the line from `p` to `q`, as [`Line::side`] gives it, that lies on the
+/// left of the direction from `p` to `q`.
+///
+/// The line's normal points left of that direction, scaled by its first nonzero
+/// coordinate: `p.y - q.y`, or else `q.x - p.x`.
+#[must_use]
+pub fn left_of(p: &Point, q: &Point, tower: &Tower) -> i32 {
+    match p.y.compare(&q.y, tower) {
+        Ordering::Greater => 1,
+        Ordering::Less => -1,
+        Ordering::Equal => match q.x.compare(&p.x, tower) {
+            Ordering::Greater => 1,
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+        },
     }
 }
 
@@ -367,6 +386,16 @@ fn clipped(
         }
     }
     distinct
+}
+
+/// Twice the signed area of a polygon: positive when its corners run counterclockwise.
+#[must_use]
+pub fn twice_area<'p>(polygon: impl Iterator<Item = &'p Point> + Clone, tower: &Tower) -> Number {
+    let mut total = Number::zero();
+    for (p, q) in polygon.clone().zip(polygon.cycle().skip(1)) {
+        total = total.plus(&p.cross(q, tower));
+    }
+    total
 }
 
 /// Whether the segment from `p` to `q` runs through a polygon's inside.

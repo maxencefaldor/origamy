@@ -41,6 +41,11 @@ def along(
     edges: list[tuple[int, int]],
     queries: list[tuple[PointData, PointData, bool]],
 ) -> list[list[int]]: ...
+def largest(
+    radicands: list[NumberData],
+    vertices: list[PointData],
+    corners: list[list[int]],
+) -> int: ...
 def collapse(
     radicands: list[NumberData],
     vertices: list[PointData],

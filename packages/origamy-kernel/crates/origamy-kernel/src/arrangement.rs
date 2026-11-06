@@ -42,12 +42,27 @@ pub struct Edge {
     pub segments: Vec<u32>,
 }
 
+/// The stretches that segments make of their lines: an arrangement's vertices and
+/// edges, before its faces.
+pub struct Stretches {
+    /// The vertices: segments' ends and crossings.
+    pub points: Vec<Point>,
+    /// The lines the segments lie on.
+    pub lines: Vec<Line>,
+    /// The line each segment lies on, by index among the lines, in the segments' order.
+    pub segment_lines: Vec<u32>,
+    /// The edges, line by line, each line's in order along it.
+    pub edges: Vec<Edge>,
+}
+
 /// The arrangement of some segments.
 pub struct Arrangement {
     /// The vertices: segments' ends and crossings.
     pub points: Vec<Point>,
     /// The lines the segments lie on.
     pub lines: Vec<Line>,
+    /// The line each segment lies on, by index among the lines, in the segments' order.
+    pub segment_lines: Vec<u32>,
     /// The edges.
     pub edges: Vec<Edge>,
     /// Each face as its half-edges in order, the face on their left. Half-edge `2e`
@@ -67,25 +82,34 @@ impl Arrangement {
     /// When a segment's ends are equal.
     #[must_use]
     pub fn new(segments: &[Segment], tower: &Tower) -> Arrangement {
-        // Segments with the same ends are one stretch of paper's edge, met once.
-        let mut distinct: Vec<(Point, Point)> = vec![];
-        let mut copies: Vec<Vec<u32>> = vec![];
-        let mut index: FxHashMap<(Point, Point), u32> = FxHashMap::default();
-        for (s, segment) in segments.iter().enumerate() {
-            let (a, b) = (&segment.start, &segment.end);
-            let key = if before(a, b, tower) {
-                (a.clone(), b.clone())
-            } else {
-                (b.clone(), a.clone())
-            };
-            let next = u32::try_from(distinct.len()).expect("segments fit in 32 bits");
-            let k = *index.entry(key.clone()).or_insert_with(|| {
-                distinct.push(key);
-                copies.push(vec![]);
-                next
-            });
-            copies[k as usize].push(u32::try_from(s).expect("segments fit in 32 bits"));
+        let Stretches {
+            points,
+            lines,
+            segment_lines,
+            edges,
+        } = Stretches::new(segments, tower);
+        let (faces, face_of, bounded) = trace(&points, &edges, tower);
+        Arrangement {
+            points,
+            lines,
+            segment_lines,
+            edges,
+            faces,
+            face_of,
+            bounded,
         }
+    }
+}
+
+impl Stretches {
+    /// The stretches of segments, none of them a single point.
+    ///
+    /// # Panics
+    ///
+    /// When a segment's ends are equal.
+    #[must_use]
+    pub fn new(segments: &[Segment], tower: &Tower) -> Stretches {
+        let (distinct, copies) = distinct(segments, tower);
         let mut lines: Vec<Line> = vec![];
         let mut line_index: FxHashMap<Line, u32> = FxHashMap::default();
         let line_of: Vec<u32> = distinct
@@ -160,17 +184,22 @@ impl Arrangement {
                 }
             }
         }
-        let (faces, face_of, bounded) = trace(&points, &edges, tower);
-        Arrangement {
+        let mut segment_lines = vec![0; segments.len()];
+        for (k, copies) in copies.iter().enumerate() {
+            for &s in copies {
+                segment_lines[s as usize] = line_of[k];
+            }
+        }
+        Stretches {
             points,
             lines,
+            segment_lines,
             edges,
-            faces,
-            face_of,
-            bounded,
         }
     }
+}
 
+impl Arrangement {
     /// The vertex a half-edge leaves from.
     #[must_use]
     pub fn tail(&self, half: u32) -> u32 {
@@ -317,6 +346,30 @@ fn meet(first: &(Point, Point), second: &(Point, Point), tower: &Tower) -> Optio
             a.plus(&ab.scaled(&t, tower), tower)
         }
     })
+}
+
+/// The distinct segments, each with its ends in order, and the copies of each: segments
+/// with the same ends are one stretch of paper's edge, met once.
+fn distinct(segments: &[Segment], tower: &Tower) -> (Vec<(Point, Point)>, Vec<Vec<u32>>) {
+    let mut distinct: Vec<(Point, Point)> = vec![];
+    let mut copies: Vec<Vec<u32>> = vec![];
+    let mut index: FxHashMap<(Point, Point), u32> = FxHashMap::default();
+    for (s, segment) in segments.iter().enumerate() {
+        let (a, b) = (&segment.start, &segment.end);
+        let key = if before(a, b, tower) {
+            (a.clone(), b.clone())
+        } else {
+            (b.clone(), a.clone())
+        };
+        let next = u32::try_from(distinct.len()).expect("segments fit in 32 bits");
+        let k = *index.entry(key.clone()).or_insert_with(|| {
+            distinct.push(key);
+            copies.push(vec![]);
+            next
+        });
+        copies[k as usize].push(u32::try_from(s).expect("segments fit in 32 bits"));
+    }
+    (distinct, copies)
 }
 
 /// Whether a point comes before another, by x and then by y.

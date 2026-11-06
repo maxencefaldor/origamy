@@ -10,10 +10,12 @@
     reason = "an isometry's entries are a to f, as its matrix writes them"
 )]
 
+use std::cmp::Ordering;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::field::Tower;
-use crate::geometry::{Isometry, Line, Point};
+use crate::field::{Number, Tower};
+use crate::geometry::{Isometry, Line, Point, twice_area};
 use crate::sheet::{Pair, Sheet};
 use crate::stacking::{Problem, StackError, stack};
 
@@ -149,6 +151,26 @@ pub fn collapse(
         above,
         moved,
     })
+}
+
+/// The face of largest area on the crease pattern, the first of them when several tie.
+///
+/// # Panics
+///
+/// When there is no face, or the faces number 2³² or more.
+#[must_use]
+pub fn largest(vertices: &[Point], corners: &[Vec<u32>], tower: &Tower) -> u32 {
+    let areas: Vec<Number> = corners
+        .iter()
+        .map(|face| twice_area(face.iter().map(|&v| &vertices[v as usize]), tower))
+        .collect();
+    let mut best = 0;
+    for f in 1..areas.len() {
+        if areas[f].compare(&areas[best], tower) == Ordering::Greater {
+            best = f;
+        }
+    }
+    u32::try_from(best).expect("faces fit in 32 bits")
 }
 
 /// The inverse of an isometry: its orthogonal matrix inverts by its transpose.
@@ -374,7 +396,6 @@ fn beside(paper: &Paper, turns: &[(u32, u32)], change: &[Isometry]) -> Vec<Pair>
 mod tests {
     use super::*;
     use crate::crease::crease;
-    use crate::field::Number;
     use crate::stacking::{Problem, violations};
 
     fn point(x: i128, y: i128, tower: &Tower) -> Point {
@@ -437,6 +458,19 @@ mod tests {
             border,
             above: vec![],
         }
+    }
+
+    #[test]
+    fn the_largest_face_wins_and_the_first_breaks_ties() {
+        let lopsided = paper(&[((1, 0), (1, 4))]);
+        let wide = largest(&lopsided.vertices, &lopsided.corners, &lopsided.tower) as usize;
+        let xs: Vec<&Number> = lopsided.corners[wide]
+            .iter()
+            .map(|&v| &lopsided.vertices[v as usize].x)
+            .collect();
+        assert!(xs.iter().any(|x| **x == Number::integer(4)));
+        let even = paper(&[((2, 0), (2, 4))]);
+        assert_eq!(largest(&even.vertices, &even.corners, &even.tower), 0);
     }
 
     #[test]

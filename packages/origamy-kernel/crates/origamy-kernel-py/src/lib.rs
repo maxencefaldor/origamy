@@ -10,7 +10,9 @@
 )]
 
 use num_bigint::BigInt;
-use origamy_kernel::collapse::{CollapseError, Collapsed, Kind, Paper, collapse as collapse_paper};
+use origamy_kernel::collapse::{
+    CollapseError, Collapsed, Kind, Paper, collapse as collapse_paper, largest as largest_face,
+};
 use origamy_kernel::crease::{CreaseError, crease as crease_paper};
 use origamy_kernel::field::{Number, Tower};
 use origamy_kernel::geometry::{Isometry, Point};
@@ -23,8 +25,39 @@ use origamy_kernel::stacking::{
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+/// An integer as Python gives it or takes it: 64 bits wide when it fits, which
+/// crosses fastest, and of any size otherwise.
+struct Integer(Int);
+
+impl<'py> FromPyObject<'_, 'py> for Integer {
+    type Error = PyErr;
+
+    fn extract(object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(small) = object.extract::<i64>() {
+            return Ok(Integer(Int::from(small)));
+        }
+        Ok(Integer(Int::from_big(object.extract::<BigInt>()?)))
+    }
+}
+
+impl<'py> IntoPyObject<'py> for Integer {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
+        match self.0 {
+            Int::Small(value) => match i64::try_from(value) {
+                Ok(small) => Ok(small.into_pyobject(py)?.into_any()),
+                Err(_) => Ok(value.into_pyobject(py)?.into_any()),
+            },
+            Int::Big(value) => Ok((*value).into_pyobject(py)?.into_any()),
+        }
+    }
+}
+
 /// A number as Python gives it: its numerators and its denominator.
-type NumberData = (Vec<BigInt>, BigInt);
+type NumberData = (Vec<Integer>, Integer);
 
 /// A point as two numbers.
 type PointData = (NumberData, NumberData);
@@ -33,27 +66,27 @@ type PointData = (NumberData, NumberData);
 type ConstraintData = (String, Vec<u32>, Option<u32>);
 
 fn number(data: NumberData) -> PyResult<Number> {
-    let (numerators, denominator) = data;
+    let (numerators, Integer(denominator)) = data;
     if !numerators.len().is_power_of_two() {
         return Err(PyValueError::new_err(
             "a number has a power of two of numerators",
         ));
     }
-    if denominator == BigInt::from(0) {
+    if denominator.is_zero() {
         return Err(PyValueError::new_err(
             "a number's denominator is never zero",
         ));
     }
     Ok(Number::new(
-        numerators.into_iter().map(Int::from_big).collect(),
-        Int::from_big(denominator),
+        numerators.into_iter().map(|Integer(n)| n).collect(),
+        denominator,
     ))
 }
 
 fn number_data(number: &Number) -> NumberData {
     (
-        number.numerators().iter().map(Int::to_big).collect(),
-        number.denominator().to_big(),
+        number.numerators().iter().cloned().map(Integer).collect(),
+        Integer(number.denominator().clone()),
     )
 }
 
@@ -336,6 +369,37 @@ fn along(
     Ok(py.detach(|| creases_along(&tower, &vertices, &edges, &queries)))
 }
 
+/// The face of largest area on the crease pattern, the first of them when several tie.
+///
+/// Args:
+///     radicands: The tower's radicands, level 1 first.
+///     vertices: The crease pattern's vertices.
+///     corners: Each face's vertices, counterclockwise on the crease pattern.
+///
+/// Returns:
+///     The face's index.
+///
+/// Raises:
+///     ValueError: A number or a face is malformed, or there is no face.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
+fn largest(
+    py: Python<'_>,
+    radicands: Vec<NumberData>,
+    vertices: Vec<PointData>,
+    corners: Vec<Vec<u32>>,
+) -> PyResult<u32> {
+    let tower = tower(radicands)?;
+    let vertices = points(vertices, &tower)?;
+    let count = u32::try_from(vertices.len()).unwrap_or(u32::MAX);
+    if corners.is_empty() || corners.iter().flatten().any(|&v| v >= count) {
+        return Err(PyValueError::new_err(
+            "each face needs vertices of the crease pattern, and there is a face",
+        ));
+    }
+    Ok(py.detach(|| largest_face(&vertices, &corners, &tower)))
+}
+
 /// What a collapse came to: an outcome's name, the places and stacking, the faces
 /// moved, and the facts of a refusal.
 type CollapseData = (
@@ -470,6 +534,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(violations, module)?)?;
     module.add_function(wrap_pyfunction!(crease, module)?)?;
     module.add_function(wrap_pyfunction!(along, module)?)?;
+    module.add_function(wrap_pyfunction!(largest, module)?)?;
     module.add_function(wrap_pyfunction!(collapse, module)?)?;
     Ok(())
 }
