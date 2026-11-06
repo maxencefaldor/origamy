@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from math import atan2, cos, degrees, isclose, pi, sin, sqrt
 from typing import Final
 
-from origamy.geometry import Isometry, Point, center
+from origamy.geometry import Isometry, Point
 from origamy.state import Edge, State
 
 type Vector = tuple[float, float, float]
@@ -177,8 +177,10 @@ def hinge(state: State, edge: Edge, face: int) -> tuple[Vector, Vector]:
     (ax, ay), (bx, by) = (state.vertices[v].floats() for v in edge)
     length = sqrt((bx - ax) ** 2 + (by - ay) ** 2)
     ux, uy = (bx - ax) / length, (by - ay) / length
-    cx, cy = center(state.patterns[face]).floats()
-    if ux * (cy - ay) - uy * (cx - ax) < 0:
+    # A face's corners run counterclockwise, so it lies left of a side it runs along.
+    corners = state.faces[face].corners
+    after = corners[(corners.index(edge[0]) + 1) % len(corners)]
+    if after != edge[1]:
         ux, uy = -ux, -uy
     return (ux, uy, 0.0), (-uy, ux, 0.0)
 

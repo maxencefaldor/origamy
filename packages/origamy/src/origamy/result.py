@@ -6,6 +6,7 @@ reads it back to report, draw and export. Numbers travel as exact data, with the
 tower of square roots they live in, so a state reads back exactly as the script left it.
 """
 
+from functools import cached_property
 from pathlib import Path
 from typing import Self
 
@@ -63,11 +64,19 @@ class StateData(_Data):
                 )
                 for f in state.faces
             ),
-            above=tuple(sorted(state.above)),
+            above=state.stacking,
         )
 
     def state(self) -> State:
-        """The state this data describes, exactly."""
+        """The state this data describes, exactly.
+
+        The state is built once, so the stages of a build share it and what it works
+        out; its numbers live in the tower the build's data reads in.
+        """
+        return self._state
+
+    @cached_property
+    def _state(self) -> State:
         return State(
             tuple(_point(v) for v in self.vertices),
             tuple(
@@ -172,7 +181,11 @@ class StepData(_Data):
         )
 
     def step(self) -> Step:
-        """The step this data describes."""
+        """The step this data describes, built once, as `StateData.state` is."""
+        return self._step
+
+    @cached_property
+    def _step(self) -> Step:
         line = (
             Line.make(_point(self.line[:2]), Number.from_data(self.line[2]))
             if self.line

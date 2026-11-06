@@ -1,6 +1,7 @@
 //! Folded paper as the stacking sees it: faces with their places, and what their
 //! geometry gives once folded.
 
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::field::{Number, Tower};
@@ -240,6 +241,76 @@ pub fn creases(corners: &[Vec<u32>]) -> Vec<([u32; 2], [u32; 2])> {
         .collect()
 }
 
+/// Each face's corners where it lies once folded, counterclockwise as seen from above:
+/// a face turned over lists them the other way round. Faces find theirs on every core.
+#[must_use]
+pub fn polygons(
+    tower: &Tower,
+    vertices: &[Point],
+    corners: &[Vec<u32>],
+    places: &[Isometry],
+) -> Vec<Polygon> {
+    corners
+        .par_iter()
+        .zip(places)
+        .map(|(face, place)| {
+            let mut image: Polygon = face
+                .iter()
+                .map(|&v| place.apply(&vertices[v as usize], tower))
+                .collect();
+            if place.flips(tower) {
+                image.reverse();
+            }
+            image
+        })
+        .collect()
+}
+
+/// The faces from the bottom up, each after every face below it, or `None` when the
+/// stacking `above`, as `(upper, lower)`, holds a cycle.
+///
+/// Faces with no face below come first, by number, and each face follows as soon as
+/// every face below it has come.
+///
+/// # Panics
+///
+/// When a pair names a face past `faces`, or the faces number 2³² or more.
+#[must_use]
+pub fn bottom_up(faces: usize, above: &[Pair]) -> Option<Vec<u32>> {
+    let mut below = vec![0u32; faces];
+    let mut starts = vec![0usize; faces + 1];
+    for &(upper, lower) in above {
+        below[upper as usize] += 1;
+        starts[lower as usize + 1] += 1;
+    }
+    for f in 0..faces {
+        starts[f + 1] += starts[f];
+    }
+    // Each face's uppers, together, face by face.
+    let mut fill = starts.clone();
+    let mut uppers = vec![0u32; above.len()];
+    for &(upper, lower) in above {
+        uppers[fill[lower as usize]] = upper;
+        fill[lower as usize] += 1;
+    }
+    let mut order: Vec<u32> = (0..faces)
+        .filter(|&f| below[f] == 0)
+        .map(|f| u32::try_from(f).expect("faces fit in 32 bits"))
+        .collect();
+    let mut next = 0;
+    while next < order.len() {
+        let face = order[next] as usize;
+        next += 1;
+        for &upper in &uppers[starts[face]..starts[face + 1]] {
+            below[upper as usize] -= 1;
+            if below[upper as usize] == 0 {
+                order.push(upper);
+            }
+        }
+    }
+    (order.len() == faces).then_some(order)
+}
+
 /// Where each face's corners lie once folded, each image found once.
 ///
 /// Corners that creases join share an image: the two faces along a crease put each of
@@ -360,6 +431,13 @@ mod tests {
 
     fn point(x: i128, y: i128, tower: &Tower) -> Point {
         Point::new(Number::integer(x), Number::integer(y), tower)
+    }
+
+    #[test]
+    fn faces_come_from_the_bottom_up() {
+        assert_eq!(bottom_up(3, &[(0, 1), (1, 2)]), Some(vec![2, 1, 0]));
+        assert_eq!(bottom_up(3, &[(2, 0)]), Some(vec![0, 1, 2]));
+        assert_eq!(bottom_up(2, &[(0, 1), (1, 0)]), None);
     }
 
     #[test]

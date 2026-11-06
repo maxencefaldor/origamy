@@ -147,15 +147,17 @@ def across(
     return (px - dx, py - dy), (px + dx, py + dy)
 
 
-def stacking(state: State) -> list[int]:
-    """The faces in an order to paint them, from the bottom up."""
-    below: dict[int, set[int]] = {f: set() for f in range(len(state.faces))}
-    for upper, lower in state.above:
-        below[upper].add(lower)
-    try:
-        return list(TopologicalSorter(below).static_order())
-    except CycleError:
-        return sorted(below, key=lambda f: len(below[f]))
+def stacking(state: State) -> Sequence[int]:
+    """The faces in an order to paint them, from the bottom up.
+
+    A stacking with a cycle paints the faces with fewer faces below them first.
+    """
+    if (order := state.bottom_up) is not None:
+        return order
+    below = [0] * len(state.faces)
+    for upper, _ in state.above:
+        below[upper] += 1
+    return sorted(range(len(state.faces)), key=lambda f: below[f])
 
 
 GAP: Final = 0.0015
@@ -266,12 +268,12 @@ def folded_view(
     front, back, unit = look.front, look.back, look.unit
     for face in stacking(state):
         canvas.polygon(
-            state.folded[face],
+            state.folded_floats[face],
             fill=back if state.flips(face) else front,
             stroke=INK,
             **{"stroke-width": 0.9, "stroke-linejoin": "round"},
         )
-    _mark_faces(canvas, state.folded, marked)
+    _mark_faces(canvas, state.folded_floats, marked)
     canvas.rulers(unit)
     return canvas
 
@@ -284,14 +286,14 @@ def xray_view(
 ) -> Canvas:
     """Every layer at once: the more layers at a point, the darker it is."""
     canvas = Canvas(box)
-    for polygon in state.folded:
+    for polygon in state.folded_floats:
         canvas.polygon(
             polygon,
             fill=INK,
             stroke=INK,
             **{"fill-opacity": 0.14, "stroke-opacity": 0.55, "stroke-width": 0.8},
         )
-    _mark_faces(canvas, state.folded, marked)
+    _mark_faces(canvas, state.folded_floats, marked)
     canvas.rulers(unit)
     return canvas
 
@@ -551,7 +553,7 @@ def _area(polygon: Sequence[Flat]) -> float:
 
 def folded_box(*states: State) -> tuple[float, float, float, float]:
     """A box around the folded paper of every state given, as floats for drawing."""
-    points = [p.floats() for state in states for poly in state.folded for p in poly]
+    points = [p for state in states for poly in state.folded_floats for p in poly]
     xs, ys = [x for x, _ in points], [y for _, y in points]
     return min(xs), min(ys), max(xs), max(ys)
 

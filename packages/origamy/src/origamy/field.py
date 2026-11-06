@@ -350,7 +350,9 @@ class Number:
     def data(self) -> NumberData:
         """The number as JSON: a fraction's text, or its level with ``a`` and ``b``."""
         if self.rational:
-            return str(self.fraction())
+            # The one form is in lowest terms, its denominator positive.
+            numerator, denominator = self.numerators[0], self.denominator
+            return str(numerator) if denominator == 1 else f"{numerator}/{denominator}"
         a, b = self._halves()
         return self.level, a.data(), b.data()
 
@@ -359,7 +361,13 @@ class Number:
         """The number that `data` wrote, in the tower it was written in."""
         match data:
             case str():
-                return cls.of(Fraction(data))
+                numerator, _, denominator = data.partition("/")
+                try:
+                    whole, part = int(numerator), int(denominator or 1)
+                except ValueError:
+                    whole = part = 0
+                # Text that Number.data did not write reads as a Fraction reads it.
+                return cls((whole,), part) if part else cls.of(Fraction(data))
             case level, a, b:
                 return _joined(cls.from_data(a), cls.from_data(b), level)
 

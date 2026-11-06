@@ -268,8 +268,16 @@ class Isometry:
 
     @property
     def flips(self) -> bool:
-        """Whether the map turns the paper over, showing its back."""
-        return (self.xx * self.yy - self.xy * self.yx).sign() < 0
+        """Whether the map turns the paper over, showing its back.
+
+        The determinant of an orthogonal matrix is 1 or -1, so the estimates of its
+        entries almost always tell its sign without exact arithmetic.
+        """
+        xx, xy, yx, yy = (n.estimate() for n in (self.xx, self.xy, self.yx, self.yy))
+        sign = (xx * yy - xy * yx).sign()
+        if sign is None:
+            sign = (self.xx * self.yy - self.xy * self.yx).sign()
+        return sign < 0
 
     def line(self, line: Line) -> Line:
         """The image of a line."""

@@ -55,18 +55,22 @@ def _pattern(step: Step) -> FoldFile:
 def _folded(step: Step) -> FoldFile:
     state, form = step.state, step.form
     places: list[tuple[float, ...]] = [()] * len(state.vertices)
-    for f, face in enumerate(state.faces):
-        for vertex in face.corners:
-            folded = state.folded_point(f, vertex)
-            places[vertex] = folded.floats() if form is None else form.point(f, folded)
     flips = [state.flips(f) for f in range(len(state.faces))]
+    for f, face in enumerate(state.faces):
+        # A face turned over lists its folded corners the other way round.
+        order = face.corners[::-1] if flips[f] else face.corners
+        if form is None:
+            for vertex, floats in zip(order, state.folded_floats[f], strict=True):
+                places[vertex] = floats
+        else:
+            for vertex, point in zip(order, state.folded[f], strict=True):
+                places[vertex] = form.point(f, point)
     return {
         "vertices_coords": places,
         **_topology(step),
         # +1 puts f above g along g's normal, which points down when g shows its back.
         "faceOrders": [
-            [upper, lower, -1 if flips[lower] else 1]
-            for upper, lower in sorted(state.above)
+            [upper, lower, -1 if flips[lower] else 1] for upper, lower in state.stacking
         ],
     }
 

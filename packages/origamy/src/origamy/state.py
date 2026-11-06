@@ -24,6 +24,7 @@ from origamy.geometry import (
     covers,
     overlaps,
 )
+from origamy_kernel.data import PointData
 
 type Pair = tuple[int, int]
 """Two faces, the upper first: ``(upper, lower)``."""
@@ -91,7 +92,25 @@ class State:
     @cached_property
     def above(self) -> frozenset[Pair]:
         """For each pair of faces that overlap once folded, which one is above."""
-        return frozenset(self.kernel.stacking())
+        return frozenset(self.stacking)
+
+    @cached_property
+    def stacking(self) -> tuple[Pair, ...]:
+        """The pairs of `above` in order, as data and files list them."""
+        if "kernel" in vars(self) or "above" not in vars(self):
+            return tuple(self.kernel.stacking())
+        return tuple(sorted(self.above))
+
+    @cached_property
+    def bottom_up(self) -> tuple[int, ...] | None:
+        """The faces from the bottom up, each after every face below it.
+
+        Faces with no face below come first, by number, and each face follows as soon
+        as every face below it has come. None comes back when the stacking holds a
+        cycle.
+        """
+        order = self.kernel.bottom_up()
+        return None if order is None else tuple(order)
 
     @override
     def __eq__(self, other: object) -> bool:
@@ -129,9 +148,18 @@ class State:
     def folded(self) -> tuple[Polygon, ...]:
         """Each face's corners where it lies, counterclockwise as seen from above."""
         return tuple(
-            f.place.polygon(polygon)
-            for f, polygon in zip(self.faces, self.patterns, strict=True)
+            tuple(kernel.from_point(p) for p, _ in face) for face in self._folded
         )
+
+    @cached_property
+    def folded_floats(self) -> tuple[tuple[tuple[float, float], ...], ...]:
+        """Each face's corners where it lies, as `folded` lists them, in floats."""
+        return tuple(tuple(floats for _, floats in face) for face in self._folded)
+
+    @cached_property
+    def _folded(self) -> list[list[tuple[PointData, tuple[float, float]]]]:
+        """Each face's folded corners as the kernel finds them, exact and in floats."""
+        return self.kernel.folded()
 
     @cached_property
     def edges(self) -> Mapping[Edge, tuple[int, ...]]:
@@ -188,7 +216,7 @@ class State:
             [kernel.point(p) for p in self.vertices],
             [list(face.corners) for face in self.faces],
             [kernel.place(face.place) for face in self.faces],
-            sorted(self.above),
+            list(self.above),
         )
 
     @cached_property

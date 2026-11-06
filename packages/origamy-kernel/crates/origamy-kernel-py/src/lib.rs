@@ -18,7 +18,10 @@ use origamy_kernel::collapse::{
 };
 use origamy_kernel::crease::{CreaseError, crease as crease_paper};
 use origamy_kernel::field::{Number, Tower};
-use origamy_kernel::folded::{Folded, Pair, creases as creases_of, edges as edges_of};
+use origamy_kernel::folded::{
+    Folded, Pair, bottom_up as bottom_up_of, creases as creases_of, edges as edges_of,
+    polygons as folded_polygons,
+};
 use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
 use origamy_kernel::lines::{Along, along as creases_along};
@@ -372,7 +375,8 @@ type CreaseData = (String, Option<State>, Option<usize>);
 ///     vertices: The crease pattern's vertices.
 ///     corners: Each face's vertices, counterclockwise on the crease pattern.
 ///     places: Each face's place.
-///     stacking: Which face is above wherever two overlap, as `(upper, lower)`.
+///     stacking: Which face is above wherever two overlap, as `(upper, lower)`, in
+///         any order.
 ///
 /// Raises:
 ///     ValueError: A number or a face is malformed, or there is no face.
@@ -443,13 +447,15 @@ impl State {
         let places = self::places(places)?;
         check_faces(vertices.len(), &corners, places.len())?;
         let creases = creases_of(&corners);
+        let mut above = stacking;
+        above.sort_unstable();
         Ok(State {
             tower,
             vertices,
             corners,
             places,
             creases,
-            above: stacking,
+            above,
             folded: OnceLock::new(),
         })
     }
@@ -486,9 +492,22 @@ impl State {
             .collect()
     }
 
-    /// The stacking, as `(upper, lower)`.
-    fn stacking(&self) -> Vec<Pair> {
-        self.above.clone()
+    /// The stacking, as `(upper, lower)`, sorted.
+    fn stacking(&self, py: Python<'_>) -> Vec<Pair> {
+        py.detach(|| {
+            let mut above = self.above.clone();
+            above.par_sort_unstable();
+            above
+        })
+    }
+
+    /// The faces from the bottom up, each after every face below it, or `None` when
+    /// the stacking holds a cycle.
+    ///
+    /// Faces with no face below come first, by number, and each face follows as soon
+    /// as every face below it has come.
+    fn bottom_up(&self, py: Python<'_>) -> Option<Vec<u32>> {
+        py.detach(|| bottom_up_of(self.corners.len(), &self.above))
     }
 
     /// Each crease's kind now, as seen from the paper's front: `M` or `V` folded, `F`
@@ -605,6 +624,28 @@ impl State {
     /// Every pair of faces that share area once folded, the lesser first, sorted.
     fn overlapping(&self, py: Python<'_>) -> Vec<Pair> {
         py.detach(|| self.folded().overlapping.clone())
+    }
+
+    /// Each face's corners where it lies once folded, counterclockwise as seen from
+    /// above, exactly and as floats.
+    ///
+    /// A face turned over lists its corners the other way round. Faces find theirs on
+    /// every core.
+    #[pyo3(name = "folded")]
+    fn folded_corners(&self, py: Python<'_>) -> Vec<Vec<(PointData, (f64, f64))>> {
+        let found = py.detach(|| match self.folded.get() {
+            Some(folded) => folded.folded.clone(),
+            None => folded_polygons(&self.tower, &self.vertices, &self.corners, &self.places),
+        });
+        found
+            .iter()
+            .map(|polygon| {
+                polygon
+                    .iter()
+                    .map(|p| (point_data(p), p.floats()))
+                    .collect()
+            })
+            .collect()
     }
 
     /// The most layers of paper at one point once folded, and a point inside them.
