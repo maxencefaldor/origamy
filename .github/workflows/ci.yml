@@ -89,6 +89,23 @@ jobs:
       - name: Tests
         run: uv run pytest
 
+  slow:
+    name: Slow tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install # the version and components rust-toolchain.toml pins
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync
+      - name: Slow tests
+        run: uv run pytest -m slow
+
   examples:
     name: Examples
     runs-on: ubuntu-latest

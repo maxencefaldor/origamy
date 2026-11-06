@@ -74,6 +74,12 @@ addopts = [
   "--strict-config",
   "--strict-markers",
   "-ra",
+  # Slow tests run alone, with `-m slow`.
+  "-m",
+  "not slow",
+]
+markers = [
+  "slow: a move the simulator cannot fold yet, which takes minutes to stop",
 ]
 filterwarnings = ["error"]
 xfail_strict = true

@@ -9,6 +9,7 @@ The README says what origamy does; the rules below say how to change it.
 uv sync                             # install Python 3.14 and every tool from uv.lock, and build the simulator's core
 uv run playwright install chromium  # the browser origamy draws in, once per machine
 uv run pytest                       # tests; warnings are errors
+uv run pytest -m slow               # the moves the simulator cannot fold yet, minutes each
 uv run ruff format                  # format
 uv run ruff check                   # lint, with every rule enabled
 uv run ty check                     # types
@@ -106,6 +107,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   `_core.pyi` types every class of `_core`, and a test holds the two together.
 - **Indices:** 32-bit in the core, and 64-bit integer arrays in Python, so arithmetic on them never wraps.
 - **Tests:** every rule gets a case that states it.
+  A move the simulator cannot fold yet is a strict expected failure and a slow test, so the main tests stay fast.
   Geometry and folding get property tests.
   Pictures get a test that checks real pixels.
   Every energy of the simulator gets finite-difference checks of its gradient and Hessian.

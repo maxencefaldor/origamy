@@ -3,9 +3,9 @@
 
 Each move is a short fold script of a square. It folds at kami's thickness, and with
 contact that keeps a twentieth of it, nearly the mathematical sheet. A move the
-simulator cannot fold yet is a strict expected failure, with what stops it. A fold at
-a tipping point folds on some machines and not on others, so its expected failure may
-pass.
+simulator cannot fold yet is a strict expected failure, with what stops it, and a slow
+test. A fold at a tipping point folds on some machines and not on others, so its
+expected failure may pass.
 """
 
 import math
@@ -100,15 +100,22 @@ STOPS: dict[tuple[str, float], str | None] = {
 fold it yet."""
 
 
+def _marks(stop: str | None) -> list[pytest.MarkDecorator]:
+    """No marks for a move that folds, and an expected failure for one that stops."""
+    if stop is None:
+        return []
+    if stop is TIPPING:
+        return [pytest.mark.xfail(reason=stop, strict=False)]
+    return [pytest.mark.xfail(reason=stop, strict=True), pytest.mark.slow]
+
+
 @pytest.mark.parametrize(
     ("name", "share"),
     [
         pytest.param(
             name,
             share,
-            marks=[]
-            if stop is None
-            else [pytest.mark.xfail(reason=stop, strict=stop is not TIPPING)],
+            marks=_marks(stop),
         )
         for (name, share), stop in STOPS.items()
     ],
