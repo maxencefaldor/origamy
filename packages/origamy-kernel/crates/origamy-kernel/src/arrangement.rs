@@ -309,7 +309,7 @@ fn crossings(
     let boxes: Vec<[f64; 4]> = (0..segments.len())
         .map(|s| {
             let (a, b) = ends(s);
-            float_box(&[a.clone(), b.clone()])
+            float_box([a, b])
         })
         .collect();
     let all = boxes.iter().fold(

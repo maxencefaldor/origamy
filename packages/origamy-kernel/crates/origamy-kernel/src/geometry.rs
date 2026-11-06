@@ -328,7 +328,7 @@ pub fn sides(polygon: &[Point]) -> impl Iterator<Item = (&Point, &Point)> {
 
 /// The smallest box around some points, in floats grown to hold every rounding.
 #[must_use]
-pub fn float_box(points: &[Point]) -> [f64; 4] {
+pub fn float_box<'p>(points: impl IntoIterator<Item = &'p Point>) -> [f64; 4] {
     let mut b = [
         f64::INFINITY,
         f64::INFINITY,

@@ -10,6 +10,7 @@
     reason = "the geometry names segments' ends p to s, as the formulas do"
 )]
 
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::arrangement::{Segment, Stretches};
@@ -128,6 +129,10 @@ pub fn crease(
 
 /// The faces the edges divide the paper into, each counterclockwise, in the order the
 /// edges first border them.
+///
+/// Each vertex sorts its neighbors by angle on its own core. A half-edge, from a vertex
+/// to its neighbor, is numbered by the vertex's run of neighbors, and the face on its
+/// left continues along the next half-edge clockwise around its end.
 fn faces(
     vertices: &[Point],
     edges: &[[u32; 2]],
@@ -142,46 +147,71 @@ fn faces(
         let y = v.y.sign(tower);
         u8::from(!(y > 0 || (y == 0 && v.x.sign(tower) > 0)))
     };
-    let mut position: FxHashMap<(u32, u32), usize> = FxHashMap::default();
-    for (v, others) in around.iter_mut().enumerate() {
+    around.par_iter_mut().enumerate().for_each(|(v, others)| {
         let center = &vertices[v];
-        let directions: FxHashMap<u32, Point> = others
+        let mut directions: Vec<(u32, Point)> = others
             .iter()
             .map(|&w| (w, vertices[w as usize].minus(center, tower)))
             .collect();
-        others.sort_by(|a, b| {
-            let (va, vb) = (&directions[a], &directions[b]);
+        directions.sort_by(|(_, va), (_, vb)| {
             half(va)
                 .cmp(&half(vb))
                 .then_with(|| 0.cmp(&va.cross(vb, tower).sign(tower)))
         });
-        for (i, &w) in others.iter().enumerate() {
-            position.insert((u32::try_from(v).expect("vertices fit in 32 bits"), w), i);
-        }
+        *others = directions.into_iter().map(|(w, _)| w).collect();
+    });
+    let mut starts = vec![0usize; vertices.len() + 1];
+    for (v, others) in around.iter().enumerate() {
+        starts[v + 1] = starts[v] + others.len();
     }
-    let mut seen: rustc_hash::FxHashSet<(u32, u32)> = rustc_hash::FxHashSet::default();
-    let mut faces = vec![];
+    // The half-edge from `a` to `b`, by its number.
+    let half_edge = |a: u32, b: u32| {
+        let at = around[a as usize]
+            .iter()
+            .position(|&w| w == b)
+            .expect("an edge's ends neighbor each other");
+        starts[a as usize] + at
+    };
+    let mut seen = vec![false; starts[vertices.len()]];
+    let mut walks = vec![];
     for &[u, v] in edges {
-        for start in [(u, v), (v, u)] {
-            if seen.contains(&start) {
+        for (a, b) in [(u, v), (v, u)] {
+            if seen[half_edge(a, b)] {
                 continue;
             }
             let mut walk = vec![];
-            let mut here = start;
-            while seen.insert(here) {
-                walk.push(here.0);
-                let (a, b) = here;
+            let (mut a, mut b) = (a, b);
+            loop {
+                let here = half_edge(a, b);
+                if seen[here] {
+                    break;
+                }
+                seen[here] = true;
+                walk.push(a);
                 let others = &around[b as usize];
-                here = (
-                    b,
-                    others[(position[&(b, a)] + others.len() - 1) % others.len()],
-                );
+                let back = half_edge(b, a) - starts[b as usize];
+                (a, b) = (b, others[(back + others.len() - 1) % others.len()]);
             }
+            walks.push(walk);
+        }
+    }
+    // Each walk decides on its own core whether it bounds a face, and the first face a
+    // loose crease leaves, in order, refuses.
+    let outcomes: Vec<Result<bool, CreaseError>> = walks
+        .par_iter()
+        .map(|walk| {
             let polygon: Vec<&Point> = walk.iter().map(|&i| &vertices[i as usize]).collect();
             if area(&polygon, tower) > 0 {
-                check(&polygon, tower)?;
-                faces.push(walk);
+                check(walk, &polygon, tower).map(|()| true)
+            } else {
+                Ok(false)
             }
+        })
+        .collect();
+    let mut faces = vec![];
+    for (walk, outcome) in walks.into_iter().zip(outcomes) {
+        if outcome? {
+            faces.push(walk);
         }
     }
     Ok(faces)
@@ -196,9 +226,13 @@ fn area(polygon: &[&Point], tower: &Tower) -> i32 {
 }
 
 /// Refuse a face a loose crease leaves: one it borders twice, or one not convex.
-fn check(polygon: &[&Point], tower: &Tower) -> Result<(), CreaseError> {
-    let distinct: rustc_hash::FxHashSet<&Point> = polygon.iter().copied().collect();
-    if distinct.len() < polygon.len() {
+fn check(walk: &[u32], polygon: &[&Point], tower: &Tower) -> Result<(), CreaseError> {
+    // The vertices are distinct points, so a face borders a vertex twice exactly when
+    // its walk repeats the vertex's number.
+    let mut distinct = walk.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if distinct.len() < walk.len() {
         return Err(CreaseError::Loose);
     }
     let n = polygon.len();
