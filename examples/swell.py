@@ -54,4 +54,6 @@ def fold() -> Paper:
     paper.collapse(valleys=valleys, mountains=mountains)
     columns = [Line.through((x, 0), (x, 1)) for x in edges[1:-1]]
     paper.flex(dict.fromkeys(columns, OPEN))
+    # Opened, the sheet leans 52° from the table; lay it down on its ridges.
+    paper.tilt(Line.through(("3/5", "7/10"), ("-7/5", "17/10")), flap=(1, 1), angle=-52)
     return paper

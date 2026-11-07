@@ -46,4 +46,7 @@ def fold() -> Paper:
     # Rigid origami: the columns open, and the zigzags follow.
     columns = [Line.through((width * c, 0), (width * c, 1)) for c in range(1, COLUMNS)]
     paper.flex(dict.fromkeys(columns, OPEN))
+    # Opened, the sheet stands on a corner; lay it down on its ridges. The tilt's line
+    # runs along the opened sheet's long side, and 76° is how far the sheet leans.
+    paper.tilt(Line.through(("3/8", "1/8"), ("35/8", "9/8")), flap=("3/8", 1), angle=76)
     return paper

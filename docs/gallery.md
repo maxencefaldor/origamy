@@ -42,10 +42,11 @@ Models that end out of the plane: shaped about their hinges, or opened as rigid 
 
 -   ![The Miura-ori example](images/gallery-miura-ori.png)
 
-    **[Miura-ori](gallery/miura-ori.html)** · 3 steps
+    **[Miura-ori](gallery/miura-ori.html)** · 4 steps
 
     A grid of parallelograms: zigzags alternate mountain and valley, and each column alternates along its length.
     Its 112 creases collapse into one flat stack, then open as rigid origami, the zigzags following the columns.
+    Opened, the sheet lies down on its ridges.
 
     [Open in 3D](gallery/miura-ori.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py)
 
@@ -169,7 +170,7 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The swell example](images/gallery-swell.png)
 
-    **[Swell](gallery/swell.html)** · 3 steps
+    **[Swell](gallery/swell.html)** · 4 steps
 
     A Miura-ori whose columns each grow a quarter wider than the last, their zigzags growing with them.
     Every zigzag keeps one slope, so every vertex keeps the Miura-ori's angles and the paper still opens rigidly, swelling as it goes.
