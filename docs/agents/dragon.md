@@ -1,6 +1,6 @@
 # Designing a dragon
 
-The [dragon](../gallery/dragon.html) in the gallery is an original model, designed by an agent through the fold loop.
+The dragon in the [gallery](../gallery.md#originals) is an original model, designed by an agent through the fold loop.
 The agent wrote [`examples/dragon.py`](https://github.com/maxencefaldor/origamy/blob/main/examples/dragon.py), built it, read the report and the pictures, and changed the script.
 This page replays four refusals from that session, each as origamy stated it, and the change that answered it.
 
