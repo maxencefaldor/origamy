@@ -381,3 +381,70 @@ def test_contact_keeps_its_share_of_the_paper_thickness() -> None:
     simulation.settings = STILL
     with pytest.raises(ValueError, match="closer than its thickness"):
         simulation.step()
+
+
+# Two squares of one sheet: a held 1 cm square, and a free 4 mm one over its middle.
+TWO_SQUARES = Mesh(
+    [
+        [0, 0],
+        [0.01, 0],
+        [0.01, 0.01],
+        [0, 0.01],
+        [0.02, 0],
+        [0.024, 0],
+        [0.024, 0.004],
+        [0.02, 0.004],
+    ],
+    [[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]],
+)
+THROUGH = Settings(time_step=math.inf, contact=Contact(layers=False))
+
+
+def stacked_squares(height: float) -> Simulation:
+    simulation = Simulation([Sheet(TWO_SQUARES)], THROUGH)
+    positions = simulation.positions(0)
+    positions[4:] += np.array([-0.017, 0.003, height])
+    simulation.set_positions(0, positions)
+    simulation.hold(0, range(4))
+    return simulation
+
+
+def test_an_order_keeps_paper_on_its_side_until_it_leaves() -> None:
+    simulation = stacked_squares(1e-4)
+    simulation.set_orders(0, [4, 5, 6, 7], [[0, 1]] * 4, [True] * 4)
+    # Gravity lays the upper square on the lower one, which holds it within microns.
+    report = simulation.step()
+    assert report.converged
+    assert report.energy.contact > 0
+    heights = simulation.positions(0)[4:, 2]
+    assert ((heights > -1e-5) & (heights < 1e-4)).all()
+    assert simulation.orders(0) == [(v, [0, 1], True) for v in range(4, 8)]
+    # Carried off the lower square, the upper one leaves its orders behind.
+    simulation.hold(0, range(4, 8))
+    away = simulation.positions(0)[4:] + np.array([0.02, 0, 0])
+    simulation.move_held(0, range(4, 8), away)
+    assert simulation.step().converged
+    assert simulation.orders(0) == []
+
+
+def test_without_orders_paper_falls_through_paper() -> None:
+    simulation = stacked_squares(1e-4)
+    simulation.settings = THROUGH.model_copy(update={"time_step": 1 / 60})
+    for _ in range(10):
+        assert simulation.step().converged
+    assert (simulation.positions(0)[4:, 2] < -1e-3).all()
+
+
+def test_orders_name_the_sheet_s_vertices_and_triangles() -> None:
+    simulation = stacked_squares(1e-4)
+    simulation.set_orders(0, [4], [[0, 1]], [True])
+    with pytest.raises(ValueError, match="vertex 8"):
+        simulation.set_orders(0, [8], [[0]], [True])
+    with pytest.raises(ValueError, match="triangle 4"):
+        simulation.set_orders(0, [4], [[4]], [True])
+    with pytest.raises(ValueError, match="no triangle"):
+        simulation.set_orders(0, [4], [[]], [True])
+    with pytest.raises(ValueError, match="each order needs one of each"):
+        simulation.set_orders(0, [4, 5], [[0]], [True])
+    # A refused list leaves the orders as they were.
+    assert simulation.orders(0) == [(4, [0, 1], True)]

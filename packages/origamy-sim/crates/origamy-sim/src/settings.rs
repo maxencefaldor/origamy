@@ -92,6 +92,12 @@ pub struct Contact {
     /// Without it, paper passes through paper, as a sheet without thickness does, and contact
     /// still keeps paper above the table and off bodies.
     pub layers: bool,
+    /// The stiffness of the penalty that keeps a point of paper in order, per area round the
+    /// point, in pascals per meter.
+    ///
+    /// The penalty is half the stiffness, times the area, times the square of how far the
+    /// point lies on the wrong side.
+    pub order_stiffness: f64,
 }
 
 /// The air paper moves through, which resists paper moving across its surface.
@@ -191,7 +197,8 @@ impl Default for Contact {
     /// barrier between two edges fades within about 1.8° of parallel. Friction between paper
     /// has a coefficient of 0.4, inside the measured ranges: 0.17 to 0.44 sliding, and 0.33 to
     /// 0.61 at rest. Friction holds contacts that slip less than 0.1 µm a step. Contact keeps
-    /// each sheet's whole thickness.
+    /// each sheet's whole thickness. A point in order with a square centimeter of paper round
+    /// it takes 100 N/m.
     fn default() -> Self {
         Self {
             gap: 2e-6,
@@ -201,6 +208,7 @@ impl Default for Contact {
             stick: 1e-7,
             thickness_share: 1.0,
             layers: true,
+            order_stiffness: 1e6,
         }
     }
 }
@@ -288,7 +296,8 @@ impl Contact {
             self.thickness_share,
             self.thickness_share > 0.0 && self.thickness_share <= 1.0,
             "above 0, and at most 1",
-        )
+        )?;
+        positive("order stiffness", self.order_stiffness)
     }
 }
 

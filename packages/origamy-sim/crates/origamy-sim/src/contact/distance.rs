@@ -195,6 +195,27 @@ enum Region {
 
 /// The region of the triangle `a`, `b`, `c` that holds the point closest to `p`, after
 /// Ericson's Real-Time Collision Detection, 5.1.5.
+/// Whether a point lies over a triangle's face: closest to the inside of its plane rather
+/// than to an edge or a corner.
+pub(crate) fn over_face(p: &Point, a: &Point, b: &Point, c: &Point) -> bool {
+    matches!(triangle_region(p, a, b, c), Region::Face)
+}
+
+/// Whether a point lies over a triangle, its edges and corners included, within a share
+/// `slack` of the triangle's size.
+pub(crate) fn over(p: &Point, a: &Point, b: &Point, c: &Point, slack: f64) -> bool {
+    let (ab, ac, ap) = (b - a, c - a, p - a);
+    let (d00, d01, d11) = (ab.dot(&ab), ab.dot(&ac), ac.dot(&ac));
+    let (d20, d21) = (ap.dot(&ab), ap.dot(&ac));
+    let determinant = d00 * d11 - d01 * d01;
+    if determinant <= 0.0 {
+        return false;
+    }
+    let v = (d11 * d20 - d01 * d21) / determinant;
+    let w = (d00 * d21 - d01 * d20) / determinant;
+    v >= -slack && w >= -slack && v + w <= 1.0 + slack
+}
+
 fn triangle_region(p: &Point, a: &Point, b: &Point, c: &Point) -> Region {
     let (ab, ac, ap) = (b - a, c - a, p - a);
     let (d1, d2) = (ab.dot(&ap), ac.dot(&ap));

@@ -196,6 +196,7 @@ impl Parameters for Contact {
             stick: field(model, "stick")?,
             thickness_share: field(model, "thickness_share")?,
             layers: field(model, "layers")?,
+            order_stiffness: field(model, "order_stiffness")?,
         })
     }
 
@@ -206,7 +207,8 @@ impl Parameters for Contact {
         fields.set_item("friction", self.friction)?;
         fields.set_item("stick", self.stick)?;
         fields.set_item("thickness_share", self.thickness_share)?;
-        fields.set_item("layers", self.layers)
+        fields.set_item("layers", self.layers)?;
+        fields.set_item("order_stiffness", self.order_stiffness)
     }
 }
 

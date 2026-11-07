@@ -15,8 +15,8 @@ use numpy::{
     PyUntypedArrayMethods,
 };
 use origamy_sim::{
-    Body, Crease, Energy, Faces, Material, Mesh, Refinement, Report, Settings, Sheet, Simulation,
-    StepError, Vertex,
+    Body, Crease, Energy, Faces, Material, Mesh, Order, Refinement, Report, Settings, Sheet,
+    Simulation, StepError, Vertex,
 };
 use pyo3::create_exception;
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -915,6 +915,75 @@ impl PySimulation {
     fn pressure(&self, sheet: usize) -> PyResult<f64> {
         self.check(sheet)?;
         Ok(self.0.pressure(sheet))
+    }
+
+    /// The orders of a sheet that have not lapsed: each its point, its triangles, and whether
+    /// it keeps to their fronts.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn orders(&self, sheet: usize) -> PyResult<Vec<(Vertex, Vec<u32>, bool)>> {
+        self.check(sheet)?;
+        Ok(self
+            .0
+            .orders(sheet)
+            .iter()
+            .map(|order| (order.point, order.triangles.clone(), order.front))
+            .collect())
+    }
+
+    /// Replaces a sheet's orders: points that keep to one side of triangles of the sheet.
+    ///
+    /// A penalty pushes a point back where it lies over a triangle's face on the wrong side.
+    /// The penalty is half the contact's order stiffness, times the area round the point,
+    /// times the squared distance. An order lapses once a time step ends with its point over
+    /// none of its triangles. Paper may then pass round an edge.
+    ///
+    /// Args:
+    ///     sheet: The sheet.
+    ///     points: Each order's point, of shape (n,).
+    ///     triangles: Each order's triangles, by their index in the mesh.
+    ///     fronts: Whether each order keeps to its triangles' fronts, where their normals
+    ///         point, of shape (n,).
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    ///     ValueError: When the lists differ in length, or an order names a vertex or
+    ///         triangle the sheet lacks, or no triangle. A refused list leaves the orders as
+    ///         they were.
+    fn set_orders(
+        &mut self,
+        sheet: usize,
+        points: &Bound<'_, PyAny>,
+        triangles: Vec<Vec<u32>>,
+        fronts: Vec<bool>,
+    ) -> PyResult<()> {
+        self.check(sheet)?;
+        let points = entries("points", points)?;
+        if points.len() != triangles.len() || points.len() != fronts.len() {
+            return Err(PyValueError::new_err(format!(
+                "{} points, {} lists of triangles and {} fronts, but each order needs one of each",
+                points.len(),
+                triangles.len(),
+                fronts.len()
+            )));
+        }
+        let orders = points
+            .into_iter()
+            .zip(triangles)
+            .zip(fronts)
+            .map(|((point, triangles), front)| {
+                let point = Vertex::try_from(point).map_err(|_| {
+                    PyValueError::new_err(format!("the sheet has no vertex {point}"))
+                })?;
+                Ok(Order {
+                    point,
+                    triangles,
+                    front,
+                })
+            })
+            .collect::<PyResult<Vec<Order>>>()?;
+        self.0.set_orders(sheet, orders).map_err(value_error)
     }
 
     /// Sets the pressure on a sheet's front, in pascals, until set again.
