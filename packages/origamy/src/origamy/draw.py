@@ -187,13 +187,17 @@ class Layers:
     """How far each face's stack shifts in space."""
 
 
-def layers(paper: Shaped) -> Layers:
-    """How a picture parts the layers of a paper, flat or shaped."""
+def layers(paper: Shaped, *, tight: bool = False) -> Layers:
+    """How a picture parts the layers of a paper, flat or shaped.
+
+    Paper in one plane stacks every face on every face below it, unless ``tight``: then
+    each face sits only as high as the faces it lies over need.
+    """
     state = paper.state
     form = paper.form or Form.flat(len(state.faces))
     stacks = _stacks(form)
     found = state.bottom_up
-    if found is not None and len(set(stacks)) == 1:
+    if found is not None and len(set(stacks)) == 1 and not tight:
         # Paper in one plane stacks every face on every face below it.
         height = list(found[1])
     else:

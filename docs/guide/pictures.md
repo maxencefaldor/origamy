@@ -75,6 +75,13 @@ Rigid origami follows a collapse of paper with at most 128 faces.
 A larger collapse, such as a published crease pattern's, moves each face straight to its place.
 Layers sit a small gap apart, and a fold's crease bends round from one layer to the other, so a folded edge reads as one sheet.
 
+A viewer can also play a film: the build as origamy's simulator folds it, from the flat sheet.
+The gallery's viewers play films.
+Each step's paper moves as the simulated paper moved, and rests exactly where the step's state puts it.
+Between steps, a hand slides the paper back to the middle of the table.
+The eye frames each step before its paper moves, and stands still while it folds.
+Each layer lies a sheet's thickness above the layers under it, so a stack thickens only where its own layers reach.
+
 ![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](../images/viewer.png)
 
 | Control | Does |

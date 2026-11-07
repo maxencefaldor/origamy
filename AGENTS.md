@@ -102,6 +102,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
 - **The viewer** is `assets/viewer.js` and `assets/viewer.css`, written into one HTML page with the build as data.
   The viewer draws paper as paper: a fold's crease bends round between its layers, and a collapse turns its creases together.
   Its studio lights the paper by a soft room and casts its shadows on a table; the gallery's viewers open there.
+  A gallery viewer plays a film, and its eye frames each step before the paper moves, then stands still.
   The viewer loads three.js from jsDelivr; `assets/three` vendors the same version, unmodified, so tests run offline.
 - **Rust:** `rust-toolchain.toml` pins the toolchain, and `Cargo.lock` every crate.
   The code is formatted by rustfmt and linted by clippy's pedantic group as errors, and the cores forbid unsafe code.
@@ -175,6 +176,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | stick distance | The slip within one time step under which friction holds a contact |
 | order | A triangle of paper kept on one side of a few others, until its centroid lies over none of them |
 | studio | The viewer's view of paper as paper: lit by a soft room, casting shadows on a table, without outlines |
+| film | A simulated build as a viewer plays it: each step's paper moves as the simulator folded it and rests exactly in its state |
 
 Spell American English: color, center.
 

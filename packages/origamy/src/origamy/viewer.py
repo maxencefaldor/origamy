@@ -11,6 +11,7 @@ headless Chromium, draws any step from any direction.
 """
 
 import base64
+import itertools
 import json
 import os
 import tempfile
@@ -24,6 +25,8 @@ from pathlib import Path
 from string import Template
 from typing import Any, Final
 
+import numpy as np
+from numpy.typing import NDArray
 from playwright.async_api import Route, async_playwright
 
 from origamy import flex
@@ -31,9 +34,10 @@ from origamy.draw import GAP, Eye, across, folded_box, layers
 from origamy.errors import OrigamyError
 from origamy.geometry import Isometry, Line
 from origamy.paper import Step
+from origamy.physics import Folding, Stage
 from origamy.render import BROWSER
 from origamy.result import BuildResult
-from origamy.space import Shaped
+from origamy.space import Shaped, placements
 from origamy.state import State
 
 THREE_VERSION: Final = "0.186.1"
@@ -62,6 +66,9 @@ _TILT: Final = (0.35, -0.75, 0.75)
 
 _STEEPEST: Final = 89.99
 """The steepest elevation an eye takes, so that it still knows which way is up."""
+
+_STILL_ANGLE: Final = 1e-9
+"""The least angle, in radians, between two poses that a turn tells apart."""
 
 _THREE: Final = Path(str(files("origamy").joinpath("assets", "three")))
 """The copy of three.js that origamy vendors."""
@@ -98,16 +105,210 @@ try {
 
 
 def write_viewer(
-    result: BuildResult, name: str, path: Path, *, studio: bool = False
+    result: BuildResult,
+    name: str,
+    path: Path,
+    *,
+    studio: bool = False,
+    folding: Folding | None = None,
 ) -> Path:
     """Write the viewer of a build to ``path`` and return the path.
 
     With ``studio``, the viewer opens showing paper as paper: lit by a soft room and
     casting shadows on a table, without outlines. Otherwise it opens as a diagram.
+    With ``folding``, the build as the simulator folded it, the viewer plays the
+    simulated paper's frames in place of rigid faces.
     """
     data = build_data(result, name) | {"studio": studio}
+    if folding is not None:
+        data["film"] = film_data(result, folding)
     path.write_text(_page(data, name), encoding="utf-8")
     return path
+
+
+def film_data(result: BuildResult, folding: Folding) -> Data:
+    """The simulated paper as the viewer plays it: its mesh, and each step's frames.
+
+    Each frame is where every vertex of the mesh lay, in the paper's units. The paper
+    rests exactly where each state puts it, and moves between rests as the simulator
+    folded it. Each fold names, for each face's copy of a vertex, how many layers lie
+    under it, and for each face whether it shows its back. The viewer thus draws
+    touching layers in their stacking.
+    """
+    steps = [data.step() for data in result.steps]
+    last = steps[-1].state
+    # The viewer works in the paper's units; the simulator, in meters.
+    xs = [p.floats()[0] for p in last.vertices]
+    rest = folding.mesh.rest
+    scale = float(rest[:, 0].max() - rest[:, 0].min()) / (max(xs) - min(xs))
+    films: list[Data] = [{"frames": "", "folds": []} for _ in steps]
+    frames: list[list[NDArray[np.float64]]] = [[] for _ in steps]
+    # Each vertex goes with one face of the last crease pattern that it bounds.
+    owner = np.zeros(len(rest), dtype=np.int64)
+    owner[folding.mesh.triangles.ravel()] = np.repeat(folding.faces, 3)
+    flat = np.column_stack([rest[:, :2] / scale, np.zeros(len(rest))])
+    before = np.column_stack([rest[:, :2], np.zeros(len(rest))])
+    correction = np.zeros_like(before)
+    copies = _copies(folding.mesh.triangles, folding.faces)
+    posed = _Pose(np.eye(3), np.zeros(3))
+    for stage in folding.stages:
+        parents = stage.state.parents(last)
+        films[stage.step]["folds"].append(
+            {
+                "count": len(stage.frames),
+                "lifts": _packed(_lifts(stage, parents, copies)),
+                "flips": [stage.state.faces[p].place.flips for p in parents],
+            }
+        )
+        # The paper rests exactly where its state puts it. Between rests it keeps the
+        # simulator's motion, eased from one rest's mismatch to the next by how far it
+        # has come, and turned as a whole from one rest's pose to the next.
+        placed = np.array(placements(stage.state, stage.form))[np.array(parents)][owner]
+        state = np.einsum("nij,nj->ni", placed[:, :9].reshape(-1, 3, 3), flat)
+        state = (state + placed[:, 9:]) * scale
+        found = stage.frames[-1]
+        reached = _fitted(state, found, flat=stage.form is None)
+        steps_taken = [before, *stage.frames]
+        lengths = np.array(
+            [np.abs(b - a).max() for a, b in itertools.pairwise(steps_taken)]
+        )
+        total = lengths.sum()
+        shares = np.cumsum(lengths) / total if total > 0 else np.ones(len(lengths))
+        after = reached - found
+        pose = _Pose.between(reached, state)
+        for frame, share in zip(stage.frames, shares, strict=True):
+            shaped = frame + (1 - share) * correction + share * after
+            frames[stage.step].append(posed.toward(pose, share).moved(shaped))
+        before, correction, posed = found, after, pose
+    for film, own in zip(films, frames, strict=True):
+        if own:
+            film["frames"] = _packed((np.stack(own) / scale).astype(np.float32))
+    return {
+        "rest": _packed((rest / scale).astype(np.float32)),
+        "triangles": _packed(folding.mesh.triangles.astype(np.int32)),
+        "faces": _packed(folding.faces.astype(np.int32)),
+        "vertices": len(folding.mesh.rest),
+        "steps": films,
+    }
+
+
+@dataclass(frozen=True)
+class _Pose:
+    """A turn of paper about its middle, then a shift: how a frame comes to its rest.
+
+    The turn acts on rows of points, and the middle is the points' mean.
+    """
+
+    turn: NDArray[np.float64]
+    shift: NDArray[np.float64]
+
+    @classmethod
+    def between(cls, points: NDArray[np.float64], target: NDArray[np.float64]) -> _Pose:
+        """The pose that takes points, rigidly, nearest a target, by Kabsch."""
+        middle, aim = points.mean(axis=0), target.mean(axis=0)
+        u, _, vt = np.linalg.svd((points - middle).T @ (target - aim))
+        sign = np.sign(np.linalg.det(u @ vt)) or 1.0
+        return cls(u @ np.diag([1.0, 1.0, sign]) @ vt, aim - middle)
+
+    def moved(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Points in this pose."""
+        middle = points.mean(axis=0)
+        return (points - middle) @ self.turn + middle + self.shift
+
+    def toward(self, other: _Pose, share: float) -> _Pose:
+        """The pose a share of the way to another, turning about one axis."""
+        start, end = _quaternion(self.turn), _quaternion(other.turn)
+        if start @ end < 0:
+            end = -end
+        angle = np.arccos(np.clip(start @ end, -1.0, 1.0))
+        if angle < _STILL_ANGLE:
+            mixed = start
+        else:
+            mixed = np.sin((1 - share) * angle) * start + np.sin(share * angle) * end
+            mixed /= np.sin(angle)
+        return _Pose(_turn(mixed), (1 - share) * self.shift + share * other.shift)
+
+
+def _quaternion(turn: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The unit quaternion (w, x, y, z) of a turn that acts on rows of points."""
+    m = turn.T
+    w = np.sqrt(max(0.0, 1 + m[0, 0] + m[1, 1] + m[2, 2])) / 2
+    x = np.copysign(
+        np.sqrt(max(0.0, 1 + m[0, 0] - m[1, 1] - m[2, 2])) / 2, m[2, 1] - m[1, 2]
+    )
+    y = np.copysign(
+        np.sqrt(max(0.0, 1 - m[0, 0] + m[1, 1] - m[2, 2])) / 2, m[0, 2] - m[2, 0]
+    )
+    z = np.copysign(
+        np.sqrt(max(0.0, 1 - m[0, 0] - m[1, 1] + m[2, 2])) / 2, m[1, 0] - m[0, 1]
+    )
+    q = np.array([w, x, y, z])
+    return q / np.linalg.norm(q)
+
+
+def _turn(q: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The turn, acting on rows of points, of a unit quaternion (w, x, y, z)."""
+    w, x, y, z = q
+    m = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
+    return m.T
+
+
+def _copies(
+    triangles: NDArray[np.int64], faces: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Each face's own copy of its vertices, face by face, as the viewer draws them.
+
+    Each row holds a face and a vertex. A face's vertices come in the order its
+    triangles first name them.
+    """
+    copies: list[tuple[int, int]] = []
+    for face in range(int(faces.max()) + 1):
+        own = dict.fromkeys(int(v) for v in triangles[faces == face].ravel())
+        copies += [(face, v) for v in own]
+    return np.array(copies, dtype=np.int64)
+
+
+def _lifts(
+    stage: Stage, parents: Sequence[int], copies: NDArray[np.int64]
+) -> NDArray[np.uint8]:
+    """How many layers lie under each copy of a vertex at a fold's end.
+
+    Each face sits only as high as the faces it lies over need, so a stack thickens
+    only as far as its own layers reach.
+    """
+    heights = np.array(layers(Shaped(stage.state, stage.form), tight=True).heights)
+    return np.minimum(heights[np.array(parents)[copies[:, 0]]], 255).astype(np.uint8)
+
+
+def _fitted(
+    points: NDArray[np.float64], target: NDArray[np.float64], *, flat: bool
+) -> NDArray[np.float64]:
+    """Points moved by the rigid motion that brings them nearest a target, by Kabsch.
+
+    Each point pairs with the target's point of the same row, and the motion never
+    mirrors them. Flat points only turn and slide on the table, and lie at its height.
+    """
+    if flat:
+        middle, aim = points[:, :2].mean(axis=0), target[:, :2].mean(axis=0)
+        u, _, vt = np.linalg.svd((points[:, :2] - middle).T @ (target[:, :2] - aim))
+        turn = np.diag([1.0, np.sign(np.linalg.det(u @ vt))])
+        moved = (points[:, :2] - middle) @ (u @ turn @ vt) + aim
+        return np.column_stack([moved, np.full(len(points), target[:, 2].min())])
+    middle, aim = points.mean(axis=0), target.mean(axis=0)
+    u, _, vt = np.linalg.svd((points - middle).T @ (target - aim))
+    turn = np.diag([1.0, 1.0, np.sign(np.linalg.det(u @ vt))])
+    return (points - middle) @ (u @ turn @ vt) + aim
+
+
+def _packed(array: NDArray[Any]) -> str:
+    """An array's bytes, little-endian, in base64."""
+    return base64.b64encode(np.ascontiguousarray(array).tobytes()).decode("ascii")
 
 
 @dataclass(frozen=True, slots=True)

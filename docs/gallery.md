@@ -3,6 +3,7 @@
 The models below each fold with one command from [`examples/`](https://github.com/maxencefaldor/origamy/tree/main/examples).
 Each opens in the 3D viewer, to replay its steps, orbit the paper and see every layer in x-ray.
 The viewer opens in its studio, lighting the paper as paper; its Studio button turns the view into a diagram.
+Each viewer plays the model as origamy's simulator folds it, from the flat sheet, each step resting exactly in its state.
 The viewer also traces each face back to the crease pattern.
 
 ## In space
@@ -156,5 +157,23 @@ Models designed with origamy, each a short composition of the same exact actions
     Seven precreases, found by halving, collapse at once into alternate pleats, then the stack folds in half.
 
     [Open in 3D](gallery/pleated-fan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pleated_fan.py)
+
+-   ![The swell example](images/gallery-swell.png)
+
+    **[Swell](gallery/swell.html)** · 3 steps
+
+    A Miura-ori whose columns each grow a quarter wider than the last, their zigzags growing with them.
+    Every zigzag keeps one slope, so every vertex keeps the Miura-ori's angles and the paper still opens rigidly, swelling as it goes.
+
+    [Open in 3D](gallery/swell.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swell.py)
+
+-   ![The winglet dart example](images/gallery-winglet-dart.png)
+
+    **[Winglet dart](gallery/winglet-dart.html)** · 16 steps
+
+    The classic dart, each wingtip turned up square as a winglet.
+    Each winglet's crease lies where the paper's edge folds onto the wing's crease.
+
+    [Open in 3D](gallery/winglet-dart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/winglet_dart.py)
 
 </div>

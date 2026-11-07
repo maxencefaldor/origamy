@@ -20,7 +20,7 @@ jobs:
   build:
     name: Build the site
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust

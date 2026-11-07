@@ -8,6 +8,12 @@ Each script in ``examples`` folds in its own process, and its viewer goes to
 ``docs/gallery/<name>.html``, named after the script with hyphens. Each viewer loads
 three.js from jsDelivr when opened.
 
+Each viewer plays the model's film: the model as origamy's simulator folds it, from the
+flat sheet, in the viewer's studio. The simulation keeps no thickness, and orders hold
+its layers in the stacking. A model whose simulation strays from its states shows as
+rigid faces.
+Worker processes simulate the models in parallel, the longest first.
+
 Writing a viewer needs no browser, so the docs workflow runs this script on a plain
 runner. The viewers are build output, left out of the repository. With
 ``--thumbnails``, the script also draws each model's card image into ``docs/images``
@@ -15,10 +21,12 @@ from its viewer, in Chromium; those images are committed.
 """
 
 import asyncio
+import math
 import os
 import re
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from importlib.resources import files
 from pathlib import Path
 from typing import Final
@@ -27,10 +35,12 @@ from playwright.async_api import Route, async_playwright
 
 from origamy import Number
 from origamy.field import tower
+from origamy.physics import Physics, simulate
 from origamy.render import BROWSER
 from origamy.result import Failure
 from origamy.service import run_script
 from origamy.viewer import THREE_PACKAGE, write_viewer
+from origamy_sim import Contact, Settings, Table
 
 ROOT: Final = Path(__file__).resolve().parent.parent
 EXAMPLES: Final = ROOT / "examples"
@@ -40,6 +50,15 @@ GALLERY_PAGE: Final = ROOT / "docs" / "gallery.md"
 THREE: Final = Path(str(files("origamy").joinpath("assets", "three")))
 VIEWER_LINK: Final = re.compile(r"\[([^\]]+)\]\(gallery/([a-z0-9-]+)\.html\)")
 """A link to a viewer, such as ``[Crane](gallery/crane.html)``."""
+PHYSICS: Final = Physics(
+    settings=Settings(time_step=math.inf, table=Table(), contact=Contact(layers=False))
+)
+"""How the gallery simulates each model: quasi-static, on a table, without thickness."""
+STRAY: Final = 0.03
+"""The farthest, in meters, a simulated fold may leave paper from its state for the
+viewer to play the simulation."""
+LONGEST: Final = ("crane", "flapping-bird", "frog-base")
+"""The models whose simulations take longest, which start first."""
 
 
 def gallery_headings() -> dict[str, str]:
@@ -50,17 +69,27 @@ def gallery_headings() -> dict[str, str]:
     return headings
 
 
-async def write_gallery_viewer(name: str, heading: str) -> Path:
-    """Fold an example in its own process and write its viewer."""
+def write_gallery_viewer(name: str, heading: str) -> tuple[Path, str]:
+    """Fold an example in its own process, simulate it, and write its viewer.
+
+    Returns the viewer's path and what the simulation found.
+    """
     script = EXAMPLES / (name.replace("-", "_") + ".py")
-    result = await run_script(script, timeout=600)
+    result = asyncio.run(run_script(script, timeout=600))
     if isinstance(result, Failure):
         msg = f"{script.name} failed: {result.error}: {result.message}"
         raise SystemExit(msg)
     path = GALLERY / f"{name}.html"
     path.parent.mkdir(parents=True, exist_ok=True)
     with tower(Number.from_data(radicand) for radicand in result.tower):
-        return await asyncio.to_thread(write_viewer, result, heading, path, studio=True)
+        folding = simulate([data.step() for data in result.steps], PHYSICS)
+        stray = max(stage.offset for stage in folding.stages)
+        faithful = stray <= STRAY
+        write_viewer(
+            result, heading, path, studio=True, folding=folding if faithful else None
+        )
+    found = f"{len(folding.stages)} simulated folds, straying {stray * 1000:.1f} mm"
+    return path, found if faithful else found + ", shown rigid"
 
 
 async def draw_thumbnails(names: list[str]) -> None:
@@ -85,7 +114,7 @@ async def draw_thumbnails(names: list[str]) -> None:
             # The card shows the finished model alone, without its last fold line.
             await page.evaluate(
                 "const stage = window.origamy.stage;"
-                "stage.look('tilt');"
+                "stage.look('tilt', false, null, true);"
                 "if (stage.line) stage.line.visible = false;"
             )
             await page.wait_for_timeout(900)
@@ -104,13 +133,17 @@ async def main() -> None:
         if not wanted or name in wanted or name.replace("-", "_") in wanted
     }
     started = time.perf_counter()
-    for name, heading in headings.items():
-        begun = time.perf_counter()
-        path = await write_gallery_viewer(name, heading)
-        print(
-            f"wrote {path.relative_to(ROOT)}: {path.stat().st_size / 1000:,.0f} kB "
-            f"in {time.perf_counter() - begun:.1f} s"
-        )
+    order = sorted(headings, key=lambda name: name not in LONGEST)
+    with ProcessPoolExecutor() as pool:
+        loop = asyncio.get_running_loop()
+        jobs = [
+            loop.run_in_executor(pool, write_gallery_viewer, name, headings[name])
+            for name in order
+        ]
+        for job in asyncio.as_completed(jobs):
+            path, found = await job
+            size = path.stat().st_size / 1000
+            print(f"wrote {path.relative_to(ROOT)}: {size:,.0f} kB, {found}")
     print(f"wrote {len(headings)} viewers in {time.perf_counter() - started:.1f} s")
     if "--thumbnails" in sys.argv:
         await draw_thumbnails(list(headings))

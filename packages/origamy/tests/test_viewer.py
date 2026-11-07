@@ -1,5 +1,6 @@
 # Copyright 2026 Maxence Faldor
 import asyncio
+import base64
 import json
 import os
 import re
@@ -8,11 +9,15 @@ from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
 
+import numpy as np
+import pytest
 from playwright.async_api import Route, async_playwright
 
-from origamy import service
+from origamy import Line, Paper, service
+from origamy.physics import simulate
 from origamy.render import BROWSER
-from origamy.viewer import THREE_PACKAGE
+from origamy.result import BuildResult
+from origamy.viewer import THREE_PACKAGE, film_data, write_viewer
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 THREE = Path(str(files("origamy").joinpath("assets", "three")))
@@ -238,3 +243,80 @@ def test_a_view_draws_a_step_from_the_direction_asked(
     unfolded = asyncio.run(service.view(service.ViewRequest(script=script, step=0)))
     front = colors(Path(unfolded.files[0]))
     assert any(r > 150 and r > g + 60 for r, g, b in front)
+
+
+def filmed(tmp_path: Path) -> tuple[BuildResult, Path]:
+    """Fold a book in half and turn it over, simulate it, and write its viewer."""
+    paper = Paper.square()
+    paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    paper.turn_over()
+    result = BuildResult.of(paper, tmp_path)
+    page = tmp_path / "book.html"
+    write_viewer(result, "Book", page, studio=True, folding=simulate(paper.steps))
+    return result, page
+
+
+def test_a_film_rests_exactly_where_each_state_puts_the_paper(
+    tmp_path: Path,
+) -> None:
+    paper = Paper.square()
+    paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    folding = simulate(paper.steps)
+    film = film_data(BuildResult.of(paper, tmp_path), folding)
+    frames = np.frombuffer(base64.b64decode(film["steps"][1]["frames"]), np.float32)
+    last = frames.reshape(-1, film["vertices"], 3)[-1]
+    rest = np.frombuffer(base64.b64decode(film["rest"]), np.float32).reshape(-1, 2)
+    # The right half lies folded onto the left, every vertex mirrored in the middle.
+    for (x, y), (fx, fy, fz) in zip(rest, last, strict=True):
+        assert fx == pytest.approx(min(x, 1 - x), abs=1e-5)
+        assert fy == pytest.approx(y, abs=1e-5)
+        assert fz == pytest.approx(0, abs=1e-5)
+
+
+EYE = """(async () => {
+  const stage = window.origamy.stage;
+  const seen = [];
+  window.origamy.go(1, true);
+  const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+  await wait(800);
+  const end = stage.started + stage.duration();
+  while (performance.now() < end) {
+    const paper = stage.film.positions.slice(0, 3).join();
+    seen.push([...stage.camera.position.toArray(), paper]);
+    await wait(60);
+  }
+  return seen;
+})()"""
+"""Play the fold, and note where the eye stands and the paper lies as it plays."""
+
+
+def test_the_eye_holds_still_while_a_film_folds(tmp_path: Path) -> None:
+    _, page = filmed(tmp_path)
+
+    async def watch() -> tuple[list[str], list[list[str]]]:
+        errors: list[str] = []
+
+        async def serve(route: Route) -> None:
+            path = route.request.url.removeprefix(THREE_PACKAGE).replace("build/", "")
+            await route.fulfill(path=THREE / path, content_type="text/javascript")
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                executable_path=os.environ.get(BROWSER) or None
+            )
+            tab = await browser.new_page(viewport={"width": 900, "height": 700})
+            tab.on("pageerror", lambda error: errors.append(str(error)))
+            await tab.route(THREE_PACKAGE + "**", serve)
+            await tab.goto(page.as_uri())
+            await tab.wait_for_selector('#origamy[data-state="ready"]')
+            await tab.evaluate("window.origamy.go(0, false)")
+            seen = await tab.evaluate(EYE)
+            await browser.close()
+        return errors, [[str(value) for value in shot] for shot in seen]
+
+    errors, seen = asyncio.run(watch())
+    assert errors == []
+    # The paper moves while the eye, once it frames the step, stands still.
+    assert len({shot[3] for shot in seen}) > 3
+    eyes = np.array([shot[:3] for shot in seen], dtype=float)
+    assert np.abs(eyes - eyes[-1]).max() < 1e-9

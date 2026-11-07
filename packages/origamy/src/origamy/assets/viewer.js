@@ -19,6 +19,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const DURATION = 1100; // milliseconds a step's motion takes
+const GLIDE = 700; // milliseconds the eye takes to frame a film's next step, before the paper moves
 const BEND = 8; // segments in the half turn a bend makes
 const STROKES = {
   M: { color: "#c0392b", dash: "7 3 1.5 3", width: 1.6 },
@@ -51,7 +52,7 @@ export function start(root, build) {
   function go(target, animate) {
     index = Math.max(0, Math.min(steps.length - 1, target));
     const step = steps[index];
-    stage.show(step, animate);
+    stage.show(step, animate, index);
     pattern.show(step);
     label.innerHTML = describe(step, index, steps.length);
     facts.innerHTML = factsOf(step);
@@ -69,7 +70,7 @@ export function start(root, build) {
     if (!playing) return;
     if (index === steps.length - 1) go(0, false);
     else go(index + 1, true);
-    setTimeout(tick, DURATION + 500);
+    setTimeout(tick, stage.duration() + 500);
   }
 
   const actions = {
@@ -102,7 +103,7 @@ export function start(root, build) {
     go(target, false);
     stage.xray(seeThrough);
     if (stage.line) stage.line.visible = false;
-    stage.look("tilt", true, toward);
+    stage.look("tilt", true, toward, true);
   }
 
   if (build.studio) actions.studio(root.querySelector('[data-do="studio"]'));
@@ -321,10 +322,17 @@ class Stage {
     this.table.visible = false;
     this.scene.add(this.table);
     this.inStudio = false;
-    this.camera = new THREE.PerspectiveCamera(35, 1, 0.001, 100);
+    // The depth buffer spans the paper's scale, so layers a breath apart still draw in order.
+    this.camera = new THREE.PerspectiveCamera(35, 1, this.size / 50, this.size * 50);
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    // Once a hand turns the view, the eye stays where the hand left it.
+    this.held = false;
+    this.controls.addEventListener("start", () => {
+      this.held = true;
+      this.glide = null;
+    });
     this.paper = new THREE.Group();
     this.scene.add(this.paper);
     this.line = null;
@@ -336,6 +344,8 @@ class Stage {
       fold: new THREE.LineDashedMaterial({ color: "#2c6fbb", dashSize: 0.02, gapSize: 0.014 }),
       refused: new THREE.LineDashedMaterial({ color: "#e0182d", dashSize: 0.02, gapSize: 0.014 }),
     };
+    // A simulated build plays its frames in place of rigid faces.
+    this.film = build.film ? new Film(this.scene, build.film, this.materials, build.size) : null;
     this.seeThrough = false;
     this.lit = null;
     this.pointer = new THREE.Vector2();
@@ -345,6 +355,7 @@ class Stage {
     this.resize();
     this.look("tilt", true);
     const loop = (now) => {
+      this.steer(now);
       this.animate(now);
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
@@ -361,10 +372,26 @@ class Stage {
     this.camera.updateProjectionMatrix();
   }
 
-  show(step, animate) {
+  show(step, animate, index = 0) {
     this.step = step;
     this.started = animate ? performance.now() : null;
     this.paper.clear();
+    if (this.film) {
+      // The simulated paper stands in for the rigid faces, and no fold line shows.
+      this.faces = [];
+      this.bends = [];
+      if (this.line) this.scene.remove(this.line);
+      this.line = null;
+      // The eye frames each step before its paper moves, and holds still while it folds.
+      this.film.step = this.film.steps[index] ?? this.film.steps.at(-1);
+      const glide = animate && !this.held && this.aim(this.view ?? "tilt");
+      this.film.show(index, animate, glide ? GLIDE : 0);
+      if (glide) this.glide = { ...glide, started: performance.now() };
+      else if (!this.held) this.look(this.view ?? "tilt", true);
+      this.studio(this.inStudio);
+      this.place(animate ? 0 : 1);
+      return;
+    }
     this.faces = step.faces.map((corners, face) => {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(corners.length * 3), 3));
@@ -418,6 +445,7 @@ class Stage {
   }
 
   place(t) {
+    if (this.film) return this.film.place(t);
     const step = this.step;
     // When every face moves, the whole paper turns as one.
     const together = step.moved.length === step.faces.length ? true : null;
@@ -467,6 +495,7 @@ class Stage {
     for (const bend of this.bends ?? []) {
       for (const mesh of [bend.front, bend.back]) mesh.castShadow = mesh.receiveShadow = on;
     }
+    this.film?.shadows(on);
     this.element.classList.toggle("studio", on);
     if (this.line) this.line.visible = !on && !this.started;
     if (on && this.faces) this.light();
@@ -475,19 +504,21 @@ class Stage {
 
   /** Aim the key light's shadows at the paper, and lay the table under it. */
   light() {
-    // The box reads the paper's vertices, as the faces' cached bounds lag their moves.
-    const box = new THREE.Box3().setFromObject(this.paper, true);
+    // A film lights every place its paper reaches, so the light and table stay still as it plays.
+    // Otherwise the box reads the paper's vertices, as the faces' cached bounds lag their moves.
+    const box = this.film ? new THREE.Box3().setFromPoints(this.film.reach) : new THREE.Box3().setFromObject(this.paper, true);
     if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const reach = box.getSize(new THREE.Vector3()).length() / 2 + 1e-6;
     const { key } = this.lights;
     key.target.position.copy(center);
-    key.position.copy(center).add(new THREE.Vector3(-0.8, -0.45, 0.75).normalize().multiplyScalar(3 * reach));
+    key.position.copy(center).add(new THREE.Vector3(-0.8, -0.45, 0.75).normalize().multiplyScalar(6 * reach));
+    // The shadow camera sees the whole table, so no edge of its view crosses the table.
     const camera = key.shadow.camera;
-    camera.left = camera.bottom = -2 * reach;
-    camera.right = camera.top = 2 * reach;
-    camera.near = reach;
-    camera.far = 5 * reach;
+    camera.left = camera.bottom = -3 * reach;
+    camera.right = camera.top = 3 * reach;
+    camera.near = 2 * reach;
+    camera.far = 10 * reach;
     camera.updateProjectionMatrix();
     key.shadow.bias = -0.0001;
     this.table.position.set(center.x, center.y, box.min.z - 1e-4 * reach);
@@ -538,21 +569,65 @@ class Stage {
     bend.back.material = back;
   }
 
+  /** How long the step on show takes to move, in milliseconds. */
+  duration() {
+    return this.film ? this.film.duration : DURATION;
+  }
+
   animate(now) {
     if (this.started == null) return;
-    const t = Math.min(1, (now - this.started) / DURATION);
+    const t = Math.min(1, (now - this.started) / this.duration());
     this.place(t);
     if (t >= 1) this.started = null;
   }
 
-  look(view, instant = false, toward = null) {
-    const box = new THREE.Box3().setFromObject(this.paper);
+  /**
+   * Move the eye to frame the paper from a view, for good unless a hand turns it again.
+   *
+   * With `settled`, a film's eye frames only where the step leaves its paper.
+   */
+  look(view, instant = false, toward = null, settled = false) {
+    this.view = view;
+    this.held = false;
+    this.glide = null;
+    const aim = this.aim(view, toward, settled);
+    if (aim) {
+      this.controls.target.copy(aim.target);
+      this.camera.position.copy(aim.position);
+      this.controls.update();
+    }
+    if (instant) this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Glide the eye toward where it frames the film's step. */
+  steer(now) {
+    if (!this.glide) return;
+    const s = Math.min(1, (now - this.glide.started) / GLIDE);
+    const eased = 0.5 - Math.cos(Math.PI * s) / 2;
+    this.camera.position.lerpVectors(this.glide.from.position, this.glide.position, eased);
+    this.controls.target.lerpVectors(this.glide.from.target, this.glide.target, eased);
+    if (s >= 1) this.glide = null;
+  }
+
+  /**
+   * Where the eye goes to frame the paper from a view, and where it looks.
+   *
+   * A film's eye frames the step on show: where its paper rests before and after, and
+   * where it passes between; or, `settled`, where it rests after alone. Returns null for
+   * a film whose eye is there already.
+   */
+  aim(view, toward = null, settled = false) {
+    const step = this.film?.step;
+    const rests = step && (settled ? step.settled : step.rests);
+    const box = step ? new THREE.Box3().setFromPoints(rests) : new THREE.Box3().setFromObject(this.paper);
     const center = box.isEmpty() ? new THREE.Vector3(this.size / 2, this.size / 2, 0) : box.getCenter(new THREE.Vector3());
     // Shaped paper comes with an eye that faces it; flat paper is seen from in front.
+    const flat = [0.35, -0.75, 0.75];
+    const standing = step ? step.standing : true;
     const offsets = {
       top: [0, -0.0001, 1],
       bottom: [0, -0.0001, -1],
-      tilt: this.build.eye ?? [0.35, -0.75, 0.75],
+      tilt: standing ? (this.build.eye ?? flat) : flat,
     };
     const eye = new THREE.Vector3(...(toward ?? offsets[view])).normalize();
     // Back away until every corner of the paper, seen from there, fits the view both ways.
@@ -561,7 +636,7 @@ class Stage {
     right.normalize();
     const up = new THREE.Vector3().crossVectors(eye, right);
     const half = Math.tan((this.camera.fov * Math.PI) / 360);
-    const corners = (this.faces ?? []).flatMap((face) => {
+    const corners = step ? rests : (this.faces ?? []).flatMap((face) => {
       const positions = face.geometry.attributes.position;
       return Array.from({ length: positions.count }, (_, i) => new THREE.Vector3().fromBufferAttribute(positions, i));
     });
@@ -577,10 +652,17 @@ class Stage {
       const fit = Math.max(Math.abs(offset.dot(right)) / (half * this.camera.aspect), Math.abs(offset.dot(up)) / half);
       distance = Math.max(distance, fit * 1.1 + offset.dot(eye));
     }
-    this.controls.target.copy(center);
-    this.camera.position.copy(center).addScaledVector(eye, distance);
-    this.controls.update();
-    if (instant) this.renderer.render(this.scene, this.camera);
+    // Paper passing between rests may come near the edge of the view, but stays in it.
+    for (const corner of (!settled && step?.reach) || []) {
+      const offset = corner.clone().sub(center);
+      const fit = Math.max(Math.abs(offset.dot(right)) / (half * this.camera.aspect), Math.abs(offset.dot(up)) / half);
+      distance = Math.max(distance, fit * 1.01 + offset.dot(eye));
+    }
+    const position = center.clone().addScaledVector(eye, distance);
+    const from = { position: this.camera.position.clone(), target: this.controls.target.clone() };
+    const there = from.position.distanceTo(position) + from.target.distanceTo(center) < 1e-3 * this.size;
+    if (step && there) return null;
+    return { position, target: center, from };
   }
 
   xray(on) {
@@ -610,6 +692,427 @@ class Stage {
     if (this.lit !== null && this.faces?.[this.lit]) this.faces[this.lit].edge.material = this.materials.edge;
     this.lit = face;
     if (face !== null && this.faces?.[face]) this.faces[face].edge.material = this.materials.lit;
+  }
+}
+
+// --- The film: a build as origamy's simulator folded it. ---
+
+const FILM_STEP = 40; // milliseconds a simulated increment takes
+const FILM_MOVE = 900; // milliseconds a rigid move of the whole paper takes
+const FILM_LAYER = 1 / 5000; // touching layers' distance as drawn, in paper sizes: about a sheet of kami
+const FILM_MOVED = 1 / 150; // the least move, in paper sizes, that may be a rigid move of the whole paper
+const FILM_RIGID = 1 / 750; // the farthest, in paper sizes, a rigid move may miss the paper
+
+const FILM_GRAIN = 3; // times the paper's fibers repeat across the sheet
+
+/**
+ * Paper's fibers, as two tileable pictures: one tints the paper's color, one bumps it.
+ *
+ * The tint mottles the color by a percent or two, in soft clouds. The bumps are short
+ * strands, raised or sunk, that catch the light as paper's fibers do.
+ */
+function fibers() {
+  const size = 512;
+  // A seeded random, so every viewer draws the same paper.
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const canvas = (fill) => {
+    const element = document.createElement("canvas");
+    element.width = element.height = size;
+    const context = element.getContext("2d");
+    context.fillStyle = fill;
+    context.fillRect(0, 0, size, size);
+    return [element, context];
+  };
+  // Draw at every place a tile repeats, so the picture wraps without a seam.
+  const around = (draw) => {
+    for (const dx of [-size, 0, size]) for (const dy of [-size, 0, size]) draw(dx, dy);
+  };
+  const [tint, shade] = canvas("#f6f6f6");
+  for (let k = 0; k < 60; k++) {
+    const [x, y, r, light] = [random() * size, random() * size, 40 + random() * 90, random() < 0.5 ? 236 : 255];
+    around((dx, dy) => {
+      const cloud = shade.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+      cloud.addColorStop(0, `rgba(${light},${light},${light},0.18)`);
+      cloud.addColorStop(1, `rgba(${light},${light},${light},0)`);
+      shade.fillStyle = cloud;
+      shade.fillRect(x + dx - r, y + dy - r, 2 * r, 2 * r);
+    });
+  }
+  const [bumps, strands] = canvas("#808080");
+  strands.lineCap = "round";
+  for (let k = 0; k < 2600; k++) {
+    const [x, y, angle, length] = [random() * size, random() * size, random() * Math.PI, 3 + random() * 14];
+    const level = random() < 0.5 ? 100 : 156;
+    strands.strokeStyle = `rgba(${level},${level},${level},${0.25 + random() * 0.35})`;
+    strands.lineWidth = 0.6 + random() * 0.9;
+    const bend = (random() - 0.5) * 1.2;
+    around((dx, dy) => {
+      strands.beginPath();
+      strands.moveTo(x + dx, y + dy);
+      strands.quadraticCurveTo(
+        x + dx + Math.cos(angle + bend) * length * 0.5,
+        y + dy + Math.sin(angle + bend) * length * 0.5,
+        x + dx + Math.cos(angle) * length,
+        y + dy + Math.sin(angle) * length,
+      );
+      strands.stroke();
+    });
+  }
+  return [tint, bumps].map((element, k) => {
+    const texture = new THREE.CanvasTexture(element);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = k === 0 ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    texture.anisotropy = 8;
+    return texture;
+  });
+}
+
+function decode(text, Type) {
+  const raw = atob(text);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Type(bytes.buffer);
+}
+
+/** The eigenvector of a symmetric 4 by 4 matrix's largest eigenvalue, by Jacobi's rotations. */
+function topEigenvector(matrix) {
+  const a = matrix.map((row) => row.slice());
+  const v = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+  for (let sweep = 0; sweep < 50; sweep++) {
+    let off = 0;
+    for (let p = 0; p < 4; p++) for (let q = p + 1; q < 4; q++) off += a[p][q] ** 2;
+    if (off < 1e-30) break;
+    for (let p = 0; p < 4; p++) {
+      for (let q = p + 1; q < 4; q++) {
+        if (Math.abs(a[p][q]) < 1e-300) continue;
+        const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let k = 0; k < 4; k++) [a[k][p], a[k][q]] = [c * a[k][p] - s * a[k][q], s * a[k][p] + c * a[k][q]];
+        for (let k = 0; k < 4; k++) [a[p][k], a[q][k]] = [c * a[p][k] - s * a[q][k], s * a[p][k] + c * a[q][k]];
+        for (let k = 0; k < 4; k++) [v[k][p], v[k][q]] = [c * v[k][p] - s * v[k][q], s * v[k][p] + c * v[k][q]];
+      }
+    }
+  }
+  let best = 0;
+  for (let k = 1; k < 4; k++) if (a[k][k] > a[best][best]) best = k;
+  return [v[0][best], v[1][best], v[2][best], v[3][best]];
+}
+
+/** The rigid motion that best takes points `a` to points `b`, by Horn's method, and how far it misses. */
+function rigidFit(a, b, n) {
+  const [ca, cb] = [[0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) {
+    ca[k] += a[3 * i + k] / n;
+    cb[k] += b[3 * i + k] / n;
+  }
+  const m = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    m[r][c] += (a[3 * i + r] - ca[r]) * (b[3 * i + c] - cb[c]);
+  }
+  const [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]] = m;
+  const q = topEigenvector([
+    [xx + yy + zz, yz - zy, zx - xz, xy - yx],
+    [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+    [zx - xz, xy + yx, -xx + yy - zz, yz + zy],
+    [xy - yx, zx + xz, yz + zy, -xx - yy + zz],
+  ]);
+  const rotation = new THREE.Quaternion(q[1], q[2], q[3], q[0]).normalize();
+  const point = new THREE.Vector3();
+  let miss = 0;
+  for (let i = 0; i < n; i++) {
+    point.set(a[3 * i] - ca[0], a[3 * i + 1] - ca[1], a[3 * i + 2] - ca[2]).applyQuaternion(rotation);
+    miss = Math.max(miss, Math.hypot(point.x + cb[0] - b[3 * i], point.y + cb[1] - b[3 * i + 1], point.z + cb[2] - b[3 * i + 2]));
+  }
+  return { rotation, from: ca, to: cb, miss };
+}
+
+class Film {
+  constructor(scene, film, materials, size) {
+    const n = (this.n = film.vertices);
+    this.size = size;
+    this.triangles = decode(film.triangles, Int32Array);
+    const faces = decode(film.faces, Int32Array);
+    const rest = decode(film.rest, Float32Array);
+    const steps = film.steps.map((step) => ({
+      folds: step.folds.map((fold) => ({ ...fold, lifts: decode(fold.lifts, Uint8Array) })),
+      frames: step.frames ? decode(step.frames, Float32Array) : new Float32Array(0),
+    }));
+    // The paper lies on the table: each frame comes down to where the flat sheet lay, as a
+    // hand lowers paper it lifted to fold under.
+    const first = steps.find((step) => step.frames.length).frames;
+    let lying = Infinity;
+    for (let i = 0; i < n; i++) lying = Math.min(lying, first[3 * i + 2]);
+    for (const step of steps) {
+      for (let f = 0; f < step.frames.length / (3 * n); f++) {
+        const frame = step.frames.subarray(3 * n * f, 3 * n * (f + 1));
+        let low = Infinity;
+        for (let i = 0; i < n; i++) low = Math.min(low, frame[3 * i + 2]);
+        for (let i = 0; i < n; i++) frame[3 * i + 2] += lying - low;
+      }
+    }
+    const flat = new Float32Array(3 * n);
+    for (let i = 0; i < n; i++) flat.set([rest[2 * i], rest[2 * i + 1], lying], 3 * i);
+    // Between steps a hand slides the paper back to the middle of the table, where the sheet lay.
+    const middle = (positions) => {
+      let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
+      for (let i = 0; i < n; i++) {
+        [x0, x1] = [Math.min(x0, positions[3 * i]), Math.max(x1, positions[3 * i])];
+        [y0, y1] = [Math.min(y0, positions[3 * i + 1]), Math.max(y1, positions[3 * i + 1])];
+      }
+      return [(x0 + x1) / 2, (y0 + y1) / 2];
+    };
+    const home = middle(flat);
+    for (const step of steps) {
+      const count = step.frames.length / (3 * n);
+      if (!count) continue;
+      const [x, y] = middle(step.frames.subarray(3 * n * (count - 1)));
+      step.shift = [home[0] - x, home[1] - y];
+      for (let f = 0; f < count; f++) {
+        for (let i = 0; i < n; i++) {
+          step.frames[3 * n * f + 3 * i] += step.shift[0];
+          step.frames[3 * n * f + 3 * i + 1] += step.shift[1];
+        }
+      }
+    }
+    const faceCount = Math.max(...faces) + 1;
+    const still = { lifts: new Uint8Array(3 * this.triangles.length), flips: new Array(faceCount).fill(false) };
+    // Each step ends where its last frame lies, or where the step before it ended.
+    this.steps = [];
+    let end = { positions: flat, fold: still };
+    let shift = [0, 0];
+    for (const step of steps) {
+      const shots = [];
+      if (step.shift) {
+        const [dx, dy] = [step.shift[0] - shift[0], step.shift[1] - shift[1]];
+        if (Math.hypot(dx, dy) > FILM_MOVED * size) {
+          const slid = Float32Array.from(end.positions);
+          for (let i = 0; i < n; i++) {
+            slid[3 * i] += dx;
+            slid[3 * i + 1] += dy;
+          }
+          shots.push({ positions: slid, fold: end.fold });
+        }
+        shift = step.shift;
+      }
+      step.folds.forEach((fold, k) => {
+        const before = step.folds.slice(0, k).reduce((sum, f) => sum + f.count, 0);
+        for (let f = 0; f < fold.count; f++) {
+          shots.push({ positions: step.frames.subarray(3 * n * (before + f), 3 * n * (before + f + 1)), fold });
+        }
+      });
+      this.steps.push({ start: end, shots });
+      if (shots.length) end = shots[shots.length - 1];
+      this.steps[this.steps.length - 1].end = end;
+    }
+    // The eye frames where the paper rests between steps, and keeps in view where it passes
+    // during them. Each keeps a point once to a cell of a fine grid.
+    const kept = (shots) => {
+      const cell = size / 64;
+      const cells = new Map();
+      for (const { positions: p } of shots) {
+        for (let i = 0; i < n; i++) {
+          const key = `${Math.round(p[3 * i] / cell)},${Math.round(p[3 * i + 1] / cell)},${Math.round(p[3 * i + 2] / cell)}`;
+          if (!cells.has(key)) cells.set(key, new THREE.Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]));
+        }
+      }
+      return [...cells.values()];
+    };
+    this.reach = kept(this.steps.flatMap((step) => [step.start, ...step.shots]));
+    for (const step of this.steps) {
+      step.rests = kept([step.start, step.end]);
+      step.settled = kept([step.end]);
+      step.reach = kept(step.shots);
+      // Paper that stands up from the table needs the eye that faces the finished model.
+      let [low, high] = [Infinity, -Infinity];
+      for (let i = 0; i < n; i++) [low, high] = [Math.min(low, step.end.positions[3 * i + 2]), Math.max(high, step.end.positions[3 * i + 2])];
+      step.standing = high - low > size / 12;
+    }
+    // Each face of the last crease pattern draws as its own surface, with its own vertices.
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this.groups = [];
+    for (let face = 0; face < faceCount; face++) {
+      const own = [];
+      for (let t = 0; t < faces.length; t++) if (faces[t] === face) own.push(t);
+      if (!own.length) continue;
+      const local = new Map();
+      const vertices = [];
+      const corners = new Int32Array(3 * own.length);
+      own.forEach((t, k) => {
+        for (let c = 0; c < 3; c++) {
+          const v = this.triangles[3 * t + c];
+          if (!local.has(v)) {
+            local.set(v, vertices.length);
+            vertices.push(v);
+          }
+          corners[3 * k + c] = local.get(v);
+        }
+      });
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(3 * vertices.length), 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(3 * vertices.length), 3));
+      // The fibers stay with the paper, wherever it goes.
+      const uv = new Float32Array(2 * vertices.length);
+      vertices.forEach((v, i) => uv.set([(rest[2 * v] / size) * FILM_GRAIN, (rest[2 * v + 1] / size) * FILM_GRAIN], 2 * i));
+      geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      geometry.setIndex(Array.from(corners));
+      const meshes = [materials.front, materials.back].map((material) => new THREE.Mesh(geometry, material));
+      this.group.add(...meshes);
+      const offset = this.groups.length ? this.groups.at(-1).offset + this.groups.at(-1).vertices.length : 0;
+      this.groups.push({ face, own, vertices, corners, geometry, meshes, local, offset });
+    }
+    // Paper's edges catch a line of shade: its raw edges, and its creases as far as they fold.
+    const sides = new Map();
+    for (let t = 0; t < this.triangles.length / 3; t++) {
+      for (let c = 0; c < 3; c++) {
+        const [u, v] = [this.triangles[3 * t + c], this.triangles[3 * t + ((c + 1) % 3)]];
+        const key = u < v ? `${u},${v}` : `${v},${u}`;
+        if (!sides.has(key)) sides.set(key, []);
+        sides.get(key).push(t);
+      }
+    }
+    const groupOf = new Map(this.groups.map((group) => [group.face, group]));
+    this.edges = [];
+    for (const [key, triangles] of sides) {
+      const [u, v] = key.split(",").map(Number);
+      const kinds = triangles.map((t) => faces[t]);
+      if (triangles.length === 2 && kinds[0] === kinds[1]) continue;
+      triangles.forEach((t, k) => {
+        const group = groupOf.get(kinds[k]);
+        const ends = [group.offset + group.local.get(u), group.offset + group.local.get(v)];
+        this.edges.push({ group, u, v, ends, triangle: t, other: triangles.length === 2 ? triangles[1 - k] : -1 });
+      });
+    }
+    const lines = new THREE.BufferGeometry();
+    lines.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6 * this.edges.length), 3));
+    lines.setAttribute("color", new THREE.BufferAttribute(new Float32Array(8 * this.edges.length), 4));
+    this.lines = new THREE.LineSegments(lines, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
+    this.lines.frustumCulled = false;
+    this.group.add(this.lines);
+    const [tint, bumps] = fibers();
+    for (const material of [materials.front, materials.back]) {
+      material.map = tint;
+      material.bumpMap = bumps;
+      material.bumpScale = 0.35;
+      material.needsUpdate = true;
+    }
+    this.positions = new Float32Array(3 * n);
+    this.duration = DURATION;
+  }
+
+  shadows(on) {
+    for (const group of this.groups) for (const mesh of group.meshes) mesh.castShadow = on;
+  }
+
+  /** Get ready to show a step: its passages from where the step before left the paper. */
+  show(index, animate, lead = 0) {
+    const step = this.steps[index] ?? this.steps[this.steps.length - 1];
+    this.step = step;
+    const shots = [step.start, ...step.shots];
+    this.passages = [];
+    let clock = lead;
+    for (let k = 1; k < shots.length; k++) {
+      const [a, b] = [shots[k - 1].positions, shots[k].positions];
+      let moved = 0;
+      for (let i = 0; i < 3 * this.n; i++) moved = Math.max(moved, Math.abs(a[i] - b[i]));
+      const motion = moved > FILM_MOVED * this.size ? rigidFit(a, b, this.n) : null;
+      const rigid = motion !== null && motion.miss < FILM_RIGID * this.size;
+      const span = rigid ? FILM_MOVE : FILM_STEP;
+      this.passages.push({ a, b, rigid, motion, start: clock, span, fold: shots[k].fold });
+      clock += span;
+    }
+    this.duration = Math.max(clock, 1);
+    if (!animate) this.place(1);
+  }
+
+  /** Lay the paper where it lies a share `t` of the way through the step. */
+  place(t) {
+    const step = this.step;
+    if (!this.passages.length) return this.draw(step.end.positions, step.end.fold);
+    const time = t * this.duration;
+    const passage = this.passages.find((p) => time < p.start + p.span) ?? this.passages[this.passages.length - 1];
+    const s = Math.min(1, Math.max(0, (time - passage.start) / passage.span));
+    const out = this.positions;
+    const { a, b } = passage;
+    if (passage.rigid) {
+      const eased = 0.5 - Math.cos(Math.PI * s) / 2;
+      const turn = new THREE.Quaternion().slerp(passage.motion.rotation, eased);
+      const { from, to } = passage.motion;
+      const point = new THREE.Vector3();
+      for (let i = 0; i < this.n; i++) {
+        point.set(a[3 * i] - from[0], a[3 * i + 1] - from[1], a[3 * i + 2] - from[2]).applyQuaternion(turn);
+        out[3 * i] = point.x + from[0] + (to[0] - from[0]) * eased;
+        out[3 * i + 1] = point.y + from[1] + (to[1] - from[1]) * eased;
+        out[3 * i + 2] = point.z + from[2] + (to[2] - from[2]) * eased;
+      }
+    } else {
+      for (let i = 0; i < 3 * this.n; i++) out[i] = a[i] + (b[i] - a[i]) * s;
+    }
+    this.draw(out, passage.fold);
+  }
+
+  /** Draw the paper at positions, each vertex lifted a sheet for each layer below it there. */
+  draw(positions, fold) {
+    for (const group of this.groups) {
+      const sheet = FILM_LAYER * this.size * (fold.flips[group.face] ? -1 : 1);
+      const sums = new Float32Array(3 * group.vertices.length);
+      group.own.forEach((t, k) => {
+        const [a, b, c] = [0, 1, 2].map((j) => this.triangles[3 * t + j]);
+        const ab = [0, 1, 2].map((j) => positions[3 * b + j] - positions[3 * a + j]);
+        const ac = [0, 1, 2].map((j) => positions[3 * c + j] - positions[3 * a + j]);
+        const normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+        for (let j = 0; j < 3; j++) {
+          const v = group.corners[3 * k + j];
+          for (let d = 0; d < 3; d++) sums[3 * v + d] += normal[d];
+        }
+      });
+      const position = group.geometry.attributes.position;
+      const normal = group.geometry.attributes.normal;
+      group.vertices.forEach((v, i) => {
+        const length = Math.hypot(sums[3 * i], sums[3 * i + 1], sums[3 * i + 2]) || 1;
+        const [x, y, z] = [sums[3 * i] / length, sums[3 * i + 1] / length, sums[3 * i + 2] / length];
+        const lift = fold.lifts[group.offset + i] * sheet;
+        position.setXYZ(i, positions[3 * v] + lift * x, positions[3 * v + 1] + lift * y, positions[3 * v + 2] + lift * z);
+        normal.setXYZ(i, x, y, z);
+      });
+      position.needsUpdate = normal.needsUpdate = true;
+      group.geometry.computeBoundingSphere();
+      group.geometry.computeBoundingBox();
+    }
+    this.shade(positions, fold);
+  }
+
+  /** Draw the paper's edges half a layer over their faces, as dark as they fold. */
+  shade(positions, fold) {
+    const normalOf = (t) => {
+      const [a, b, c] = [0, 1, 2].map((j) => this.triangles[3 * t + j]);
+      const ab = [0, 1, 2].map((j) => positions[3 * b + j] - positions[3 * a + j]);
+      const ac = [0, 1, 2].map((j) => positions[3 * c + j] - positions[3 * a + j]);
+      const cross = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+      const length = Math.hypot(...cross) || 1;
+      return cross.map((x) => x / length);
+    };
+    const position = this.lines.geometry.attributes.position;
+    const color = this.lines.geometry.attributes.color;
+    this.edges.forEach((edge, k) => {
+      const sheet = FILM_LAYER * this.size * (fold.flips[edge.group.face] ? -1 : 1);
+      const normal = normalOf(edge.triangle);
+      let alpha = 0.3;
+      if (edge.other >= 0) {
+        const other = normalOf(edge.other);
+        const bent = 1 - (normal[0] * other[0] + normal[1] * other[1] + normal[2] * other[2]);
+        alpha = 0.05 + 0.25 * Math.min(1, bent);
+      }
+      [edge.u, edge.v].forEach((v, end) => {
+        const lift = (fold.lifts[edge.ends[end]] + 0.5) * sheet;
+        position.setXYZ(2 * k + end, positions[3 * v] + lift * normal[0], positions[3 * v + 1] + lift * normal[1], positions[3 * v + 2] + lift * normal[2]);
+        color.setXYZW(2 * k + end, 0.16, 0.13, 0.1, alpha);
+      });
+    });
+    position.needsUpdate = color.needsUpdate = true;
   }
 }
 
