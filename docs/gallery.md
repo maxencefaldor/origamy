@@ -87,10 +87,11 @@ Traditional models that end flat, folded step by step as diagrams teach them, wi
 
 -   ![The tulip example](images/gallery-tulip.png)
 
-    **[Tulip](gallery/tulip.html)** · 3 steps
+    **[Tulip](gallery/tulip.html)** · 4 steps
 
     A triangle whose bottom corners rise past its top as petals, each 22.5° off the flower's axis.
     Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
+    A settle step opens the flower: the petals spread and the cup rounds as the paper bends.
 
     [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
 
