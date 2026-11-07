@@ -60,3 +60,20 @@ def fold() -> Paper:
   `tilt(line, flap, angle)` turns the whole model in space.
 - Within one script, a fold after `shape`, `flex` or `tilt` is refused (`not-flat`).
 - The queries are `where` (unfolded point to where it lies now), `origin` (back), `creases` (crease pattern segments along a line), `layers` (layers at a point) and `thickest` (the most layers at one point).
+
+## When the paper refuses
+
+- `layer-crossing` on an inside reverse fold: the tip would pass between layers that folds already wrap.
+  The same line with `outside=True` wraps the tip round them instead, and often folds.
+- `hinge-bent` on a shape step: its line crosses faces that earlier shaping turned apart.
+  Draw the line so it crosses only the flap you turn, starting from that flap's own edge.
+- `flap-off-paper`: the flap point lies on a crease or an edge, or where no paper lies now.
+  Move it a little into the face you mean, and remember that a turn over mirrors every coordinate.
+- `flap-on-line` on a tilt: the point names no side of the line.
+  Name a point of the body that no later fold moves, not the tip of a flap.
+
+## When the pictures disagree
+
+A build with no refusals can still be wrong: check every model from several sides.
+A tilt raises the side of its flap point, so a point that a fold moved across the line turns the model upside down.
+Points that stick up near the head read as ears; turn or droop them until the silhouette reads as the subject.
