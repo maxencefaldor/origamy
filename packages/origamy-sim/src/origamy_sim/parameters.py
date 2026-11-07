@@ -359,6 +359,16 @@ class Contact(_Parameters):
     contact still keeps paper above the table and off bodies.
     """
 
+    order_stiffness: Positive = 1e8
+    """The stiffness of the penalty that keeps a triangle of paper in order, per area of
+    the triangle, in pascals per meter.
+
+    The penalty sums over three points of the triangle, each standing for a third of its
+    rest area. Each point takes half the stiffness, times that area, times the square of
+    how far it lies on the wrong side. Paper under ten layers of kami then sinks 60 nm
+    into the layer below it.
+    """
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""

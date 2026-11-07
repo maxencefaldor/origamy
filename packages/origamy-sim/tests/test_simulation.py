@@ -381,3 +381,94 @@ def test_contact_keeps_its_share_of_the_paper_thickness() -> None:
     simulation.settings = STILL
     with pytest.raises(ValueError, match="closer than its thickness"):
         simulation.step()
+
+
+# Two squares of one sheet: a held 1 cm square, and a free 4 mm one over its middle.
+TWO_SQUARES = Mesh(
+    [
+        [0, 0],
+        [0.01, 0],
+        [0.01, 0.01],
+        [0, 0.01],
+        [0.02, 0],
+        [0.024, 0],
+        [0.024, 0.004],
+        [0.02, 0.004],
+    ],
+    [[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]],
+)
+# Paper passes through paper, in time steps of a sixtieth of a second. A square free on
+# frictionless paper would otherwise slide at no cost.
+THROUGH = Settings(time_step=1 / 60, contact=Contact(layers=False))
+
+
+def stacked_squares(height: float, beside: float = 0.0) -> Simulation:
+    simulation = Simulation([Sheet(TWO_SQUARES)], THROUGH)
+    positions = simulation.positions(0)
+    positions[4:] += np.array([-0.017 + beside, 0.003, height])
+    simulation.set_positions(0, positions)
+    simulation.hold(0, range(4))
+    return simulation
+
+
+def carry(simulation: Simulation, offset: tuple[float, float, float]) -> None:
+    """Carry the upper square, held, by an offset from where it lies."""
+    simulation.hold(0, range(4, 8))
+    moved = simulation.positions(0)[4:] + np.array(offset)
+    simulation.move_held(0, range(4, 8), moved)
+    assert simulation.step().converged
+
+
+def settle(simulation: Simulation) -> None:
+    """Let go of the upper square, and let it settle."""
+    simulation.hold(0, range(4, 8), held=False)
+    for _ in range(10):
+        assert simulation.step().converged
+
+
+def test_an_order_keeps_paper_on_its_side_until_it_leaves() -> None:
+    simulation = stacked_squares(1e-4)
+    simulation.set_orders(0, [2, 3], [[0, 1]] * 2, [True] * 2, [True] * 2)
+    # Gravity lays the upper square on the lower one, which holds it within microns.
+    settle(simulation)
+    assert (np.abs(simulation.positions(0)[4:, 2]) < 1e-5).all()
+    assert simulation.orders(0) == [(t, [0, 1], True, True) for t in (2, 3)]
+    assert simulation.step().energy.contact > 0
+    # Carried off the lower square, the upper one leaves its orders behind.
+    carry(simulation, (0.02, 0, 0))
+    assert simulation.orders(0) == []
+
+
+def test_an_order_that_waits_holds_once_paper_comes_over_on_its_side() -> None:
+    simulation = stacked_squares(1e-4, beside=0.02)
+    simulation.set_orders(0, [2, 3], [[0, 1]] * 2, [True] * 2, [False] * 2)
+    # Carried over the lower square, below it, the upper one keeps its orders waiting.
+    carry(simulation, (-0.02, 0, -2e-4))
+    assert simulation.orders(0) == [(t, [0, 1], True, False) for t in (2, 3)]
+    # Carried over it above, the upper square's orders hold, and the lower square holds
+    # it up once let go.
+    carry(simulation, (0, 0, 4e-4))
+    assert simulation.orders(0) == [(t, [0, 1], True, True) for t in (2, 3)]
+    settle(simulation)
+    assert (np.abs(simulation.positions(0)[4:, 2]) < 1e-5).all()
+
+
+def test_without_orders_paper_falls_through_paper() -> None:
+    simulation = stacked_squares(1e-4)
+    settle(simulation)
+    assert (simulation.positions(0)[4:, 2] < -1e-3).all()
+
+
+def test_orders_name_the_sheet_s_triangles() -> None:
+    simulation = stacked_squares(1e-4)
+    simulation.set_orders(0, [2], [[0, 1]], [True], [True])
+    with pytest.raises(ValueError, match="triangle 4"):
+        simulation.set_orders(0, [4], [[0]], [True], [True])
+    with pytest.raises(ValueError, match="triangle 4"):
+        simulation.set_orders(0, [2], [[4]], [True], [True])
+    with pytest.raises(ValueError, match="no other triangle"):
+        simulation.set_orders(0, [2], [[]], [True], [True])
+    with pytest.raises(ValueError, match="each order needs one of each"):
+        simulation.set_orders(0, [2, 3], [[0]], [True], [True])
+    # A refused list leaves the orders as they were.
+    assert simulation.orders(0) == [(2, [0, 1], True, True)]

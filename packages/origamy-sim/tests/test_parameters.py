@@ -172,6 +172,7 @@ def settings_data() -> st.SearchStrategy[dict[str, Any]]:
                             "friction",
                             "stick",
                             "thickness_share",
+                            "order_stiffness",
                         ),
                         NUMBERS,
                     ),

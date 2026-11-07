@@ -15,8 +15,8 @@ use numpy::{
     PyUntypedArrayMethods,
 };
 use origamy_sim::{
-    Body, Crease, Energy, Faces, Material, Mesh, Refinement, Report, Settings, Sheet, Simulation,
-    StepError, Vertex,
+    Body, Crease, Energy, Faces, Material, Mesh, Order, Refinement, Report, Settings, Sheet,
+    Simulation, StepError, Vertex,
 };
 use pyo3::create_exception;
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -268,6 +268,10 @@ fn rows<T: Element + Copy, const N: usize>(
         .map(|row| std::array::from_fn(|i| row[i]))
         .collect())
 }
+
+/// An order as Python sees it: its triangle, the others, whether it keeps to their fronts,
+/// and whether it holds.
+type OrderData = (u32, Vec<u32>, bool, bool);
 
 /// The entries of a scalar or an array of shape (n,), as 64-bit integers.
 fn entries(name: &str, value: &Bound<'_, PyAny>) -> PyResult<Vec<i64>> {
@@ -915,6 +919,86 @@ impl PySimulation {
     fn pressure(&self, sheet: usize) -> PyResult<f64> {
         self.check(sheet)?;
         Ok(self.0.pressure(sheet))
+    }
+
+    /// The orders of a sheet that have not lapsed.
+    ///
+    /// Each is its triangle, the others, whether it keeps to their fronts, and whether it holds
+    /// yet.
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    fn orders(&self, sheet: usize) -> PyResult<Vec<OrderData>> {
+        self.check(sheet)?;
+        Ok(self
+            .0
+            .orders(sheet)
+            .iter()
+            .map(|order| {
+                let others = order.others.clone();
+                (order.triangle, others, order.front, order.holds)
+            })
+            .collect())
+    }
+
+    /// Replaces a sheet's orders: triangles that keep to one side of others of the sheet.
+    ///
+    /// A penalty pushes a triangle back where it lies on the wrong side of another's face. The
+    /// penalty acts at three points inside the triangle, each standing for a third of its rest
+    /// area. Each point's penalty is half the contact's order stiffness, times that area, times
+    /// its squared distance. An order that waits holds once a time step ends with the centroid
+    /// over the others on its side. An order that holds lapses once a time step ends with the
+    /// centroid over none of them. Paper may then pass round an edge.
+    ///
+    /// Args:
+    ///     sheet: The sheet.
+    ///     triangles: Each order's triangle, by its index in the mesh, of shape (n,).
+    ///     others: The triangles each order keeps to one side of.
+    ///     fronts: Whether each order keeps to the others' fronts, where their normals point,
+    ///         of shape (n,).
+    ///     holds: Whether each order holds already, or waits, of shape (n,).
+    ///
+    /// Raises:
+    ///     IndexError: When the simulation has no such sheet.
+    ///     ValueError: When the lists differ in length, or an order names a triangle the sheet
+    ///         lacks, or no other triangle. A refused list leaves the orders as they were.
+    fn set_orders(
+        &mut self,
+        sheet: usize,
+        triangles: &Bound<'_, PyAny>,
+        others: Vec<Vec<u32>>,
+        fronts: Vec<bool>,
+        holds: Vec<bool>,
+    ) -> PyResult<()> {
+        self.check(sheet)?;
+        let triangles = entries("triangles", triangles)?;
+        let count = triangles.len();
+        if others.len() != count || fronts.len() != count || holds.len() != count {
+            return Err(PyValueError::new_err(format!(
+                "{count} triangles, {} lists of others, {} fronts and {} holds, but each order \
+                 needs one of each",
+                others.len(),
+                fronts.len(),
+                holds.len()
+            )));
+        }
+        let orders = triangles
+            .into_iter()
+            .zip(others)
+            .zip(fronts.into_iter().zip(holds))
+            .map(|((triangle, others), (front, holds))| {
+                let triangle = u32::try_from(triangle).map_err(|_| {
+                    PyValueError::new_err(format!("the sheet has no triangle {triangle}"))
+                })?;
+                Ok(Order {
+                    triangle,
+                    others,
+                    front,
+                    holds,
+                })
+            })
+            .collect::<PyResult<Vec<Order>>>()?;
+        self.0.set_orders(sheet, orders).map_err(value_error)
     }
 
     /// Sets the pressure on a sheet's front, in pascals, until set again.

@@ -172,6 +172,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | stage | One fold of a simulated build: to a step's state, or to the paper a precrease passes through |
 | lag | One solve of a time step with friction fixed at a state: the step's start, then each solution it reaches |
 | stick distance | The slip within one time step under which friction holds a contact |
+| order | A triangle of paper kept on one side of a few others, until its centroid lies over none of them |
 
 Spell American English: color, center.
 

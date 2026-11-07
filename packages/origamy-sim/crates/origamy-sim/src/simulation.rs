@@ -22,7 +22,7 @@ use crate::energy::membrane::{self, Stretching};
 use crate::energy::{Point, Project};
 use crate::parameter::{ParameterError, finite};
 use crate::settings::Settings;
-use crate::sheet::Sheet;
+use crate::sheet::{Order, Sheet, SheetError};
 use crate::system::{Assembly, Factor, Pattern, SingularError};
 
 /// The energy of a simulation, term by term, in joules.
@@ -39,7 +39,8 @@ pub struct Energy {
     /// The work creases take as they yield over the time step, dissipated or stored by
     /// hardening.
     pub yielding: f64,
-    /// The energy of contact's barrier, between sheets and with the table.
+    /// The energy of contact's barrier, between sheets and with the table, and of the
+    /// penalties that keep paper in order.
     pub contact: f64,
     /// The work friction does against the slip of contacts over the time step, up to the
     /// smoothing below the stick distance.
@@ -685,6 +686,30 @@ impl Simulation {
         self.pressures[sheet]
     }
 
+    /// The orders of a sheet that have not lapsed.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    #[must_use]
+    pub fn orders(&self, sheet: usize) -> &[Order] {
+        self.sheets[sheet].orders()
+    }
+
+    /// Replaces a sheet's orders: triangles that keep to one side of others of the sheet.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`SheetError`] of an order that names a triangle the sheet lacks, or no
+    /// other triangle. A refused list leaves the orders as they were.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the simulation has no such sheet.
+    pub fn set_orders(&mut self, sheet: usize, orders: Vec<Order>) -> Result<(), SheetError> {
+        self.sheets[sheet].set_orders(orders)
+    }
+
     /// Sets the pressure on a sheet's front, in pascals, until set again.
     ///
     /// The pressure pushes each patch of the sheet against its normal at the start of each time
@@ -1106,10 +1131,7 @@ impl Simulation {
             iterations += 1;
             let near = self.candidates(&x, &x);
             let derivatives = self.derivatives(&x, incremental, &near);
-            self.grow(
-                &mut grown,
-                derivatives.pairs.iter().chain(&derivatives.friction),
-            );
+            self.grow(&mut grown, derivatives.joined());
             let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
             // definite; elsewhere each element's Hessian is projected to be.
@@ -1202,16 +1224,13 @@ impl Simulation {
     ///
     /// The pattern only grows within a time step, so contacts that come and go do not rebuild
     /// it again and again.
-    fn grow<'e>(
+    fn grow(
         &self,
         grown: &mut Option<(Pattern, Vec<(u32, u32)>)>,
-        contacts: impl Iterator<Item = &'e Element<4, 12>>,
+        joined: impl Iterator<Item = (u32, u32)>,
     ) {
         let pattern = grown.as_ref().map_or(&self.pattern, |(p, _)| p);
-        let missing: Vec<(u32, u32)> = contacts
-            .flat_map(|(stencil, _, _)| vertex_pairs(*stencil))
-            .filter(|&(a, b)| !pattern.contains(a, b))
-            .collect();
+        let missing: Vec<(u32, u32)> = joined.filter(|&(a, b)| !pattern.contains(a, b)).collect();
         if !missing.is_empty() {
             let mut joined = grown.take().map_or_else(Vec::new, |(_, joined)| joined);
             joined.extend(missing);
@@ -1296,6 +1315,18 @@ impl Simulation {
             for (span, state) in spans {
                 sheet.set_span_plastic(span, state);
             }
+            // An order that waits holds once its centroid lies over the others on its side, and
+            // an order that holds lapses once the centroid lies over none of them.
+            let positions = &solve.x[offset..offset + sheet.mesh().vertex_count()];
+            let triangles = sheet.mesh().triangles().to_vec();
+            sheet.retain_orders(|order| {
+                let heights = heights(order, &triangles, positions);
+                if order.holds {
+                    return !heights.is_empty();
+                }
+                order.holds = heights.iter().any(|&height| height >= 0.0);
+                true
+            });
         }
         let energy = Energy {
             kinetic: self.kinetic(),
@@ -1527,7 +1558,8 @@ impl Simulation {
         }
     }
 
-    /// The friction and contact energies at positions `x`, with contact between `pairs`.
+    /// The friction and contact energies at positions `x`, with contact between `pairs` and
+    /// the penalties that keep paper in order.
     ///
     /// Contact is infinite where paper reaches its thickness, from paper, a body or the table.
     fn touching(&self, x: &[Point], incremental: &Incremental, pairs: &[Pair]) -> (f64, f64) {
@@ -1554,7 +1586,24 @@ impl Simulation {
                     .map_or(f64::INFINITY, |[value, _, _]| value)
             })
             .sum();
-        (frictions.iter().sum(), barriers.iter().sum::<f64>() + table)
+        let orders: f64 = self
+            .sheets
+            .iter()
+            .zip(&self.offsets)
+            .map(|(sheet, &offset)| {
+                let positions = &x[offset..offset + sheet.mesh().vertex_count()];
+                let penalties: Vec<f64> = sheet
+                    .orders()
+                    .par_iter()
+                    .map(|order| order_energy(sheet, order, positions, contact.order_stiffness))
+                    .collect();
+                penalties.iter().sum::<f64>()
+            })
+            .sum();
+        (
+            frictions.iter().sum(),
+            barriers.iter().sum::<f64>() + table + orders,
+        )
     }
 
     /// Every element's gradient and Hessian at positions `x`, with contact between `pairs`.
@@ -1596,6 +1645,15 @@ impl Simulation {
             let constants = Constants::of(sheet);
             let mesh = sheet.mesh();
             let x = &x[offset..offset + mesh.vertex_count()];
+            derivatives.orders.par_extend(
+                sheet
+                    .orders()
+                    .par_iter()
+                    .flat_map_iter(|order| order_elements(sheet, order, x, contact.order_stiffness))
+                    .map(|(stencil, gradient, hessian)| {
+                        (stencil.map(|v| Some(global(v))), gradient, hessian)
+                    }),
+            );
             for (v, area) in sheet.areas().iter().enumerate() {
                 let mass = constants.mass_per_area * area;
                 let terms = self.vertex(incremental, s, offset + v, &x[v], *area, mass);
@@ -2041,6 +2099,9 @@ struct Derivatives {
     table: Vec<(u32, f64, f64)>,
     /// The contact barrier of each pair within reach.
     pairs: Vec<Element<4, 12>>,
+    /// The penalty of each order on each triangle its centroid lies over on the wrong side:
+    /// the order's triangle, then the other.
+    orders: Vec<Element<6, 18>>,
     /// The friction of each contact lagged from the step's start, positive semi-definite already.
     friction: Vec<Element<4, 12>>,
     /// The air drag on each vertex, positive semi-definite already.
@@ -2066,12 +2127,26 @@ impl Derivatives {
             assembly.add_vertex_z(vertex, slope, curvature);
         }
         scatter_elements(&self.pairs, assembly, projected);
+        scatter_elements(&self.orders, assembly, projected);
         scatter_elements(&self.friction, assembly, false);
         scatter_elements(&self.drag, assembly, false);
         scatter_elements(&self.triangles, assembly, projected);
         scatter_elements(&self.plates, assembly, false);
         scatter_elements(&self.dihedrals, assembly, projected);
         scatter_elements(&self.spans, assembly, projected);
+    }
+
+    /// The pairs of vertices that contact, friction and orders join, which the sheets'
+    /// pattern may lack.
+    fn joined(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        let contacts = self.pairs.iter().chain(&self.friction);
+        contacts
+            .flat_map(|(stencil, _, _)| vertex_pairs(*stencil))
+            .chain(
+                self.orders
+                    .iter()
+                    .flat_map(|(stencil, _, _)| vertex_pairs(*stencil)),
+            )
     }
 
     /// The gradient at each of `count` vertices, every vertex free.
@@ -2084,6 +2159,7 @@ impl Derivatives {
             gradient[vertex as usize].z += slope;
         }
         gather(&self.pairs, &mut gradient);
+        gather(&self.orders, &mut gradient);
         gather(&self.friction, &mut gradient);
         gather(&self.drag, &mut gradient);
         gather(&self.triangles, &mut gradient);
@@ -2255,7 +2331,7 @@ fn elapsed(dt: f64) -> f64 {
 }
 
 /// Every pair of a contact's four vertices, the greater first.
-fn vertex_pairs(stencil: [Option<u32>; 4]) -> Vec<(u32, u32)> {
+fn vertex_pairs<const N: usize>(stencil: [Option<u32>; N]) -> Vec<(u32, u32)> {
     let v: Vec<u32> = stencil.into_iter().flatten().collect();
     (0..v.len())
         .flat_map(|i| (0..i).map(move |j| (i, j)))
@@ -2272,6 +2348,129 @@ fn moved(x: &[Point], displacement: &[f64], fraction: f64) -> Vec<Point> {
 }
 
 /// The stencil `[u, v, a, b]` of a dihedral.
+/// The share of a triangle's size within which a point still lies over it. An order at a
+/// shared edge then never lapses by rounding.
+const LAPSE: f64 = 1e-9;
+
+/// The barycentric weights of the points where an order presses: Gauss's three-point rule,
+/// each point standing for a third of the triangle. Every point lies inside the triangle, off
+/// its edges and so off any crease.
+const PRESSES: [[f64; 3]; 3] = [
+    [2.0 / 3.0, 1.0 / 6.0, 1.0 / 6.0],
+    [1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0],
+    [1.0 / 6.0, 1.0 / 6.0, 2.0 / 3.0],
+];
+
+/// Each point of an order's triangle over another of its triangles' faces, on the wrong side.
+/// Each comes with its weights and a stencil: the order's triangle's corners, then the other's.
+fn wrong_sides<'s>(
+    sheet: &'s Sheet,
+    order: &'s Order,
+    positions: &'s [Point],
+) -> impl Iterator<Item = ([f64; 3], [u32; 6])> + 's {
+    let triangles = sheet.mesh().triangles();
+    let own = triangles[order.triangle as usize];
+    let corners = own.map(|vertex| positions[vertex as usize]);
+    // An order that waits pushes nothing.
+    let others = if order.holds { &order.others[..] } else { &[] };
+    PRESSES.into_iter().flat_map(move |weights| {
+        let point = pressed(weights, corners);
+        others.iter().filter_map(move |&other| {
+            let below = triangles[other as usize];
+            let [a, b, c] = below.map(|vertex| positions[vertex as usize]);
+            if !distance::over_face(&point, &a, &b, &c) {
+                return None;
+            }
+            let along = (point - a).dot(&(b - a).cross(&(c - a)));
+            let wrong = if order.front {
+                along < 0.0
+            } else {
+                along > 0.0
+            };
+            let stencil = [own[0], own[1], own[2], below[0], below[1], below[2]];
+            wrong.then_some((weights, stencil))
+        })
+    })
+}
+
+/// An order's pressed point and the corners of the other triangle, from its stencil.
+fn split(weights: [f64; 3], stencil: [u32; 6], positions: &[Point]) -> (Point, [Point; 3]) {
+    let corners = stencil.map(|vertex| positions[vertex as usize]);
+    let point = pressed(weights, [corners[0], corners[1], corners[2]]);
+    (point, [corners[3], corners[4], corners[5]])
+}
+
+/// How far an order's centroid lies on its side of each other triangle it lies over.
+fn heights(order: &Order, triangles: &[[u32; 3]], positions: &[Point]) -> Vec<f64> {
+    let point = centroid(triangles[order.triangle as usize].map(|v| positions[v as usize]));
+    let side = if order.front { 1.0 } else { -1.0 };
+    order
+        .others
+        .iter()
+        .filter_map(|&other| {
+            let [a, b, c] = triangles[other as usize].map(|v| positions[v as usize]);
+            let normal = (b - a).cross(&(c - a)).normalize();
+            distance::over(&point, &a, &b, &c, LAPSE).then(|| side * (point - a).dot(&normal))
+        })
+        .collect()
+}
+
+/// The point of a triangle with barycentric weights.
+fn pressed(weights: [f64; 3], [a, b, c]: [Point; 3]) -> Point {
+    a * weights[0] + b * weights[1] + c * weights[2]
+}
+
+/// A triangle's centroid.
+fn centroid(corners: [Point; 3]) -> Point {
+    pressed([1.0 / 3.0; 3], corners)
+}
+
+/// The penalty of an order: half the stiffness, times a third of its triangle's rest area,
+/// times each squared distance. Each distance runs from a point where the order presses to the
+/// plane of another triangle the point lies over on the wrong side.
+fn order_energy(sheet: &Sheet, order: &Order, positions: &[Point], stiffness: f64) -> f64 {
+    let half = 0.5 * stiffness * sheet.mesh().rest_area(order.triangle as usize) / 3.0;
+    wrong_sides(sheet, order, positions)
+        .map(|(weights, stencil)| {
+            let (point, [a, b, c]) = split(weights, stencil, positions);
+            let normal = (b - a).cross(&(c - a));
+            let along = (point - a).dot(&normal);
+            half * along * along / normal.norm_squared()
+        })
+        .sum()
+}
+
+/// The penalty's gradient and Hessian for each point of an order on the wrong side of another
+/// triangle, in the sheet's vertex numbering.
+fn order_elements<'s>(
+    sheet: &'s Sheet,
+    order: &'s Order,
+    positions: &'s [Point],
+    stiffness: f64,
+) -> impl Iterator<Item = ([u32; 6], SMatrix<f64, 18, 1>, SMatrix<f64, 18, 18>)> + 's {
+    let half = 0.5 * stiffness * sheet.mesh().rest_area(order.triangle as usize) / 3.0;
+    wrong_sides(sheet, order, positions).map(move |(weights, stencil)| {
+        // The point is its weights' share of each corner of the order's triangle.
+        let mut map = SMatrix::<f64, 12, 18>::zeros();
+        for (k, weight) in weights.iter().enumerate() {
+            for axis in 0..3 {
+                map[(axis, 3 * k + axis)] = *weight;
+                map[(3 + 3 * k + axis, 9 + 3 * k + axis)] = 1.0;
+            }
+        }
+        let (point, [a, b, c]) = split(weights, stencil, positions);
+        let (_, gradient, hessian) =
+            crate::generated::point_plane_distance(point.into(), a.into(), b.into(), c.into());
+        let gradient = SMatrix::<f64, 12, 1>::from_column_slice(&gradient);
+        let hessian = SMatrix::<f64, 12, 12>::from_fn(|row, column| hessian[row][column]);
+        (
+            stencil,
+            map.transpose() * gradient * half,
+            map.transpose() * hessian * map * half,
+        )
+    })
+}
+
 /// The points whose dihedral angle is a span's: its edge and near vertex, then its start moved
 /// by the vector from its foot to its far vertex.
 fn span_points([start, end, near, foot, far]: [Point; 5]) -> [Point; 4] {
@@ -2393,8 +2592,8 @@ mod tests {
     use crate::mesh::Mesh;
     use std::f64::consts::FRAC_PI_2;
 
-    use crate::settings::{Solver, Table};
-    use crate::sheet::{Crease, SheetError};
+    use crate::settings::{Contact, Solver, Table};
+    use crate::sheet::Crease;
 
     /// A small deterministic wobble, to keep every quantity away from symmetric values.
     fn wobble(v: usize, amplitude: f64) -> Point {
@@ -2439,14 +2638,12 @@ mod tests {
             stiffness: 50.0,
         };
         let pairs = simulation.candidates(x, x);
-        let pattern = Pattern::new(
-            x.len(),
-            simulation
-                .pairs
-                .iter()
-                .copied()
-                .chain(pairs.iter().flat_map(|p| vertex_pairs(p.stencil()))),
-        );
+        // Contact pairs and orders join vertices the sheets' pattern may not.
+        let joined: Vec<(u32, u32)> = simulation
+            .derivatives(x, &incremental, &pairs)
+            .joined()
+            .collect();
+        let pattern = Pattern::new(x.len(), simulation.pairs.iter().copied().chain(joined));
         // Every vertex is free here, the bodies' points too, so every derivative is checked.
         let free = vec![false; x.len()];
         let assemble = |y: &[Point]| {
@@ -2642,6 +2839,218 @@ mod tests {
         let bent: f64 = band.iter().map(|(_, angle)| angle).sum::<f64>() / f64::from(rows);
         assert!((bent - FRAC_PI_2).abs() < 0.05, "the band bends {bent}");
         assert!(beside.iter().all(|(_, angle)| angle.abs() < 0.06));
+    }
+
+    /// Two squares of one sheet, apart in the flat sheet: a lower one of side 1 cm, its corners
+    /// 0 to 3, and an upper one of side 4 mm, its corners 4 to 7.
+    fn two_squares() -> Sheet {
+        let rest = vec![
+            [0.0, 0.0],
+            [0.01, 0.0],
+            [0.01, 0.01],
+            [0.0, 0.01],
+            [0.02, 0.0],
+            [0.024, 0.0],
+            [0.024, 0.004],
+            [0.02, 0.004],
+        ];
+        let triangles = vec![[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]];
+        Sheet::new(Mesh::new(rest, triangles).unwrap(), Material::kami()).unwrap()
+    }
+
+    /// Each triangle of the upper square keeps to the front of the lower square.
+    fn above_the_lower_square() -> Vec<Order> {
+        (2..4)
+            .map(|triangle| Order {
+                triangle,
+                others: vec![0, 1],
+                front: true,
+                holds: true,
+            })
+            .collect()
+    }
+
+    /// Paper that passes through paper, under gravity, off the table, in time steps of a
+    /// sixtieth of a second. A square free on frictionless paper would otherwise slide at no
+    /// cost.
+    fn through() -> Settings {
+        Settings {
+            time_step: 1.0 / 60.0,
+            contact: Contact {
+                layers: false,
+                ..Contact::default()
+            },
+            ..Settings::default()
+        }
+    }
+
+    /// The two squares, the upper one lying over the lower one at a height.
+    fn stacked(height: f64) -> Vec<Point> {
+        let mut x: Vec<Point> = two_squares()
+            .mesh()
+            .rest()
+            .iter()
+            .map(|p| Point::new(p[0], p[1], 0.0))
+            .collect();
+        for p in &mut x[4..] {
+            *p += Point::new(-0.017, 0.003, height);
+        }
+        x
+    }
+
+    #[test]
+    fn the_assembly_differentiates_orders() {
+        // The upper square lies a little behind the lower one, which it should keep in front of,
+        // so every order pushes.
+        let mut simulation = Simulation::new(vec![two_squares()], through()).unwrap();
+        simulation.set_orders(0, above_the_lower_square()).unwrap();
+        let x: Vec<Point> = stacked(-1e-4)
+            .into_iter()
+            .enumerate()
+            .map(|(v, p)| p + wobble(v, 2e-6))
+            .collect();
+        let energy = simulation
+            .potential(&x, &Incremental::still(&x), &[])
+            .energy;
+        assert!(energy.contact > 0.0);
+        check(&simulation, &x, &x, 1e-9);
+    }
+
+    #[test]
+    fn an_order_keeps_paper_on_its_side_until_it_leaves() {
+        let mut simulation = Simulation::new(vec![two_squares()], through()).unwrap();
+        let x = stacked(1e-4);
+        let positions: Vec<[f64; 3]> = x.iter().map(|&p| p.into()).collect();
+        simulation.set_positions(0, &positions).unwrap();
+        for v in 0..4 {
+            simulation.hold(0, v, true);
+        }
+        simulation.set_orders(0, above_the_lower_square()).unwrap();
+        // Gravity lays the upper square on the lower one, which holds it within microns.
+        for _ in 0..10 {
+            assert!(simulation.step().unwrap().converged);
+        }
+        assert!(
+            simulation.positions(0)[4..]
+                .iter()
+                .all(|p| p[2].abs() < 1e-5)
+        );
+        assert_eq!(simulation.orders(0).len(), 2);
+        // Carried off the lower square, the upper one leaves its orders behind.
+        for v in 4..8 {
+            simulation.hold(0, v, true);
+        }
+        let away: Vec<(usize, [f64; 3])> = (4..8)
+            .map(|v| {
+                let p = simulation.positions(0)[v];
+                (v, [p[0] + 0.02, p[1], p[2]])
+            })
+            .collect();
+        simulation.move_held(0, &away).unwrap();
+        assert!(simulation.step().unwrap().converged);
+        assert!(simulation.orders(0).is_empty());
+    }
+
+    /// Carries the upper square, held, by an offset from where it lies.
+    fn carry(simulation: &mut Simulation, offset: [f64; 3]) {
+        let moved: Vec<(usize, [f64; 3])> = (4..8)
+            .map(|v| {
+                let p = simulation.positions(0)[v];
+                (v, [p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]])
+            })
+            .collect();
+        for v in 4..8 {
+            simulation.hold(0, v, true);
+        }
+        simulation.move_held(0, &moved).unwrap();
+        assert!(simulation.step().unwrap().converged);
+    }
+
+    #[test]
+    fn an_order_that_waits_holds_once_paper_comes_over_on_its_side() {
+        // The upper square starts beside the lower one, its orders waiting.
+        let mut simulation = Simulation::new(vec![two_squares()], through()).unwrap();
+        let positions: Vec<[f64; 3]> = stacked(1e-4)
+            .iter()
+            .enumerate()
+            .map(|(v, &p)| {
+                (if v < 4 {
+                    p
+                } else {
+                    p + Point::new(0.02, 0.0, 0.0)
+                })
+                .into()
+            })
+            .collect();
+        simulation.set_positions(0, &positions).unwrap();
+        for v in 0..4 {
+            simulation.hold(0, v, true);
+        }
+        let waiting: Vec<Order> = above_the_lower_square()
+            .into_iter()
+            .map(|order| Order {
+                holds: false,
+                ..order
+            })
+            .collect();
+        simulation.set_orders(0, waiting.clone()).unwrap();
+        // Carried over the lower square, below it, the upper one keeps its orders waiting.
+        carry(&mut simulation, [-0.02, 0.0, -2e-4]);
+        assert!(simulation.orders(0).iter().all(|order| !order.holds));
+        // Carried over it above, the upper square's orders hold, and the lower square holds
+        // it up once let go.
+        carry(&mut simulation, [0.0, 0.0, 4e-4]);
+        assert_eq!(simulation.orders(0).len(), 2);
+        assert!(simulation.orders(0).iter().all(|order| order.holds));
+        for v in 4..8 {
+            simulation.hold(0, v, false);
+        }
+        for _ in 0..10 {
+            assert!(simulation.step().unwrap().converged);
+        }
+        assert!(
+            simulation.positions(0)[4..]
+                .iter()
+                .all(|p| p[2].abs() < 1e-5)
+        );
+    }
+
+    #[test]
+    fn without_orders_paper_falls_through_paper() {
+        let mut simulation = Simulation::new(vec![two_squares()], through()).unwrap();
+        let positions: Vec<[f64; 3]> = stacked(1e-4).iter().map(|&p| p.into()).collect();
+        simulation.set_positions(0, &positions).unwrap();
+        for v in 0..4 {
+            simulation.hold(0, v, true);
+        }
+        for _ in 0..10 {
+            simulation.step().unwrap();
+        }
+        assert!(simulation.positions(0)[4..].iter().all(|p| p[2] < -1e-4));
+    }
+
+    #[test]
+    fn orders_name_the_sheet_s_triangles() {
+        let mut simulation = Simulation::new(vec![two_squares()], through()).unwrap();
+        let order = |triangle, others: Vec<u32>| Order {
+            triangle,
+            others,
+            front: true,
+            holds: true,
+        };
+        assert!(matches!(
+            simulation.set_orders(0, vec![order(4, vec![0])]),
+            Err(SheetError::NoTriangle { triangle: 4 })
+        ));
+        assert!(matches!(
+            simulation.set_orders(0, vec![order(2, vec![])]),
+            Err(SheetError::EmptyOrder { triangle: 2 })
+        ));
+        assert!(matches!(
+            simulation.set_orders(0, vec![order(2, vec![4])]),
+            Err(SheetError::NoTriangle { triangle: 4 })
+        ));
+        assert!(simulation.orders(0).is_empty());
     }
 
     #[test]
