@@ -42,14 +42,16 @@ def fold() -> Paper:
     flap = midpoint(neck, midpoint(top, bottom))
     paper.reverse(head, flap=flap, layers=paper.layers(flap))
 
-    # Fold each wing down at the shoulders, then spread it level. Last, hold the bird
-    # up by its shoulders, its neck and tail rising.
+    # Fold each wing down at the shoulders, then raise it 30° above level. Last, hold
+    # the bird up by its shoulders, its neck and tail rising.
     wings = (((0, 0), ("1/8", "1/16")), ((1, 1), ("7/8", "15/16")))
     for tip, inside in wings:
         paper.valley(shoulders(paper, tip), flap=paper.where(inside), layers=1)
         paper.turn_over()
     for tip, inside in wings:
-        paper.shape(shoulders(paper, tip), flap=paper.where(inside), angle=90, layers=1)
+        paper.shape(
+            shoulders(paper, tip), flap=paper.where(inside), angle=120, layers=1
+        )
         paper.turn_over()
     paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
     return paper

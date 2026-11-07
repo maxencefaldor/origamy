@@ -144,6 +144,79 @@ def fold() -> Paper:
 """
 
 
+PIXELS = """(() => {
+  const stage = window.origamy.stage;
+  stage.renderer.render(stage.scene, stage.camera);
+  const gl = stage.renderer.getContext();
+  const [w, h] = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+  const data = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  let shade = 0;
+  let outline = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const [r, g, b, a] = data.slice(i, i + 4);
+    if (a > 8 && a < 200 && r < 60 && g < 60 && b < 60) shade += 1;
+    const gray = [r, g, b].every((c) => Math.abs(c - 58) < 12);
+    if (a === 255 && gray) outline += 1;
+  }
+  return [shade, outline];
+})()"""
+"""Count the stage's pixels that a translucent dark shadow covers, and the outline's.
+
+The canvas holds the pixels, so the count reads real pixels, alpha included.
+"""
+
+
+async def studio_pixels(page: Path) -> tuple[list[str], dict[str, list[int]]]:
+    """Open the viewer, and count its pixels in three views.
+
+    The views are the studio, the studio without its table, and the diagram.
+    """
+    errors: list[str] = []
+
+    async def serve(route: Route) -> None:
+        path = route.request.url.removeprefix(THREE_PACKAGE).replace("build/", "")
+        await route.fulfill(path=THREE / path, content_type="text/javascript")
+
+    counts: dict[str, list[int]] = {}
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            executable_path=os.environ.get(BROWSER) or None
+        )
+        tab = await browser.new_page(viewport={"width": 900, "height": 700})
+        tab.on("pageerror", lambda error: errors.append(str(error)))
+        await tab.route(THREE_PACKAGE + "**", serve)
+        await tab.goto(page.as_uri())
+        await tab.wait_for_selector('#origamy[data-state="ready"]')
+        await tab.click('[data-do="studio"]')
+        for name, change in (
+            ("studio", ""),
+            ("bare", "window.origamy.stage.table.visible = false"),
+            ("diagram", "window.origamy.stage.studio(false)"),
+        ):
+            await tab.evaluate(change or "null")
+            await tab.wait_for_timeout(300)
+            counts[name] = await tab.evaluate(PIXELS)
+        await browser.close()
+    return errors, counts
+
+
+def test_the_studio_shows_paper_without_outlines_and_shades_the_table(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "flexed.py"
+    script.write_text(FLEXED, encoding="utf-8")
+    report = asyncio.run(service.build(service.BuildRequest(script=script)))
+    assert report.ok, report.text
+    errors, counts = asyncio.run(studio_pixels(script.with_suffix(".html")))
+    assert errors == []
+    # The paper's shadow darkens the table, and goes with it.
+    assert counts["studio"][0] > counts["bare"][0] + 500
+    # The diagram outlines every face; the studio draws none.
+    assert counts["diagram"][1] > 50
+    assert counts["studio"][1] < counts["diagram"][1] / 10
+
+
 def test_a_view_draws_a_step_from_the_direction_asked(
     tmp_path: Path, colors: Colors
 ) -> None:

@@ -2,11 +2,12 @@
 
 The models below each fold with one command from [`examples/`](https://github.com/maxencefaldor/origamy/tree/main/examples).
 Each opens in the 3D viewer, to replay its steps, orbit the paper and see every layer in x-ray.
+The viewer opens in its studio, lighting the paper as paper; its Studio button turns the view into a diagram.
 The viewer also traces each face back to the crease pattern.
 
-## Classics
+## In space
 
-Traditional models, folded step by step as diagrams teach them, with every crease exact.
+Models that end out of the plane: shaped about their hinges, or opened as rigid origami.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
@@ -16,7 +17,7 @@ Traditional models, folded step by step as diagrams teach them, with every creas
 
     The orizuru: a bird base, narrowed on both sides, with its neck, tail and head reverse folded up.
     Narrowing the legs bisects 22.5° angles, so its creases live at 11.25°, exactly.
-    Its wings then spread level, and the crane stands up on its shoulders.
+    Its wings then rise 30° above level, and the crane stands up on its shoulders.
 
     [Open in 3D](gallery/crane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py)
 
@@ -24,7 +25,7 @@ Traditional models, folded step by step as diagrams teach them, with every creas
 
     **[Flapping bird](gallery/flapping-bird.html)** · 29 steps
 
-    A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then spread level.
+    A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then raised 30° above level.
     Two precreases mark a quarter of the neck, where the head reverse folds.
 
     [Open in 3D](gallery/flapping-bird.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/flapping_bird.py)
@@ -37,6 +38,23 @@ Traditional models, folded step by step as diagrams teach them, with every creas
     Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
 
     [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
+
+-   ![The Miura-ori example](images/gallery-miura-ori.png)
+
+    **[Miura-ori](gallery/miura-ori.html)** · 3 steps
+
+    A grid of parallelograms: zigzags alternate mountain and valley, and each column alternates along its length.
+    Its 112 creases collapse into one flat stack, then open as rigid origami, the zigzags following the columns.
+
+    [Open in 3D](gallery/miura-ori.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py)
+
+</div>
+
+## Classics
+
+Traditional models that end flat, folded step by step as diagrams teach them, with every crease exact.
+
+<div class="grid cards origamy-cards origamy-gallery" markdown>
 
 -   ![The cup example](images/gallery-cup.png)
 
@@ -105,15 +123,6 @@ Models creased on the open paper from their crease pattern, then collapsed in on
     Its kites fold at 22.5°, and sixteen layers meet in its thickest point.
 
     [Open in 3D](gallery/frog-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/frog_base.py)
-
--   ![The Miura-ori example](images/gallery-miura-ori.png)
-
-    **[Miura-ori](gallery/miura-ori.html)** · 3 steps
-
-    A grid of parallelograms: zigzags alternate mountain and valley, and each column alternates along its length.
-    Its 112 creases collapse into one flat stack, then open as rigid origami, the zigzags following the columns.
-
-    [Open in 3D](gallery/miura-ori.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py)
 
 </div>
 

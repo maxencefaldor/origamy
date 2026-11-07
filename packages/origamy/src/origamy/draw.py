@@ -322,6 +322,10 @@ def _dot(a: Vector, b: Vector) -> float:
 
 _TILT: Final = (0.35, -0.75, 0.75)
 """Where the 3D viewer's eye first sits, from the paper's center: in front, above."""
+_STANDING: Final = (0.35, -0.75, 0.3)
+"""Where the eye sits for paper that stands up: in front, about 20° above the table."""
+_RISING: Final = 0.25
+"""How tall paper stands, against its reach on the table, for the eye to sit low."""
 _TINY: Final = 1e-9
 """How small a length or area of a picture of shaped paper counts as none."""
 
@@ -338,6 +342,8 @@ class Eye:
 
         The eye sits as the 3D viewer's first does for flat paper, turned about the
         upright axis so that the paper's longest reach on the table runs across it.
+        Paper that stands up, as a finished model does, shows from lower down, as a
+        photograph shows it.
         """
         state, form = paper.state, paper.form or Form.flat(len(paper.state.faces))
         points = [
@@ -351,7 +357,9 @@ class Eye:
         spin = atan2(2 * xy, xx - yy) / 2
         if abs(xy) < _TINY and abs(xx - yy) < _TINY:
             spin = 0.0
-        x, y, z = _TILT
+        span = [max(p[k] for p in points) - min(p[k] for p in points) for k in range(3)]
+        standing = span[2] >= _RISING * hypot(span[0], span[1])
+        x, y, z = _STANDING if standing else _TILT
         c, s = cos(spin), sin(spin)
         return cls(_unit((c * x - s * y, s * x + c * y, z)))
 

@@ -60,14 +60,13 @@ async def write_gallery_viewer(name: str, heading: str) -> Path:
     path = GALLERY / f"{name}.html"
     path.parent.mkdir(parents=True, exist_ok=True)
     with tower(Number.from_data(radicand) for radicand in result.tower):
-        return await asyncio.to_thread(write_viewer, result, heading, path)
+        return await asyncio.to_thread(write_viewer, result, heading, path, studio=True)
 
 
 async def draw_thumbnails(names: list[str]) -> None:
     """Draw each viewer's view of the finished model into a card image.
 
-    A model shaped in space shows in 3D, from the eye the viewer opens with; a flat
-    model shows from above.
+    Each model shows in the viewer's studio, from the eye the viewer opens with.
     """
 
     async def serve(route: Route) -> None:
@@ -86,7 +85,7 @@ async def draw_thumbnails(names: list[str]) -> None:
             # The card shows the finished model alone, without its last fold line.
             await page.evaluate(
                 "const stage = window.origamy.stage;"
-                "stage.look(stage.build.eye ? 'tilt' : 'top');"
+                "stage.look('tilt');"
                 "if (stage.line) stage.line.visible = false;"
             )
             await page.wait_for_timeout(900)

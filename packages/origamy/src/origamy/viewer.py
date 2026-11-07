@@ -97,9 +97,16 @@ try {
 """)
 
 
-def write_viewer(result: BuildResult, name: str, path: Path) -> Path:
-    """Write the viewer of a build to ``path`` and return the path."""
-    path.write_text(_page(build_data(result, name), name), encoding="utf-8")
+def write_viewer(
+    result: BuildResult, name: str, path: Path, *, studio: bool = False
+) -> Path:
+    """Write the viewer of a build to ``path`` and return the path.
+
+    With ``studio``, the viewer opens showing paper as paper: lit by a soft room and
+    casting shadows on a table, without outlines. Otherwise it opens as a diagram.
+    """
+    data = build_data(result, name) | {"studio": studio}
+    path.write_text(_page(data, name), encoding="utf-8")
     return path
 
 

@@ -10,9 +10,13 @@
 // layers under it need.
 // Once shaping turns the paper out of the plane, each face also has a rigid motion in
 // space, and a step that turns paper in space rotates its moving faces about the turn's axis.
+//
+// The studio shows paper as paper: a soft room lights it, a key light casts its shadows on
+// itself and on a table, and no outlines mark its faces.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const DURATION = 1100; // milliseconds a step's motion takes
 const BEND = 8; // segments in the half turn a bend makes
@@ -78,6 +82,7 @@ export function start(root, build) {
     bottom: () => stage.look("bottom"),
     tilt: () => stage.look("tilt"),
     xray: (button) => button.classList.toggle("on", stage.xray(!stage.seeThrough)),
+    studio: (button) => button.classList.toggle("on", stage.studio(!stage.inStudio)),
   };
   root.querySelectorAll("[data-do]").forEach((button) =>
     button.addEventListener("click", () => actions[button.dataset.do](button)),
@@ -100,6 +105,7 @@ export function start(root, build) {
     stage.look("tilt", true, toward);
   }
 
+  if (build.studio) actions.studio(root.querySelector('[data-do="studio"]'));
   pattern.onHover = (face) => stage.highlight(face);
   stage.onHover = (face) => pattern.highlight(face);
   go(steps.length - 1, false);
@@ -114,6 +120,7 @@ function page(build) {
   <nav class="views">
     <button data-do="top">Top</button><button data-do="tilt">3D</button>
     <button data-do="bottom">Bottom</button><button data-do="xray">X-ray</button>
+    <button data-do="studio">Studio</button>
   </nav></main>
 <footer>
   <div class="controls">
@@ -290,17 +297,30 @@ class Stage {
     this.element = element;
     this.build = build;
     this.size = build.size;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     element.append(this.renderer.domElement);
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#f6f5f2");
-    this.scene.add(new THREE.HemisphereLight("#ffffff", "#c9c4ba", 2.2));
+    const sky = new THREE.HemisphereLight("#ffffff", "#c9c4ba", 2.2);
     const sun = new THREE.DirectionalLight("#ffffff", 1.4);
     sun.position.set(0.3, -0.5, 1);
     const below = new THREE.DirectionalLight("#ffffff", 0.9);
     below.position.set(-0.3, 0.5, -1);
-    this.scene.add(sun, below);
+    // The studio's key light casts the paper's shadows, on itself and on the table.
+    const key = new THREE.DirectionalLight("#fffaf2", 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.radius = 6;
+    key.shadow.blurSamples = 8;
+    this.lights = { sky, sun, below, key };
+    this.scene.add(sky, sun, below, key, key.target);
+    this.table = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 }));
+    this.table.receiveShadow = true;
+    this.table.visible = false;
+    this.scene.add(this.table);
+    this.inStudio = false;
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.001, 100);
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -372,6 +392,7 @@ class Stage {
       const corners = [step.faces[f].indexOf(u), step.faces[f].indexOf(w), step.faces[g].indexOf(u), step.faces[g].indexOf(w)];
       return { geometry, front, back, f, g, corners };
     });
+    this.studio(this.inStudio);
     this.place(animate ? 0 : 1);
     if (this.line) this.scene.remove(this.line);
     this.line = null;
@@ -416,6 +437,59 @@ class Stage {
     });
     for (const bend of this.bends) this.bendAt(bend, placed);
     if (this.line) this.line.visible = t >= 1;
+    if (this.inStudio) this.light();
+  }
+
+  /** Show paper as paper, or as a diagram: lit by a soft room, casting shadows, without outlines. */
+  studio(on) {
+    this.inStudio = on;
+    const { sky, sun, below, key } = this.lights;
+    this.renderer.shadowMap.enabled = on;
+    this.renderer.toneMapping = on ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = 1;
+    if (on && !this.room) this.room = new THREE.PMREMGenerator(this.renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = on ? this.room : null;
+    this.scene.background = on ? null : new THREE.Color("#f6f5f2");
+    sky.intensity = on ? 0.45 : 2.2;
+    sun.intensity = on ? 0 : 1.4;
+    below.intensity = on ? 0.15 : 0.9;
+    key.intensity = on ? 1.05 : 0;
+    this.table.visible = on;
+    for (const material of [this.materials.front, this.materials.back]) {
+      material.envMapIntensity = 0.25;
+      material.needsUpdate = true;
+    }
+    for (const face of this.faces ?? []) {
+      face.edge.visible = !on;
+      for (const mesh of [face.front, face.back]) mesh.castShadow = mesh.receiveShadow = on;
+    }
+    for (const bend of this.bends ?? []) {
+      for (const mesh of [bend.front, bend.back]) mesh.castShadow = mesh.receiveShadow = on;
+    }
+    this.element.classList.toggle("studio", on);
+    if (on && this.faces) this.light();
+    return on;
+  }
+
+  /** Aim the key light's shadows at the paper, and lay the table under it. */
+  light() {
+    // The box reads the paper's vertices, as the faces' cached bounds lag their moves.
+    const box = new THREE.Box3().setFromObject(this.paper, true);
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const reach = box.getSize(new THREE.Vector3()).length() / 2 + 1e-6;
+    const { key } = this.lights;
+    key.target.position.copy(center);
+    key.position.copy(center).add(new THREE.Vector3(-0.8, -0.45, 0.75).normalize().multiplyScalar(3 * reach));
+    const camera = key.shadow.camera;
+    camera.left = camera.bottom = -2 * reach;
+    camera.right = camera.top = 2 * reach;
+    camera.near = reach;
+    camera.far = 5 * reach;
+    camera.updateProjectionMatrix();
+    key.shadow.bias = -0.0001;
+    this.table.position.set(center.x, center.y, box.min.z - 1e-4 * reach);
+    this.table.scale.setScalar(4 * reach);
   }
 
   /** Draw a crease as the half turn its paper makes from one face to the other. */

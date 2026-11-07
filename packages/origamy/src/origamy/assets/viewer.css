@@ -137,6 +137,10 @@ main {
   inset: 0;
 }
 
+.stage.studio {
+  background: radial-gradient(ellipse at 50% 40%, #fbfaf7 0%, #ece8e0 70%, #e2ddd3 100%);
+}
+
 .stage canvas {
   display: block;
 }

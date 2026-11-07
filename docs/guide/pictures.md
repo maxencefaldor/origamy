@@ -82,6 +82,7 @@ Layers sit a small gap apart, and a fold's crease bends round from one layer to 
 | Drag, right-drag, scroll | Orbit, pan and zoom |
 | Top, 3D, Bottom | Look from above, from a tilt, or from below |
 | X-ray | See through the layers |
+| Studio | Light the paper as paper, casting shadows on a table, without outlines; again for the diagram |
 | ⏮ ◀ Play ▶ ⏭ | The first step, the previous one, play, the next one and the last; the keys Home, ←, Space, → and End do the same |
 | Dots | Each step, to jump to it; a step with facts is yellow, and a refused step red |
 | Hover | Lights a face in the 3D view and on the crease pattern at once |
