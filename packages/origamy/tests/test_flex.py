@@ -71,11 +71,15 @@ def test_a_flex_keeps_the_fixed_face_still() -> None:
 
 
 def test_a_flex_that_no_rigid_motion_reaches_is_refused() -> None:
-    paper = example("pleated_fan")
+    # Pleats folded in half open only as the paper bends: a fan.
+    paper = Paper.square()
+    pleats = [Line.through((f"{k}/8", 0), (f"{k}/8", 1)) for k in range(1, 8)]
+    for k in (4, 2, 6, 1, 3, 5, 7):
+        paper.precrease(pleats[k - 1], flap=(f"{k}/16", "1/2"))
+    paper.collapse(valleys=pleats[0::2], mountains=pleats[1::2], fixed=("1/16", "1/2"))
+    paper.valley(Line.through((0, "1/2"), (1, "1/2")), flap=("1/16", "3/4"))
     with pytest.raises(RefusedError) as caught:
-        paper.flex(
-            {Line.through((f"{k}/8", 0), (f"{k}/8", 1)): 120 for k in range(1, 8)}
-        )
+        paper.flex(dict.fromkeys(pleats, 120))
     assert caught.value.refusal.rule == "no-flex"
 
 

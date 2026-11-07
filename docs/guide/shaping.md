@@ -66,6 +66,20 @@ for tip, inside in wings:
 paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
 ```
 
+## Settling
+
+A settle step turns creases toward angles and lets the paper bend as it must, as a hand opens a fan.
+The simulator turns the creases and lets the paper settle on the table under its weight, its faces free to bend.
+
+```python
+paper.settle(dict.fromkeys(pleats, 90))
+```
+
+Each crease is named as a flex names it, and turns its own way: 180 pressed flat, 0 open flat.
+The build keeps the exact paper as it was before the step.
+Only the simulator, and the viewer's film that plays it, show the settled paper.
+A settle step ends the build: the paper refuses any action after it.
+
 ## Rules
 
 Shaped paper takes shape steps, flexes, tilts and turning over, and no more folds.
@@ -77,9 +91,10 @@ Shaped paper takes shape steps, flexes, tilts and turning over, and no more fold
 | `turns-through-paper` | A shape step that turns paper through paper that stays, or a flex that folds a crease past flat or passes faces through each other |
 | `no-flex` | A flex whose angles no rigid motion of the faces reaches |
 | `flap-on-line` | A tilt whose flap point lies on its line, and so names no side |
+| `settled` | Any action after a settle step |
 
 Shape steps and flexes keep every face rigid.
-A cup's mouth opens only as its paper bends, so a flex that opens it is refused.
+A cup's mouth opens only as its paper bends, so a flex that opens it is refused, and a settle step opens it.
 
 ## In pictures, the viewer and FOLD files
 

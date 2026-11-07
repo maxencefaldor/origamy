@@ -210,6 +210,8 @@ class Stage:
     A pair misorders where its upper face lies below the lower one by more than half the
     thickness contact keeps between layers.
     """
+    settled: bool = False
+    """Whether the stage settles the paper, bent, away from any exact state."""
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,8 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     scale = physics.size / float(max(right - left, top - bottom))
     folds: list[tuple[int, Shaped, Shaped]] = []
     for index, step in enumerate(steps[1:], 1):
+        if step.settle:
+            continue
         before = Shaped(steps[index - 1].state, steps[index - 1].form)
         reached = Shaped(step.state, step.form)
         for after in (Shaped(step.through), reached) if step.through else (reached,):
@@ -245,8 +249,11 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     folder = _Folder(
         steps[-1].state, [(b.state, a.state) for _, b, a in folds], scale, physics
     )
-    stages = tuple(folder.fold(index, before, after) for index, before, after in folds)
-    return Folding(folder.mesh, folder.faces, folder.creep, stages)
+    stages = [folder.fold(index, before, after) for index, before, after in folds]
+    for index, step in enumerate(steps[1:], 1):
+        if step.settle:
+            stages.append(folder.settle(index, Shaped(step.state, step.form), step))
+    return Folding(folder.mesh, folder.faces, folder.creep, tuple(stages))
 
 
 class _Folder:
@@ -364,6 +371,59 @@ class _Folder:
             iterations,
             offset,
             misordered,
+        )
+
+    def settle(self, step: int, shaped: Shaped, settling: Step) -> Stage:
+        """Turn the creases a settle step names toward its angles, the paper bending.
+
+        No hand holds the paper: it bends as its stiffness and weight decide, and
+        settles on the table. A settle stage leaves the state on purpose, so it
+        measures no offset and no misordered pair.
+        """
+        goals = dict(settling.settle)
+        parents = np.array(shaped.state.parents(self.last), dtype=np.int64)
+        pairs = parents[self.ends]
+        edge = {frozenset(faces): e for e, faces in shaped.state.creases.items()}
+        drives: dict[int, float] = {}
+        for drive, (f, g) in enumerate(pairs.tolist()):
+            crease = edge.get(frozenset((f, g)))
+            if crease in goals:
+                drives[drive] = goals[crease]
+        for drive in drives:
+            if not self.made[drive]:
+                self._make(drive)
+        sheet = self.simulation
+        sheet.hold(0, np.arange(len(self.mesh.rest)), held=False)
+        closed = math.pi - self.physics.margin
+        start = {drive: float(self.angles[drive]) for drive in drives}
+        frames: list[NDArray[np.float64]] = []
+        converged, iterations = True, 0
+        count = self.physics.increments
+        for i in range(1, count + 1):
+            share = (1 - math.cos(math.pi * i / count)) / 2
+            for drive, goal in drives.items():
+                aim = float(np.clip(goal, -closed, closed))
+                self._rest(drive, start[drive] + (aim - start[drive]) * share)
+            report = sheet.step()
+            converged &= report.converged
+            iterations += report.iterations
+            frames.append(sheet.positions(0))
+        for drive, goal in drives.items():
+            self.angles[drive] = float(np.clip(goal, -closed, closed))
+        report = sheet.step()
+        frames.append(sheet.positions(0))
+        converged &= report.converged
+        iterations += report.iterations
+        return Stage(
+            step,
+            shaped.state,
+            shaped.form,
+            tuple(frames),
+            converged,
+            iterations,
+            0.0,
+            (),
+            settled=True,
         )
 
     def _move(self, step: int, start: Sequence[Motion], end: Sequence[Motion]) -> None:

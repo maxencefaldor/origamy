@@ -5,7 +5,7 @@ import re
 import runpy
 import shutil
 from collections.abc import Callable
-from math import isclose
+from math import inf, isclose, pi
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,10 @@ import pytest
 from origamy import Line, Paper, Point, service
 from origamy.draw import Eye, layers
 from origamy.paper import RefusedError
+from origamy.physics import Physics, simulate
+from origamy.result import BuildResult
 from origamy.space import Form, Shaped, apply, fold_angles, same
+from origamy_sim import Contact, Settings, Table
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 SPINE = Line.through(("1/2", 0), ("1/2", 1))
@@ -177,3 +180,42 @@ def test_pictures_draw_shaped_paper_in_space(
         all(abs(a - b) <= 2 for a, b in zip(color, shade, strict=True))
         for color in colors(plane.with_suffix(".png"))
     )
+
+
+def test_a_settle_step_keeps_the_exact_paper_and_ends_the_build(tmp_path: Path) -> None:
+    paper = book()
+    before = paper.state
+    paper.settle({SPINE: 90})
+    step = paper.steps[-1]
+    assert step.action == "settle"
+    assert paper.state is before
+    assert step.settle
+    # The spine folds as a valley, so it turns toward a quarter turn, valleys positive.
+    assert all(isclose(angle, pi / 2) for _, angle in step.settle)
+    # The build carries the settle step as data.
+    data = BuildResult.of(paper, tmp_path).steps[-1].step()
+    assert data.settle == step.settle
+    with pytest.raises(RefusedError) as caught:
+        paper.valley(MIDDLE, flap=("1/4", "3/4"))
+    assert caught.value.refusal.rule == "settled"
+
+
+def test_a_settle_step_needs_a_crease_along_its_line() -> None:
+    paper = book()
+    with pytest.raises(RefusedError) as caught:
+        paper.settle({MIDDLE: 90})
+    assert caught.value.refusal.rule == "no-crease"
+
+
+def test_the_simulator_bends_settled_paper_toward_its_angles() -> None:
+    paper = book()
+    paper.settle({SPINE: 90})
+    physics = Physics(
+        settings=Settings(time_step=inf, table=Table(), contact=Contact(layers=False))
+    )
+    stage = simulate(paper.steps, physics).stages[-1]
+    assert stage.settled
+    # The book opens from pressed flat toward a right angle: its pages part.
+    first, last = stage.frames[0], stage.frames[-1]
+    assert last[:, 2].max() - last[:, 2].min() > 0.3 * physics.size
+    assert last[:, 2].max() > first[:, 2].max()

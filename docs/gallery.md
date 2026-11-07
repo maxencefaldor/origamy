@@ -171,9 +171,10 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The pleated fan example](images/gallery-pleated-fan.png)
 
-    **[Pleated fan](gallery/pleated-fan.html)** · 9 steps
+    **[Pleated fan](gallery/pleated-fan.html)** · 10 steps
 
     Seven precreases, found by halving, collapse at once into alternate pleats, then the stack folds in half.
+    Last, the pleats open while the stack stays folded, so the paper bends: the simulator settles it into a hand fan.
 
     [Open in 3D](gallery/pleated-fan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pleated_fan.py)
 

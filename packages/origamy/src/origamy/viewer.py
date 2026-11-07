@@ -165,6 +165,22 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     posed = _Pose(np.eye(3), np.zeros(3))
     for stage in folding.stages:
         parents = stage.state.parents(last)
+        if stage.settled:
+            # A settle stage bends the paper away from any state: its frames keep the
+            # simulator's paper, posed as the last rest was, the last mismatch fading.
+            shares, kept = _shots(before, stage.frames)
+            for index in kept:
+                shaped = stage.frames[index] + (1 - shares[index]) * correction
+                frames[stage.step].append(posed.moved(shaped))
+            films[stage.step]["folds"].append(
+                {
+                    "count": len(kept),
+                    "lifts": _packed(_lifts(stage, parents, copies)),
+                    "flips": [stage.state.faces[p].place.flips for p in parents],
+                }
+            )
+            before, correction = stage.frames[-1], np.zeros_like(correction)
+            continue
         # The paper rests exactly where its state puts it. Between rests it keeps the
         # simulator's motion, eased from one rest's mismatch to the next by how far it
         # has come, and turned as a whole from one rest's pose to the next.
@@ -173,17 +189,9 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
         state = (state + placed[:, 9:]) * scale
         found = stage.frames[-1]
         reached = _fitted(state, found, flat=stage.form is None)
-        steps_taken = [before, *stage.frames]
-        lengths = np.array(
-            [np.abs(b - a).max() for a, b in itertools.pairwise(steps_taken)]
-        )
-        total = lengths.sum()
-        shares = np.cumsum(lengths) / total if total > 0 else np.ones(len(lengths))
+        shares, kept = _shots(before, stage.frames)
         after = reached - found
         pose = _Pose.between(reached, state)
-        # A fold keeps a few frames, evenly spread along its way, and always its last.
-        marks = np.arange(1, _SHOTS + 1) / _SHOTS - _SHARE
-        kept = sorted({*np.searchsorted(shares, marks).tolist(), len(shares) - 1})
         for index in kept:
             share = shares[index]
             shaped = stage.frames[index] + (1 - share) * correction + share * after
@@ -214,6 +222,23 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
         "vertices": len(folding.mesh.rest),
         "steps": films,
     }
+
+
+def _shots(
+    before: NDArray[np.float64], frames: Sequence[NDArray[np.float64]]
+) -> tuple[NDArray[np.float64], list[int]]:
+    """How far along its way each frame of a fold lies, and the frames a film keeps.
+
+    The way is the paper's greatest move from frame to frame, from where it lay
+    before. A film keeps a few frames, evenly spread along the way, and the last.
+    """
+    lengths = np.array(
+        [np.abs(b - a).max() for a, b in itertools.pairwise([before, *frames])]
+    )
+    total = lengths.sum()
+    shares = np.cumsum(lengths) / total if total > 0 else np.ones(len(lengths))
+    marks = np.arange(1, _SHOTS + 1) / _SHOTS - _SHARE
+    return shares, sorted({*np.searchsorted(shares, marks).tolist(), len(shares) - 1})
 
 
 @dataclass(frozen=True)

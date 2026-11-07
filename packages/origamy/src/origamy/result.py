@@ -147,6 +147,11 @@ class StepData(_Data):
         default=None,
         description="The folded paper a precrease passes through before it unfolds.",
     )
+    settle: tuple[tuple[int, int, float], ...] = Field(
+        default=(),
+        description="The creases a settle step turns, as their two vertices, and the "
+        "fold angle in radians, valleys positive, each turns toward.",
+    )
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -178,6 +183,7 @@ class StepData(_Data):
             ),
             path=tuple(form.motions for form in step.path),
             through=StateData.of(step.through) if step.through else None,
+            settle=tuple((u, v, angle) for (u, v), angle in step.settle),
         )
 
     def step(self) -> Step:
@@ -207,6 +213,7 @@ class StepData(_Data):
             else None,
             tuple(Form(motions) for motions in self.path),
             self.through.state() if self.through else None,
+            tuple(((u, v), angle) for u, v, angle in self.settle),
         )
 
 

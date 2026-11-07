@@ -23,6 +23,7 @@ A refusal rule is always an error, and the other rules state a fact about a step
 | [`unbalanced-angles`](#unbalanced-angles) | `error` | yes | The angles between folds at a vertex do not alternate to 180°. |
 | [`layer-crossing`](#layer-crossing) | `error` | yes | No stacking of the faces keeps paper from passing through paper. |
 | [`layer-order-unknown`](#layer-order-unknown) | `error` | yes | The layer solver stopped before finding a stacking. |
+| [`settled`](#settled) | `error` | yes | The action follows a settle step. |
 | [`not-flat`](#not-flat) | `error` | yes | The action folds paper that shaping has turned out of the plane. |
 | [`hinge-bent`](#hinge-bent) | `error` | yes | The hinge of a shape step runs through paper turned apart before. |
 | [`turns-through-paper`](#turns-through-paper) | `error` | yes | A shape step or a flex turns paper through paper. |
@@ -133,6 +134,12 @@ The layer solver proved that no order of the overlapping faces meets the taco-ta
 The layer solver stopped before finding a stacking.
 
 The layer solver reached its budget of dead ends before it found a stacking or proved that none exists.
+
+## settled
+
+The action follows a settle step.
+
+A settle step lets the simulator bend the paper, which no exact state holds, so it ends the build.
 
 ## not-flat
 

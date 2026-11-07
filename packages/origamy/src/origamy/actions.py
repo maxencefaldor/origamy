@@ -69,6 +69,9 @@ class Outcome:
     """The forms a flex passes through on its way, in order."""
     through: State | None = None
     """The folded paper a precrease passes through before it unfolds."""
+    settle: tuple[tuple[Edge, float], ...] = ()
+    """The fold angles, in radians, valleys positive, that settling turns creases
+    toward; the simulator alone shows the paper they bend."""
 
 
 def fold(

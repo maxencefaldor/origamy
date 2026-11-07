@@ -180,6 +180,14 @@ RULES = {
             refusal=True,
         ),
         Rule(
+            "settled",
+            Level.ERROR,
+            "The action follows a settle step.",
+            "A settle step lets the simulator bend the paper, which no exact state "
+            "holds, so it ends the build.",
+            refusal=True,
+        ),
+        Rule(
             "not-flat",
             Level.ERROR,
             "The action folds paper that shaping has turned out of the plane.",

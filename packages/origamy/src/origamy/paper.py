@@ -61,6 +61,9 @@ class Step:
     through: State | None = None
     """The folded paper a precrease passes through before it unfolds; its faces are the
     step's faces."""
+    settle: tuple[tuple[Edge, float], ...] = ()
+    """The fold angles, in radians, valleys positive, that a settle step turns creases
+    toward, while the paper bends as it must."""
 
 
 type CreaseLike = Line | tuple[PointLike, PointLike]
@@ -412,6 +415,40 @@ class Paper:
         named = ", ".join(f"{_describe(c)} to {a}°" for c, a in targets)
         self._act("flex", f"flex: fold {named}", act)
 
+    def settle(self, angles: Mapping[CreaseLike, Exact]) -> None:
+        """Turn creases toward angles in degrees, and let the paper bend as it must.
+
+        Each crease is named as `flex` names it, and turns its own way: 180 pressed
+        flat, 0 open flat, and a negative angle the other way. A crease lying flat
+        turns as a valley. Faces need not stay rigid: the simulator turns the creases
+        and lets the paper settle on the table, bent as its stiffness and weight
+        decide. The build keeps the exact paper as it was; only the simulator, and
+        the viewer that plays it, show the settled paper. The paper takes no action
+        after it settles.
+        """
+        targets = [
+            (_crease(crease), Fraction(Number.of(angle).fraction()))
+            for crease, angle in angles.items()
+        ]
+
+        def act(paper: Shaped) -> Outcome:
+            state = paper.state
+            goals: dict[Edge, float] = {}
+            found = actions.along(state, [crease for crease, _ in targets])
+            for (crease, angle), edges in zip(targets, found, strict=True):
+                if not edges:
+                    msg = f"no crease of the paper lies along {_describe(crease)}"
+                    raise RefusalError(msg, rule="no-crease", state=state)
+                for edge in edges:
+                    sense = -1 if state.assignment(edge) == "M" else 1
+                    goals[edge] = sense * radians(angle)
+            return Outcome(
+                state, frozenset(), paper.form, settle=tuple(sorted(goals.items()))
+            )
+
+        named = ", ".join(f"{_describe(c)} toward {a}°" for c, a in targets)
+        self._act("settle", f"settle: turn {named}, the paper bending", act)
+
     def tilt(self, line: Line, flap: PointLike, *, angle: Exact) -> None:
         """Turn the whole paper about ``line`` by ``angle`` degrees, in space.
 
@@ -506,6 +543,8 @@ class Paper:
         source = capture()
         before = self.state
         diagnostics: list[Diagnostic] = []
+        if self.steps[-1].settle:
+            act = _settled
         if line is not None and not is_referenced(before, line):
             message = f"no point or line on the paper locates the fold line {line}"
             diagnostics.append(Diagnostic.of("unreferenced-fold", message))
@@ -539,8 +578,15 @@ class Paper:
                 turn=outcome.turn,
                 path=outcome.path,
                 through=outcome.through,
+                settle=outcome.settle,
             )
         )
+
+
+def _settled(paper: Shaped) -> Outcome:
+    """Any action after a settle step, which the paper refuses."""
+    msg = "the paper has settled, bent by the simulator, so it takes no more actions"
+    raise RefusalError(msg, rule="settled", state=paper.state)
 
 
 def _flat(act: Callable[[State], Outcome]) -> Callable[[Shaped], Outcome]:
