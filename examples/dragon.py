@@ -1,12 +1,12 @@
 # Copyright 2026 Maxence Faldor
-"""An original: a wyvern, with a curled tail, a hooked snout and fanned bat wings."""
+"""An original: a wyvern, with a curled tail, a hooked snout and arched bat wings."""
 
 from origamy import Line, Paper, Point, bisect, meet, midpoint, perpendicular
 
-FAN = 40
-"""How far, in degrees, the membrane turns at each finger of a wing."""
-RISE = 125
-"""How far, in degrees, each wing rises from folded down: well past level."""
+DROOP = 30
+"""How far, in degrees, the membrane turns down at each finger of a wing."""
+RISE = 150
+"""How far, in degrees, each wing rises from folded down: high above level."""
 FINGERS = (
     (("-83/1000", "-207/1000"), ("-77/1000", "-151/1000")),
     (("-47/1000", "-118/1000"), ("-44/1000", "-69/1000")),
@@ -23,7 +23,8 @@ def fold() -> Paper:
 
     The legs reverse fold into a rising neck and a level tail. The head reverse folds
     forward, its snout hooks down, and the tail's tip curls up. The wings fold down,
-    rise, and fan out between three fingers each. Last, the wyvern stands up.
+    rise high, and arch down at three fingers each, as a bat's do. Last, the wyvern
+    stands up.
     """
     paper = Paper.square(front="#2f6b3a", back="#d9c27a")
     bird_base(paper)
@@ -78,7 +79,7 @@ def fold() -> Paper:
     flap = paper.where(("47/50", "1/20"))
     paper.reverse(line, flap=flap, layers=paper.layers(flap), outside=True)
 
-    # Fold each wing down at the shoulders, then raise it well past level.
+    # Fold each wing down at the shoulders, then raise it high above level.
     wings = (((0, 0), ("1/8", "1/16")), ((1, 1), ("7/8", "15/16")))
     for corner, inside in wings:
         paper.valley(shoulders(paper, corner), flap=paper.where(inside), layers=1)
@@ -89,9 +90,9 @@ def fold() -> Paper:
         )
         paper.turn_over()
 
-    # Fan each wing: fingers run from a wrist on the leading edge to the trailing
-    # edge, and the membrane turns one way, then the other, at each. The second wing's
-    # points mirror the first's, as the turn over between them mirrors the paper.
+    # Arch each wing: fingers run from a wrist on the leading edge to the trailing
+    # edge, and the membrane turns down at each. The second wing's points mirror the
+    # first's, as the turn over between them mirrors the paper.
     for corner, side in (((0, 0), 1), ((1, 1), -1)):
         tip = paper.where(corner)
 
@@ -99,10 +100,9 @@ def fold() -> Paper:
             shift = Point.of(offset)
             return Point(tip.x + side * shift.x, tip.y + shift.y)
 
-        for k, (end, inside) in enumerate(FINGERS):
+        for end, inside in FINGERS:
             line = Line.through(near(WRIST), near(end))
-            angle = FAN if k % 2 == 0 else -FAN
-            paper.shape(line, flap=near(inside), angle=angle, layers=1)
+            paper.shape(line, flap=near(inside), angle=-DROOP, layers=1)
         paper.turn_over()
 
     # Stand the wyvern up on its belly, its back to the sky.
