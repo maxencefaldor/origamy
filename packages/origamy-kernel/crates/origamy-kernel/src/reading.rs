@@ -6,10 +6,10 @@
 //! be found. Snapping within a looser fit then finds the corners left, and lets
 //! crossings find more, until none is left.
 //!
-//! A snapped number may hold a square root that no level of the tower holds, which
-//! adds a level. Corners and slopes build their numbers in the order the reading meets
-//! them, so the tower's levels come in that order. Crossings run on every core, and a
-//! crossing that needs a new level runs again, in order, once the level is added.
+//! A snapped number may lie in a field whose roots no level of the tower holds yet,
+//! which adds levels. Corners and slopes build their numbers in the order the reading
+//! meets them, so the tower's levels come in that order. Crossings run on every core,
+//! and a crossing that needs a new level runs again, in order, once the level is added.
 
 use std::cmp::Ordering;
 
@@ -21,7 +21,7 @@ use smallvec::smallvec;
 use crate::field::{Number, Tower};
 use crate::geometry::{Line, Point};
 use crate::int::Int;
-use crate::snap::{Bounds, Explanation, explain};
+use crate::snap::{Bounds, Explanation, Field, explain};
 
 /// The inputs of reading, besides the corners.
 #[derive(Clone, Debug)]
@@ -124,6 +124,9 @@ fn corners(segments: &[[(f64, f64); 2]], frame: &Frame) -> CornerData {
 /// Corners' keys and floats, and segments' corners.
 type CornerData = (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<[u32; 2]>);
 
+/// A unit in the last place of a key: keys round to ten decimal places.
+const KEY: f64 = 1e-10;
+
 /// A float rounded to ten decimal places, as Python's `round(x, 10)` rounds it: to the
 /// nearest decimal, ties to even, then to the nearest float.
 fn rounded(value: f64) -> f64 {
@@ -185,59 +188,84 @@ fn ranked(order: &[usize], edges: &[(u32, u32)]) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// The roots that snapped numbers may hold, each once a level of the tower holds it.
-struct Roots(Vec<(u32, Option<Number>)>);
+/// The fields that snapped numbers may lie in, each with the products of its roots once
+/// levels of the tower hold them.
+struct Fields(Vec<(Field, Option<Vec<Number>>)>);
 
-impl Roots {
-    fn new(roots: &[u32], tower: &Tower) -> Roots {
-        let mut found = Roots(roots.iter().map(|&r| (r, None)).collect());
+impl Fields {
+    fn new(fields: &[Field], tower: &Tower) -> Fields {
+        let mut found = Fields(fields.iter().map(|field| (field.clone(), None)).collect());
         found.refresh(tower);
         found
     }
 
-    /// The root of an integer, or `Err` with the integer when no level holds it yet.
-    fn get(&self, integer: u32) -> Result<&Number, u32> {
-        self.0
-            .iter()
-            .find(|(r, _)| *r == integer)
-            .and_then(|(_, root)| root.as_ref())
-            .ok_or(integer)
+    /// The products of a field's roots, or `Err` with the field when no level holds
+    /// one of its roots yet.
+    fn get(&self, field: usize) -> Result<&[Number], usize> {
+        self.0[field].1.as_deref().ok_or(field)
     }
 
-    /// Add the level an integer's root needs, and find the roots it holds.
-    fn grow(&mut self, integer: u32, tower: &mut Tower) {
-        let root = Number::integer(i128::from(integer)).sqrt(tower);
-        if let Some(entry) = self.0.iter_mut().find(|(r, _)| *r == integer) {
-            entry.1 = Some(root);
+    /// Add the levels a field's roots need, and find the roots the others hold.
+    fn grow(&mut self, field: usize, tower: &mut Tower) {
+        let mut products = vec![Number::one()];
+        for radicand in &self.0[field].0.0 {
+            let root = combination(radicand, &products, tower).sqrt(tower);
+            let above: Vec<Number> = products.iter().map(|p| p.times(&root, tower)).collect();
+            products.extend(above);
         }
+        self.0[field].1 = Some(products);
         self.refresh(tower);
     }
 
     fn refresh(&mut self, tower: &Tower) {
-        for (integer, root) in &mut self.0 {
-            if root.is_none() {
-                *root = Number::integer(i128::from(*integer)).root(tower);
+        for (field, products) in &mut self.0 {
+            if products.is_none() {
+                *products = roots(field, tower);
             }
         }
     }
 }
 
-/// A candidate as a number, or `Err` with the integer under its root when no level
-/// holds that root yet.
-fn number(candidate: &Explanation, roots: &Roots, tower: &Tower) -> Result<Number, u32> {
-    let rational = fraction(&candidate.rational);
-    if candidate.surd.0 == BigInt::ZERO {
-        return Ok(rational);
+/// The products of a field's roots, when levels of the tower hold every root.
+fn roots(field: &Field, tower: &Tower) -> Option<Vec<Number>> {
+    let mut products = vec![Number::one()];
+    for radicand in &field.0 {
+        let root = combination(radicand, &products, tower).root(tower)?;
+        let above: Vec<Number> = products.iter().map(|p| p.times(&root, tower)).collect();
+        products.extend(above);
     }
-    let root = roots.get(candidate.root)?;
-    Ok(rational.plus(&fraction(&candidate.surd).times(root, tower)))
+    Some(products)
 }
 
-fn fraction((numerator, denominator): &(BigInt, BigInt)) -> Number {
-    Number::new(
-        smallvec![Int::from_big(numerator.clone())],
-        Int::from_big(denominator.clone()),
-    )
+/// The sum of integers times numbers.
+fn combination(integers: &[i64], numbers: &[Number], tower: &Tower) -> Number {
+    integers
+        .iter()
+        .zip(numbers)
+        .fold(Number::zero(), |sum, (&integer, number)| {
+            sum.plus(&Number::integer(i128::from(integer)).times(number, tower))
+        })
+}
+
+/// A candidate as a number, or `Err` with its field when no level holds one of the
+/// field's roots yet.
+fn number(candidate: &Explanation, fields: &Fields, tower: &Tower) -> Result<Number, usize> {
+    let denominator = Int::from_big(candidate.denominator.clone());
+    let Some(field) = candidate.field else {
+        return Ok(Number::new(
+            smallvec![Int::from_big(candidate.numerators[0].clone())],
+            denominator,
+        ));
+    };
+    let products = fields.get(field)?;
+    let sum = candidate.numerators.iter().zip(products).fold(
+        Number::zero(),
+        |sum, (numerator, product)| {
+            let term = Number::new(smallvec![Int::from_big(numerator.clone())], Int::ONE);
+            sum.plus(&term.times(product, tower))
+        },
+    );
+    Ok(sum.times(&Number::new(smallvec![Int::ONE], denominator), tower))
 }
 
 /// The corners in order by key, their creases, and what snapping found of them.
@@ -251,7 +279,7 @@ struct Reader<'r> {
     candidates: Vec<[Option<Explanation>; 2]>,
     /// Each corner's coordinates' numbers, once built.
     numbers: Vec<[Option<Number>; 2]>,
-    roots: Roots,
+    fields: Fields,
 }
 
 impl<'r> Reader<'r> {
@@ -295,7 +323,7 @@ impl<'r> Reader<'r> {
             near,
             reading,
             candidates,
-            roots: Roots::new(&reading.bounds.roots, tower),
+            fields: Fields::new(&reading.bounds.fields, tower),
         }
     }
 
@@ -352,9 +380,9 @@ impl<'r> Reader<'r> {
         let candidate = self.candidates[corner][axis].as_ref()?;
         if self.numbers[corner][axis].is_none() {
             let built = loop {
-                match number(candidate, &self.roots, tower) {
+                match number(candidate, &self.fields, tower) {
                     Ok(built) => break built,
-                    Err(integer) => self.roots.grow(integer, tower),
+                    Err(field) => self.fields.grow(field, tower),
                 }
             };
             self.numbers[corner][axis] = Some(built);
@@ -373,7 +401,7 @@ impl<'r> Reader<'r> {
         exact: &[Option<Point>],
         tower: &mut Tower,
     ) -> Vec<(usize, Point)> {
-        let outcomes: Vec<Result<Option<Point>, u32>> = {
+        let outcomes: Vec<Result<Option<Point>, usize>> = {
             let (reader, tower) = (&*self, &*tower);
             left.par_iter()
                 .map(|&corner| reader.crossing(corner, exact, tower))
@@ -381,8 +409,8 @@ impl<'r> Reader<'r> {
         };
         let mut found = vec![];
         for (&corner, mut outcome) in left.iter().zip(outcomes) {
-            while let Err(integer) = outcome {
-                self.roots.grow(integer, tower);
+            while let Err(field) = outcome {
+                self.fields.grow(field, tower);
                 outcome = self.crossing(corner, exact, tower);
             }
             if let Ok(Some(point)) = outcome {
@@ -393,8 +421,8 @@ impl<'r> Reader<'r> {
     }
 
     /// Where two lines of creases through exact corners cross at a corner, when they
-    /// cross within `near` of its key; or `Err` with an integer whose root no level of
-    /// the tower holds yet.
+    /// cross within `near` of its key; or `Err` with a field one of whose roots no
+    /// level of the tower holds yet.
     ///
     /// A line runs from the corner along creases that continue straight, in both
     /// directions, through two exact corners on its way. Failing two such lines, a
@@ -405,7 +433,7 @@ impl<'r> Reader<'r> {
         corner: usize,
         exact: &[Option<Point>],
         tower: &Tower,
-    ) -> Result<Option<Point>, u32> {
+    ) -> Result<Option<Point>, usize> {
         let mut first: Option<Line> = None;
         let mut meet = |line: Line| -> Option<Option<Point>> {
             match &first {
@@ -454,14 +482,17 @@ impl<'r> Reader<'r> {
                 continue;
             }
             let steep = dy.abs() > dx.abs();
+            // Keys hold ten decimal places, so a slope, at most 1, measures its value to
+            // a unit in their last place over the run.
             let bounds = Bounds {
                 tolerance: self.reading.bounds.tolerance / length,
+                spread: KEY / dx.abs().max(dy.abs()),
                 ..self.reading.bounds.clone()
             };
             let Some(candidate) = explain(if steep { dx / dy } else { dy / dx }, &bounds) else {
                 continue;
             };
-            let slope = number(&candidate, &self.roots, tower)?;
+            let slope = number(&candidate, &self.fields, tower)?;
             if candidate.fit > self.reading.fit {
                 continue;
             }
@@ -528,9 +559,16 @@ mod tests {
         Reading {
             bounds: Bounds {
                 tolerance: 1e-9,
+                spread: 0.0,
                 sure: 1e-8,
                 denominator: 1_000_000,
-                roots: vec![2, 3, 5, 6],
+                fields: vec![
+                    Field(vec![vec![2]]),
+                    Field(vec![vec![3]]),
+                    Field(vec![vec![5]]),
+                    Field(vec![vec![6]]),
+                    Field(vec![vec![2], vec![2, 1]]),
+                ],
                 scale: 1_000_000_000_000,
                 size: 10_000,
             },
@@ -559,6 +597,22 @@ mod tests {
         let root_half = Number::new(smallvec![Int::ZERO, Int::ONE], Int::from(2i64));
         assert_eq!(points[1], Point::new(root_half, rational(1, 2), &tower));
         assert_eq!(points[2], Point::new(Number::one(), Number::one(), &tower));
+    }
+
+    #[test]
+    fn corners_of_eleven_and_a_quarter_degrees_add_nested_roots() {
+        // cos 22.5° / 2 is √(2 + √2) / 4, which needs √2 and then √(2 + √2).
+        let quarter = (2.0 + 2f64.sqrt()).sqrt() / 4.0;
+        let segments = [[(0.0, 0.0), (quarter, 0.5)]];
+        let mut tower = Tower::new(vec![]);
+        let (points, _) = read(&segments, &UNIT, &reading(), &mut tower).unwrap();
+        let nested = Number::new(smallvec![Int::from(2i64), Int::ONE], Int::ONE);
+        assert_eq!(tower.radicands(), &[Number::integer(2), nested]);
+        let x = Number::new(
+            smallvec![Int::ZERO, Int::ZERO, Int::ONE, Int::ZERO],
+            Int::from(4i64),
+        );
+        assert_eq!(points[1], Point::new(x, rational(1, 2), &tower));
     }
 
     #[test]

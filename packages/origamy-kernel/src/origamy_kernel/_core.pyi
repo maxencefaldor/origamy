@@ -59,10 +59,10 @@ def explain(
     tolerance: float,
     sure: float,
     denominator: int,
-    roots: list[int],
+    fields: list[list[list[int]]],
     scale: int,
     size: int,
-) -> list[tuple[float, tuple[int, int], tuple[int, int], int] | None]: ...
+) -> list[tuple[float, list[int], int, int | None] | None]: ...
 def read_corners(
     radicands: list[NumberData],
     segments: list[tuple[tuple[float, float], tuple[float, float]]],
@@ -73,7 +73,7 @@ def read_corners(
     fit: float,
     near: float,
     denominator: int,
-    roots: list[int],
+    fields: list[list[list[int]]],
     scale: int,
     size: int,
 ) -> tuple[

@@ -238,17 +238,21 @@ A file gives its coordinates as floats, and reading finds the exact number each 
 | --- | --- |
 | A fraction p / d | Its denominator d, up to a million |
 | (p + q√r) / d, for r one of 2, 3, 5 and 6 | Its largest integer s, up to 10,000 |
+| (p + q√2 + r√(2 + √2) + t√2·√(2 + √2)) / d | Its largest integer s, up to 10,000 |
 
 Lattice reduction finds the integers of each candidate.
-A candidate's fit is its error times d², or times s³.
+A candidate's fit is its error times d², or its error times d and a power of s: the count of integers over the roots.
+The error of a candidate with roots counts the rounding of its floats too.
 A random float's best candidate has a fit near 1, so a far smaller fit shows the number the float stands for.
 The candidate with the smallest fit wins, within `tolerance` of the float.
 
 Reading takes the coordinates with a fit under `origamy.pattern.SURE`, 10⁻⁸, first.
 A corner without both then lies where two lines of creases cross, each through corners already exact.
 A line runs straight along creases through two exact corners, or leaves an exact corner at a slope that snaps.
+A slope measures its value only as finely as the corners' ten decimal places allow, and its candidates' errors count as no less.
 Coordinates with a fit under `origamy.pattern.FIT`, 10⁻⁴, come next, then crossings again, until every corner is exact.
-Patterns on grids, on 22.5° and 30° angles, with golden ratios, and on crossings of their creases all read exactly.
+Patterns on grids, on 22.5°, 11.25° and 30° angles, with golden ratios, and on crossings of their creases all read exactly.
+The 11.25° angles come from paper turned by 22.5°, as the traditional crane's pattern draws it.
 Reading refuses a corner left over, with a `ValueError`.
 
 A FOLD file's unassigned creases read as flat creases, and an assignment origamy cannot fold is refused.
@@ -258,16 +262,15 @@ An ORIPA file's aid lines are ignored.
 
 The script `docs/patterns.py` folds every pattern in a folder: it reads each one, creases its paper, and collapses it.
 [Flat-Folder](https://github.com/origamimagiro/flat-folder)'s examples hold 755 patterns published by origami designers, from a sailboat to box-pleated insects.
-Of the 748 that assign folds, origamy collapses 628 exactly:
+Of the 748 that assign folds, origamy collapses 657 exactly:
 
 | Outcome | Patterns |
 | --- | --- |
-| Collapsed | 628 |
-| Refused, `layer-crossing` | 9, all among the 12 Flat-Folder lists as unsatisfiable |
+| Collapsed | 657 |
+| Refused, `layer-crossing` | 11, all among the 12 Flat-Folder lists as unsatisfiable |
 | Refused, `loose-crease` | 3, with a crease that ends inside a face |
-| Refused, `unbalanced-angles` | 1 |
-| Unread | 107, with arbitrary angles or the nested roots of 11.25° creases |
+| Unread | 77, with arbitrary angles |
 
-None of the 12 unsatisfiable patterns collapses: origamy refuses 9 and reads 3 in no exact numbers.
+None of the 12 unsatisfiable patterns collapses: origamy refuses 11 and reads 1 in no exact numbers.
 The largest, a Menger sponge of 13,974 folds and 8,701 faces, reads, creases and collapses in 0.5 seconds on two cores.
 Kamiya's Ryujin 2.1, with 10,842 folds, takes 0.6 seconds, and a lobster of 9,771 folds stacks 560 layers deep in 1.0.

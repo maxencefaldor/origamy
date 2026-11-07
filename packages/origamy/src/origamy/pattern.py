@@ -7,10 +7,11 @@ collapse it in the next, as a folder precreases a pattern and then collapses it.
 
 A file gives its coordinates as floats, and origamy's numbers are exact. Reading snaps
 each coordinate, once the paper's longer side measures 1, to the exact number that
-explains it best: a fraction, or ``(p + q√r) / d`` with small integers and r one of
-2, 3, 5 and 6, found by lattice reduction. A corner no number explains lies where two
-lines of creases through exact corners cross. Patterns on grids, on 22.5° and 30°
-angles, with golden ratios, and on crossings of their creases all read exactly.
+explains it best: a fraction, or small integers over the products of a field's square
+roots, found by lattice reduction. The fields hold √2, √3, √5 and √6 alone, and √2
+with √(2 + √2). A corner no number explains lies where two lines of creases through
+exact corners cross. Patterns on grids, on 22.5°, 11.25° and 30° angles, with golden
+ratios, and on crossings of their creases all read exactly.
 """
 
 import json
@@ -42,10 +43,11 @@ FIT: Final = 1e-4
 """How well an exact number must explain a coordinate, for its complexity.
 
 A random float lies about ``1 / d²`` from the nearest fraction with denominator up to
-d, and about ``1 / s³`` from the nearest ``(p + q√r) / d`` with integers up to s. A
-number's fit is its error times d², or times s³: a random float's best is about 1, and
-a coordinate the number explains has a fit far smaller. A snapped number's fit is at
-most `FIT`.
+d. Times a denominator d, it lies about ``1 / s^k`` from the nearest integers up to s
+over the k products of a field's roots, such as ``p + q√r`` for k = 2. A number's fit
+is its error times d², or its error times d times s^k: a random float's best is about
+1, and a coordinate the number explains has a fit far smaller. A snapped number's fit
+is at most `FIT`.
 """
 
 SURE: Final = 1e-8
@@ -55,13 +57,30 @@ _DENOMINATOR: Final = 10**6
 """The largest denominator of a fraction a coordinate snaps to."""
 
 _SIZE: Final = 10**4
-"""The largest integer of a ``(p + q√r) / d`` a coordinate snaps to."""
+"""The largest integer of a number of a field that a coordinate snaps to."""
 
 _SCALE: Final = 10**12
 """The weight of a relation's error against its integers, in lattice reduction."""
 
-_ROOTS: Final = (2, 3, 5, 6)
-"""The square roots a snapped coordinate may hold besides a fraction."""
+type _Field = tuple[tuple[int, ...], ...]
+"""A tower of square roots: each level's radicand as integers over the products of the
+roots below it, as a `Number` orders its coefficients."""
+
+_FIELDS: Final[tuple[_Field, ...]] = (
+    ((2,),),
+    ((3,),),
+    ((5,),),
+    ((6,),),
+    ((2,), (2, 1)),
+)
+"""The fields a snapped coordinate may lie in besides the fractions.
+
+√2, √3, √5 and √6 alone draw creases at 22.5°, 30° and golden ratios. √2 with
+√(2 + √2) draws them at 11.25°, as on paper turned by 22.5°.
+"""
+
+_FIELD_LISTS: Final = [[list(radicand) for radicand in field] for field in _FIELDS]
+"""`_FIELDS` as the kernel takes them."""
 
 _NEAR: Final = 1e-7
 """How far apart, as a share of the paper's longer side, two float points may lie and
@@ -197,7 +216,7 @@ def _exact(
         FIT,
         _NEAR,
         _DENOMINATOR,
-        list(_ROOTS),
+        _FIELD_LISTS,
         _SCALE,
         _SIZE,
     )
@@ -215,9 +234,9 @@ def _exact(
 def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number:
     """The exact number that explains a float best, within a tolerance and a fit.
 
-    The candidates are fractions with denominators up to a million, and
-    ``(p + q√r) / d`` for r one of 2, 3, 5 and 6 with integers up to 10,000. The best
-    has the smallest fit, as `FIT` defines it.
+    The candidates are fractions with denominators up to a million, and integers up to
+    10,000 over the products of the square roots of a field of `_FIELDS`, over a
+    denominator. The best has the smallest fit, as `FIT` defines it.
 
     Raises:
         ValueError: No candidate lies within the tolerance and the fit.
@@ -229,16 +248,17 @@ def snap(value: float, tolerance: float = TOLERANCE, fit: float = FIT) -> Number
     return found[1]
 
 
-type _Explained = tuple[float, tuple[int, int], tuple[int, int], int] | None
-"""A float's best candidate as the kernel gives it: its fit, its rational part and its
-root's coefficient as fractions, and the integer under the root; or none."""
+type _Explained = tuple[float, list[int], int, int | None] | None
+"""A float's best candidate as the kernel gives it: its fit, its integer over each
+product of its field's roots, its denominator, and its field, none for a fraction; or
+none."""
 
 
 def _explanations(values: Iterable[float], tolerance: float) -> dict[float, _Explained]:
     """The candidate that explains each float best, as the kernel weighs them."""
     values = sorted(set(values))
     found = origamy_kernel.explain(
-        values, tolerance, SURE, _DENOMINATOR, list(_ROOTS), _SCALE, _SIZE
+        values, tolerance, SURE, _DENOMINATOR, _FIELD_LISTS, _SCALE, _SIZE
     )
     return dict(zip(values, found, strict=True))
 
@@ -256,17 +276,29 @@ def _number(found: _Explained) -> tuple[float, Number] | None:
     """
     if found is None:
         return None
-    fit, rational, surd, root = found
-    number = Number.of(Fraction(*rational))
-    if surd[0]:
-        number += Number.of(Fraction(*surd)) * _root(root)
-    return fit, number
+    fit, numerators, denominator, field = found
+    if field is None:
+        return fit, Number.of(Fraction(numerators[0], denominator))
+    products = _products(_FIELDS[field])
+    total = sum(
+        (
+            Number.of(n) * product
+            for n, product in zip(numerators, products, strict=True)
+        ),
+        ZERO,
+    )
+    return fit, total / denominator
 
 
 @remembered
-def _root(n: int) -> Number:
-    """The square root of an integer, in the current tower."""
-    return Number.of(n).sqrt()
+def _products(field: _Field) -> tuple[Number, ...]:
+    """The products of a field's square roots, 1 first, in the current tower."""
+    products: list[Number] = [Number.of(1)]
+    for radicand in field:
+        terms = (Number.of(n) * p for n, p in zip(radicand, products, strict=False))
+        root = sum(terms, ZERO).sqrt()
+        products += [p * root for p in products]
+    return tuple(products)
 
 
 def crease(state: State, segments: Iterable[Segment]) -> State:

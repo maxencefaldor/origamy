@@ -1,8 +1,9 @@
 //! The exact numbers that explain floats, as `origamy.pattern` snaps coordinates.
 //!
-//! A candidate is a fraction, from the float's continued fraction, or `(p + q√r) / d`
-//! for small integers, from lattice reduction. Its fit weighs its error by its size,
-//! and the best candidate has the smallest fit, then the smallest size.
+//! A candidate is a fraction, from the float's continued fraction, or a number of a
+//! field of square roots with small integers, from lattice reduction. Its fit weighs
+//! its error by its size, and the best candidate has the smallest fit, then the
+//! smallest size.
 
 use num_bigint::{BigInt, BigUint, Sign};
 use num_integer::Integer;
@@ -10,38 +11,88 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use crate::lattice::relations;
 
+/// A field a candidate may lie in beyond the fractions: a tower of square roots.
+///
+/// Each level's radicand is integers over the products of the roots below it, in the
+/// order a [`crate::field::Number`] keeps its coefficients: `[2]` is √2, and
+/// `[2], [2, 1]` adds √(2 + √2) above it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Field(pub Vec<Vec<i64>>);
+
+impl Field {
+    /// Each product of the field's roots as a float, 1 first, in the order of a
+    /// number's coefficients.
+    #[must_use]
+    pub fn basis(&self) -> Vec<f64> {
+        let mut products = vec![1.0];
+        for radicand in &self.0 {
+            #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+            let value: f64 = radicand
+                .iter()
+                .zip(&products)
+                .map(|(&c, &product)| c as f64 * product)
+                .sum();
+            let root = value.sqrt();
+            let above: Vec<f64> = products.iter().map(|&product| product * root).collect();
+            products.extend(above);
+        }
+        products
+    }
+
+    /// Whether every level's radicand is positive and its integers fit its level.
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        self.0
+            .iter()
+            .enumerate()
+            .all(|(level, radicand)| radicand.len() <= 1 << level && !radicand.is_empty())
+            && self.basis().iter().all(|x| x.is_finite() && *x > 0.0)
+    }
+}
+
 /// The bounds on the candidates that may explain a float.
 #[derive(Clone, Debug)]
 pub struct Bounds {
     /// How far a candidate may lie from the float.
     pub tolerance: f64,
-    /// The fit under which a fraction explains the float surely, so that no root is
+    /// How finely the float measures its value: a candidate's error counts as no
+    /// less. Zero for a float a file gives.
+    pub spread: f64,
+    /// The fit under which a fraction explains the float surely, so that no field is
     /// tried.
     pub sure: f64,
     /// The largest denominator of a fraction.
     pub denominator: u64,
-    /// The integers whose square roots a candidate may hold.
-    pub roots: Vec<u32>,
+    /// The fields a candidate may lie in beyond the fractions.
+    pub fields: Vec<Field>,
     /// The weight of a relation's error against its integers in lattice reduction.
     pub scale: i64,
-    /// The largest integer of a candidate with a root.
+    /// The largest integer of a candidate in a field.
     pub size: i64,
 }
 
-/// The best candidate for a float: `rational + surd·√root`, with its fit.
+/// The best candidate for a float: integers over a field's basis, over a denominator,
+/// with its fit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Explanation {
-    /// The error times the candidate's size squared.
+    /// The error times a power of the candidate's size: its square for a fraction, and
+    /// one less than the count of its integers for a number of a field. The error is
+    /// no less than the float's spread, and for a number of a field it holds the
+    /// rounding of its floats.
     pub fit: f64,
-    /// The rational part, as a numerator and a positive denominator in lowest terms.
-    pub rational: (BigInt, BigInt),
-    /// The coefficient of the root, likewise, zero for a fraction.
-    pub surd: (BigInt, BigInt),
-    /// The integer under the root, 1 for a fraction.
-    pub root: u32,
+    /// The integer of each product of the field's roots, as [`Field::basis`] orders
+    /// them; one integer for a fraction. They and the denominator share no factor.
+    pub numerators: Vec<BigInt>,
+    /// The positive denominator.
+    pub denominator: BigInt,
+    /// The field among the bounds' the number lies in, or `None` for a fraction.
+    pub field: Option<usize>,
 }
 
 /// The candidate that explains a finite float best within the bounds, if any.
+///
+/// A number of a field holds its top level's root, so that a smaller field's number
+/// comes from that field alone.
 #[must_use]
 pub fn explain(value: f64, bounds: &Bounds) -> Option<Explanation> {
     // Each candidate with its fit and size, in the order found: the first of equals wins.
@@ -51,39 +102,58 @@ pub fn explain(value: f64, bounds: &Bounds) -> Option<Explanation> {
         if error <= bounds.tolerance {
             // The denominator stays under the bound, a u64.
             let size = d.to_u64().unwrap_or(u64::MAX);
-            let fit = error * ratio(&(&d * &d), &BigInt::one());
-            let rational = (p, d);
-            let surd = (BigInt::zero(), BigInt::one());
-            found.push((
+            let fit = error.max(bounds.spread) * ratio(&(&d * &d), &BigInt::one());
+            let explanation = Explanation {
                 fit,
-                size,
-                Explanation {
-                    fit,
-                    rational,
-                    surd,
-                    root: 1,
-                },
-            ));
+                numerators: vec![p],
+                denominator: d,
+                field: None,
+            };
+            found.push((fit, size, explanation));
         }
     }
     if !found.iter().any(|(fit, _, _)| *fit <= bounds.sure) {
-        for &root in &bounds.roots {
-            let surd = f64::from(root).sqrt();
-            for (d, p, q) in relations(value, root, bounds.scale, bounds.size) {
-                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
-                let (df, pf, qf) = (d as f64, p as f64, q as f64);
-                if (value - (pf + qf * surd) / df).abs() <= bounds.tolerance {
-                    let size = d.max(p.abs()).max(q.abs());
-                    #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
-                    let fit = (df * value - pf - qf * surd).abs() * (size * size) as f64;
-                    let explanation = Explanation {
-                        fit,
-                        rational: lowest(BigInt::from(p), BigInt::from(d)),
-                        surd: lowest(BigInt::from(q), BigInt::from(d)),
-                        root,
-                    };
-                    found.push((fit, size.unsigned_abs(), explanation));
+        for (index, field) in bounds.fields.iter().enumerate() {
+            let basis = field.basis();
+            let top = basis.len() / 2;
+            for (d, c) in relations(value, &basis, bounds.scale, bounds.size) {
+                if c[top..].iter().all(|&x| x == 0) {
+                    continue;
                 }
+                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+                let sum: f64 = c.iter().zip(&basis).map(|(&x, &b)| x as f64 * b).sum();
+                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+                let df = d as f64;
+                if (value - sum / df).abs() > bounds.tolerance {
+                    continue;
+                }
+                let size = c.iter().fold(d, |m, x| m.max(x.abs()));
+                // Floats know the error only up to the rounding of its terms, a few units
+                // in the last place of each.
+                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+                let terms: f64 = (df * value).abs()
+                    + c.iter()
+                        .zip(&basis)
+                        .map(|(&x, &b)| (x as f64 * b).abs())
+                        .sum::<f64>();
+                #[allow(
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_possible_wrap,
+                    reason = "the integers are small, and so is their count"
+                )]
+                let (rounding, power) = (f64::EPSILON * c.len() as f64, c.len() as i32);
+                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+                let error = (df * value - sum).abs().max(df * bounds.spread) + terms * rounding;
+                #[allow(clippy::cast_precision_loss, reason = "the integers are small")]
+                let fit = error * (size as f64).powi(power);
+                let explanation = Explanation {
+                    fit,
+                    numerators: c.iter().map(|&x| BigInt::from(x)).collect(),
+                    denominator: BigInt::from(d),
+                    field: Some(index),
+                };
+                found.push((fit, size.unsigned_abs(), lowest(explanation)));
             }
         }
     }
@@ -95,14 +165,19 @@ pub fn explain(value: f64, bounds: &Bounds) -> Option<Explanation> {
     Some(found.swap_remove(best).2)
 }
 
-/// A fraction in lowest terms, its denominator positive.
-fn lowest(numerator: BigInt, denominator: BigInt) -> (BigInt, BigInt) {
-    let g = numerator.gcd(&denominator);
-    let (mut p, mut d) = (numerator / &g, denominator / &g);
-    if d.is_negative() {
-        (p, d) = (-p, -d);
+/// An explanation with its integers and denominator in lowest terms.
+fn lowest(mut explanation: Explanation) -> Explanation {
+    let common = explanation
+        .numerators
+        .iter()
+        .fold(explanation.denominator.clone(), |g, n| g.gcd(n));
+    if !common.is_one() {
+        for n in &mut explanation.numerators {
+            *n /= &common;
+        }
+        explanation.denominator /= &common;
     }
-    (p, d)
+    explanation
 }
 
 /// The convergents of a finite float's continued fraction, exactly, while their
@@ -212,9 +287,16 @@ mod tests {
     fn bounds() -> Bounds {
         Bounds {
             tolerance: 1e-9,
+            spread: 0.0,
             sure: 1e-8,
             denominator: 1_000_000,
-            roots: vec![2, 3, 5, 6],
+            fields: vec![
+                Field(vec![vec![2]]),
+                Field(vec![vec![3]]),
+                Field(vec![vec![5]]),
+                Field(vec![vec![6]]),
+                Field(vec![vec![2], vec![2, 1]]),
+            ],
             scale: 1_000_000_000_000,
             size: 10_000,
         }
@@ -224,18 +306,64 @@ mod tests {
         (BigInt::from(p), BigInt::from(d))
     }
 
+    fn integers(found: &Explanation) -> (Vec<i64>, i64, Option<usize>) {
+        let numerators = found
+            .numerators
+            .iter()
+            .map(|n| n.to_i64().unwrap())
+            .collect();
+        (numerators, found.denominator.to_i64().unwrap(), found.field)
+    }
+
     #[test]
     fn fractions_and_roots_explain_floats() {
         let half = explain(0.5, &bounds()).unwrap();
-        assert_eq!((half.rational, half.root), (fraction(1, 2), 1));
+        assert_eq!(integers(&half), (vec![1], 2, None));
         let third = explain(1.0 / 3.0, &bounds()).unwrap();
-        assert_eq!(third.rational, fraction(1, 3));
+        assert_eq!(integers(&third), (vec![1], 3, None));
         let golden = explain((1.0 + 5f64.sqrt()) / 4.0, &bounds()).unwrap();
-        assert_eq!(
-            (golden.rational, golden.surd, golden.root),
-            (fraction(1, 4), fraction(1, 4), 5)
-        );
+        assert_eq!(integers(&golden), (vec![1, 1], 4, Some(2)));
         assert!(explain(0.123_456_789, &bounds()).unwrap().fit > 1e-4);
+    }
+
+    #[test]
+    fn nested_roots_explain_the_floats_of_eleven_and_a_quarter_degrees() {
+        // The traditional crane drawn on a square turned by 22.5° has a corner at
+        // (2 - √2 - 3·√(2 + √2) + 2·√2·√(2 + √2)) / 2.
+        let (two, nested) = (
+            std::f64::consts::SQRT_2,
+            (2.0 + std::f64::consts::SQRT_2).sqrt(),
+        );
+        let corner = 1.0 - 0.5 * two - 1.5 * nested + two * nested;
+        let found = explain(corner, &bounds()).unwrap();
+        assert_eq!(integers(&found), (vec![2, -1, -3, 2], 2, Some(4)));
+        assert!(found.fit < 1e-8, "{found:?}");
+        // A number of √2 alone comes from √2's field.
+        let found = explain(0.5 + two / 4.0, &bounds()).unwrap();
+        assert_eq!(integers(&found), (vec![2, 1], 4, Some(0)));
+    }
+
+    #[test]
+    fn a_float_measured_coarsely_gives_no_candidate_a_finer_error() {
+        let coarse = Bounds {
+            spread: 1e-7,
+            ..bounds()
+        };
+        let third = explain(1.0 / 3.0, &coarse).unwrap();
+        assert_eq!(integers(&third), (vec![1], 3, None));
+        assert!((third.fit - 9e-7).abs() < 1e-12, "{third:?}");
+    }
+
+    #[test]
+    fn a_field_lists_its_roots_products() {
+        let field = Field(vec![vec![2], vec![2, 1]]);
+        let nested = (2.0 + std::f64::consts::SQRT_2).sqrt();
+        let basis = field.basis();
+        assert_eq!(basis.len(), 4);
+        assert!((basis[3] - std::f64::consts::SQRT_2 * nested).abs() < 1e-15);
+        assert!(field.valid());
+        assert!(!Field(vec![vec![2], vec![1, 2, 3]]).valid());
+        assert!(!Field(vec![vec![-2]]).valid());
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //! Integer relations by lattice reduction, as `origamy.pattern` snaps coordinates.
 //!
-//! The integer combinations of a float, 1 and a square root span a lattice. Its
-//! LLL-reduced basis holds short vectors: small integers whose combination nearly
-//! vanishes. Cohen's integral LLL keeps the Gram-Schmidt data in integers, so the
-//! reduction is exact.
+//! The integer combinations of a float and the floats of a field's basis span a
+//! lattice. Its LLL-reduced basis holds short vectors: small integers whose
+//! combination nearly vanishes. Cohen's integral LLL keeps the Gram-Schmidt data in
+//! integers, so the reduction is exact.
 //!
 //! The reduction runs in 128-bit integers with 256-bit products, which hold every
 //! value of the usual bounds without a heap allocation. A value that outgrows them
@@ -18,27 +18,34 @@ use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
-/// Small integers `(d, p, q)`, with `d` positive and `q` nonzero, that make
-/// `d·value ≈ p + q√root`.
+/// Small integers `d` and `c`, with `d` positive, that make
+/// `d·value ≈ c[0]·basis[0] + c[1]·basis[1] + …`.
 ///
 /// `scale` weighs a relation's error against its integers, and `size` bounds the
-/// integers kept. The basis is the integer vectors of `value`, 1 and `√root`, each
-/// with its float times `scale`, rounded half to even, as a last coordinate.
+/// integers kept. The lattice's basis is the integer vectors of `value` and of each
+/// float of `basis`, each with its float times `scale`, rounded half to even, as a
+/// last coordinate.
 #[must_use]
-pub fn relations(value: f64, root: u32, scale: i64, size: i64) -> Vec<(i64, i64, i64)> {
-    let surd = f64::from(root).sqrt();
+pub fn relations(value: f64, basis: &[f64], scale: i64, size: i64) -> Vec<(i64, Vec<i64>)> {
     #[allow(clippy::cast_precision_loss, reason = "the scale is a float's weight")]
     let scaled = |x: f64| (scale as f64 * x).round_ties_even().to_i128().unwrap_or(0);
-    let basis = [
-        [1, 0, 0, scaled(value)],
-        [0, 1, 0, i128::from(scale)],
-        [0, 0, 1, scaled(surd)],
-    ];
-    let reduced: Vec<Vec<Option<i64>>> = reduced(&basis).map_or_else(
+    let width = basis.len() + 2;
+    let vectors: Vec<Vec<i128>> = std::iter::once(value)
+        .chain(basis.iter().copied())
+        .enumerate()
+        .map(|(i, x)| {
+            let mut vector = vec![0; width];
+            vector[i] = 1;
+            vector[width - 1] = scaled(x);
+            vector
+        })
+        .collect();
+    let reduced: Vec<Vec<Option<i64>>> = reduced(&vectors).map_or_else(
         || {
-            let big = basis
-                .map(|vector| vector.map(BigInt::from).to_vec())
-                .to_vec();
+            let big: Vec<Vec<BigInt>> = vectors
+                .iter()
+                .map(|vector| vector.iter().map(|&x| BigInt::from(x)).collect())
+                .collect();
             // Big integers hold every value, so the reduction completes.
             reduced(&big)
                 .unwrap_or_default()
@@ -55,13 +62,19 @@ pub fn relations(value: f64, root: u32, scale: i64, size: i64) -> Vec<(i64, i64,
     );
     let mut found = vec![];
     for vector in reduced {
-        let (Some(times), Some(minus_p), Some(minus_q)) = (vector[0], vector[1], vector[2]) else {
+        let Some(integers) = vector[..width - 1]
+            .iter()
+            .copied()
+            .collect::<Option<Vec<i64>>>()
+        else {
             continue;
         };
+        let times = integers[0];
         let sign = if times > 0 { 1 } else { -1 };
-        let (d, p, q) = (sign * times, -sign * minus_p, -sign * minus_q);
-        if d != 0 && q != 0 && d.max(p.abs()).max(q.abs()) <= size {
-            found.push((d, p, q));
+        let d = sign * times;
+        let c: Vec<i64> = integers[1..].iter().map(|&x| -sign * x).collect();
+        if d != 0 && c.iter().fold(d, |m, x| m.max(x.abs())) <= size {
+            found.push((d, c));
         }
     }
     found
@@ -404,20 +417,33 @@ mod tests {
 
     #[test]
     fn a_half_root_two_relates_to_root_two() {
+        let basis = [1.0, std::f64::consts::SQRT_2];
         let found = relations(
             std::f64::consts::FRAC_1_SQRT_2,
-            2,
+            &basis,
             1_000_000_000_000,
             10_000,
         );
-        assert!(found.contains(&(2, 0, 1)), "{found:?}");
+        assert!(found.contains(&(2, vec![0, 1])), "{found:?}");
     }
 
     #[test]
     fn the_golden_ratio_relates_to_root_five() {
         let golden = f64::midpoint(1.0, 5f64.sqrt());
-        let found = relations(golden, 5, 1_000_000_000_000, 10_000);
-        assert!(found.contains(&(2, 1, 1)), "{found:?}");
+        let found = relations(golden, &[1.0, 5f64.sqrt()], 1_000_000_000_000, 10_000);
+        assert!(found.contains(&(2, vec![1, 1])), "{found:?}");
+    }
+
+    #[test]
+    fn a_cosine_of_eleven_and_a_quarter_degrees_relates_to_nested_roots() {
+        // cos 22.5° is √(2 + √2) / 2, in the basis 1, √2, √(2 + √2), √2·√(2 + √2).
+        let (two, nested) = (
+            std::f64::consts::SQRT_2,
+            (2.0 + std::f64::consts::SQRT_2).sqrt(),
+        );
+        let basis = [1.0, two, nested, two * nested];
+        let found = relations(nested / 4.0, &basis, 1_000_000_000_000, 10_000);
+        assert!(found.contains(&(4, vec![0, 0, 1, 0])), "{found:?}");
     }
 
     proptest::proptest! {

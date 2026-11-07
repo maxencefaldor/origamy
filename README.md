@@ -82,7 +82,7 @@ Two queries find the creases to name.
 A script can also start from a crease pattern, as published designs give them.
 `CreasePattern.read(path)` reads a FOLD or ORIPA file, and `paper.crease(pattern.creases)` creases the open paper along it.
 One collapse of its valleys and mountains then folds the whole pattern, as the [frog base](examples/frog_base.py) and [Miura-ori](examples/miura_ori.py) do.
-Of 748 published patterns in [Flat-Folder](https://github.com/origamimagiro/flat-folder)'s examples, origamy collapses 628 exactly, Kamiya's Ryujin 2.1 and its 10,842 folds among them.
+Of 748 published patterns in [Flat-Folder](https://github.com/origamimagiro/flat-folder)'s examples, origamy collapses 657 exactly, Kamiya's Ryujin 2.1 and its 10,842 folds among them.
 Before folding, a collapse checks every vertex with Maekawa's and Kawasaki's theorems, and the layer solver checks every stacking.
 
 ## Named moves

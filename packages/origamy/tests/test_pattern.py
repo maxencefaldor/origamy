@@ -35,6 +35,8 @@ def test_coordinates_snap_to_the_simplest_exact_number() -> None:
     assert snap((3 - 6**0.5) / 7) == Number.of("3/7 - √6/7")
     assert snap(1 - 2**0.5 / 2) == Number.of("1 - √2/2")
     assert snap(3**0.5 / 4) == Number.of("√3/4")
+    # cos 22.5° / 2 needs √2, then √(2 + √2) above it.
+    assert snap((2 + 2**0.5) ** 0.5 / 4) == (2 + Number.of("√2")).sqrt() / 4
     with pytest.raises(ValueError, match="no exact number"):
         snap(0.123456789)
     # A file's rounding: the number still explains the float far better than chance,
@@ -83,6 +85,47 @@ def test_an_oripa_pattern_collapses_into_a_preliminary_base(tmp_path: Path) -> N
     paper.crease(pattern.creases)
     paper.collapse(valleys=pattern.valleys, mountains=pattern.mountains)
     assert len(paper.state.faces) == 6
+    assert paper.thickest()[0] == 4
+
+
+def test_a_square_turned_by_a_sixteenth_turn_reads_and_collapses(
+    tmp_path: Path,
+) -> None:
+    # The preliminary base on a square turned by 22.5°, as the traditional crane's
+    # pattern draws it: its corners hold √2 and √(2 + √2).
+    root = (2 + Number.of("√2")).sqrt()
+    cosine, sine = root / 2, (Number.of("√2") - 1) * root / 2
+    reach = (cosine + sine) / 2
+
+    def turned(x: Fraction, y: Fraction) -> Point:
+        """A point of the centered square, turned and moved into the box of side 1."""
+        return Point(
+            (cosine * x - sine * y + reach) / (2 * reach),
+            (sine * x + cosine * y + reach) / (2 * reach),
+        )
+
+    half, zero = Fraction(1, 2), Fraction(0)
+    corners = [turned(x, y) for x, y in ((-half, -half), (half, -half), (half, half))]
+    corners.append(turned(-half, half))
+    sides = ((zero, -half), (half, zero), (zero, half), (-half, zero))
+    middles = [turned(x, y) for x, y in sides]
+    lines = [(1, corners[k], corners[(k + 1) % 4]) for k in range(4)]
+    lines += [(2, corners[1], corners[3]), (3, middles[0], middles[2])]
+    lines.append((3, middles[1], middles[3]))
+    path = tmp_path / "turned.cp"
+    floats = [
+        (kind, [200 * float(c) for p in ends for c in (p.x, p.y)])
+        for kind, *ends in lines
+    ]
+    path.write_text(
+        "".join(f"{kind} {' '.join(map(str, ends))}\n" for kind, ends in floats),
+        encoding="utf-8",
+    )
+    pattern = CreasePattern.read(path)
+    assert set(pattern.outline) == set(corners)
+    paper = Paper.polygon(pattern.outline)
+    paper.crease(pattern.creases)
+    paper.collapse(valleys=pattern.valleys, mountains=pattern.mountains)
     assert paper.thickest()[0] == 4
 
 

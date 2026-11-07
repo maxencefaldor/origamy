@@ -26,7 +26,7 @@ use origamy_kernel::geometry::{Isometry, Point};
 use origamy_kernel::int::Int;
 use origamy_kernel::lines::{Along, along as creases_along};
 use origamy_kernel::reading::{Frame, Reading, Unexplained, read};
-use origamy_kernel::snap::{Bounds, explain as explain_float};
+use origamy_kernel::snap::{Bounds, Field, explain as explain_float};
 use origamy_kernel::stacking::{
     Constraint, Problem, StackError, stack as solve, violations as broken,
 };
@@ -165,26 +165,29 @@ fn stack_data(
 }
 
 /// The exact number that explains each float best: a fraction, from the continued
-/// fraction, or `(p + q√r) / d` for small integers, from lattice reduction. The floats
-/// find theirs on every core.
+/// fraction, or a number of a field of square roots with small integers, from lattice
+/// reduction. The floats find theirs on every core.
 ///
 /// Args:
 ///     values: The floats to explain.
 ///     tolerance: How far a candidate may lie from its float.
-///     sure: The fit under which a fraction explains a float surely, so that no root
+///     sure: The fit under which a fraction explains a float surely, so that no field
 ///         is tried.
 ///     denominator: The largest denominator of a fraction.
-///     roots: The integers whose square roots a candidate may hold.
+///     fields: The fields a candidate may lie in beyond the fractions, each a tower of
+///         square roots: each level's radicand as integers over the products of the
+///         roots below it.
 ///     scale: The weight of a relation's error against its integers.
-///     size: The largest integer of a candidate with a root.
+///     size: The largest integer of a candidate in a field.
 ///
 /// Returns:
-///     For each float, the best candidate's fit, its rational part and its root's
-///     coefficient as fractions in lowest terms, and the integer under the root, 1 for
-///     a fraction; or `None` when no candidate lies within the tolerance.
+///     For each float, the best candidate's fit, its integer over each product of its
+///     field's roots, its positive denominator, and its field's index, none for a
+///     fraction; or `None` when no candidate lies within the tolerance.
 ///
 /// Raises:
-///     ValueError: A value is not finite, or a root, the scale or the size is not
+///     ValueError: A value is not finite, a field has a radicand that is not positive
+///         or has more integers than its level, or the scale or the size is not
 ///         positive.
 #[pyfunction]
 #[allow(
@@ -198,20 +201,22 @@ fn explain(
     tolerance: f64,
     sure: f64,
     denominator: u64,
-    roots: Vec<u32>,
+    fields: Vec<Vec<Vec<i64>>>,
     scale: i64,
     size: i64,
 ) -> PyResult<Vec<Option<Explained>>> {
-    if values.iter().any(|v| !v.is_finite()) || roots.contains(&0) || scale <= 0 || size <= 0 {
+    let fields = valid_fields(fields)?;
+    if values.iter().any(|v| !v.is_finite()) || scale <= 0 || size <= 0 {
         return Err(PyValueError::new_err(
-            "explaining needs finite values, and positive roots, scale and size",
+            "explaining needs finite values, and a positive scale and size",
         ));
     }
     let bounds = Bounds {
         tolerance,
+        spread: 0.0,
         sure,
         denominator,
-        roots,
+        fields,
         scale,
         size,
     };
@@ -220,15 +225,27 @@ fn explain(
             .par_iter()
             .map(|&value| {
                 explain_float(value, &bounds)
-                    .map(|found| (found.fit, found.rational, found.surd, found.root))
+                    .map(|found| (found.fit, found.numerators, found.denominator, found.field))
             })
             .collect()
     }))
 }
 
-/// What explains a float: its fit, its rational part and its root's coefficient, and
-/// the integer under the root.
-type Explained = (f64, (BigInt, BigInt), (BigInt, BigInt), u32);
+/// What explains a float: its fit, its integer over each product of its field's roots,
+/// its denominator, and its field, none for a fraction.
+type Explained = (f64, Vec<BigInt>, BigInt, Option<usize>);
+
+/// Fields whose radicands are positive, each with no more integers than its level.
+fn valid_fields(fields: Vec<Vec<Vec<i64>>>) -> PyResult<Vec<Field>> {
+    let fields: Vec<Field> = fields.into_iter().map(Field).collect();
+    if fields.iter().all(Field::valid) {
+        Ok(fields)
+    } else {
+        Err(PyValueError::new_err(
+            "each field's radicands must be positive, with no more integers than their level",
+        ))
+    }
+}
 
 /// What reading corners came to: the radicands of the levels their roots added, each
 /// corner's exact point, each segment's two corners, and the coordinate and floats of a
@@ -250,8 +267,8 @@ type ReadData = (
 /// A corner whose coordinates both snap surely takes them. Any other corner lies where
 /// two lines of creases cross, each through exact corners. Snapping within a looser fit
 /// then finds the corners left, and lets crossings find more, until none is left. A
-/// root that no level of the tower holds adds a level, in the order reading meets it.
-/// Explaining and crossings run on every core.
+/// field whose roots no level of the tower holds adds levels, in the order reading meets
+/// it. Explaining and crossings run on every core.
 ///
 /// Args:
 ///     radicands: The tower's radicands, level 1 first.
@@ -260,13 +277,15 @@ type ReadData = (
 ///     length: The box's longer side.
 ///     tolerance: How far a coordinate may lie from the number it snaps to.
 ///     sure: The fit reading takes first, under which a fraction explains a float
-///         surely, so that no root is tried.
+///         surely, so that no field is tried.
 ///     fit: The fit reading loosens to, and the fit a snapped slope needs.
 ///     near: How far apart two float points may lie and still be one.
 ///     denominator: The largest denominator of a fraction.
-///     roots: The integers whose square roots a number may hold.
+///     fields: The fields a number may lie in beyond the fractions, each a tower of
+///         square roots: each level's radicand as integers over the products of the
+///         roots below it.
 ///     scale: The weight of a relation's error against its integers.
-///     size: The largest integer of a number with a root.
+///     size: The largest integer of a number in a field.
 ///
 /// Returns:
 ///     The radicands of the levels the reading added, level by level; each corner's
@@ -275,8 +294,9 @@ type ReadData = (
 ///     two lines of creases cross, its coordinate that snaps to none and its floats.
 ///
 /// Raises:
-///     ValueError: A float is not finite, the length is not positive, or a root,
-///         the scale or the size is not positive.
+///     ValueError: A float is not finite, the length is not positive, a field has a
+///         radicand that is not positive or has more integers than its level, or the
+///         scale or the size is not positive.
 #[pyfunction]
 #[allow(
     clippy::too_many_arguments,
@@ -294,21 +314,21 @@ fn read_corners(
     fit: f64,
     near: f64,
     denominator: u64,
-    roots: Vec<u32>,
+    fields: Vec<Vec<Vec<i64>>>,
     scale: i64,
     size: i64,
 ) -> PyResult<ReadData> {
+    let fields = valid_fields(fields)?;
     let finite = |&(x, y): &(f64, f64)| x.is_finite() && y.is_finite();
     let valid = segments.iter().flatten().all(finite)
         && finite(&origin)
         && length.is_finite()
         && length > 0.0
-        && !roots.contains(&0)
         && scale > 0
         && size > 0;
     if !valid {
         return Err(PyValueError::new_err(
-            "reading needs finite floats, a positive length, and positive roots, scale and size",
+            "reading needs finite floats, and a positive length, scale and size",
         ));
     }
     let mut tower = tower(radicands)?;
@@ -316,9 +336,10 @@ fn read_corners(
     let reading = Reading {
         bounds: Bounds {
             tolerance,
+            spread: 0.0,
             sure,
             denominator,
-            roots,
+            fields,
             scale,
             size,
         },
