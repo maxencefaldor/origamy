@@ -76,6 +76,15 @@ Traditional models that end flat, folded step by step as diagrams teach them, wi
 
     [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
 
+-   ![The heart example](images/gallery-heart.png)
+
+    **[Heart](gallery/heart.html)** · 10 steps
+
+    A square on its corner: the top corner folds to the center and the bottom corner up to the top edge.
+    The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
+
+    [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
+
 </div>
 
 ## Bases
