@@ -260,8 +260,7 @@ At every step, the layer order wherever paper overlaps must match the order orig
 
 **Paper without thickness.**
 Contact can let paper pass through paper, as a mathematical sheet does, while the table and bodies still push it away.
-Creases then fold sharp, with no bands, and origamy's kernel alone proves the layer order.
-Every example then folds end to end in seconds.
+Creases then fold sharp, with no bands, and orders keep the layers in the stacking origamy's kernel proves.
 Real thickness stays a choice for the models it can fold.
 
 **Paper in order.**
@@ -780,7 +779,7 @@ Phase 6 adds these findings so far:
   The bird base still stopped at its first petal fold at kami's thickness, and the crane further on.
   With contact between layers off, the bird base, crane, flapping bird and every other example fold end to end.
   Every step settles, each within 0.01 mm of its state, in seconds.
-  Without layers to rest on, a hand holds all the paper a step keeps in place.
+  Without layers to rest on, a hand held all the paper a step keeps in place.
   The contact search then skips pairs of paper altogether, which halves the crane's time to 75 s.
 - **Paths that jump.**
   The rigid path of the petal fold took, at each share, the closed loops nearest even turns of its creases.
@@ -816,6 +815,32 @@ Phase 6 adds these findings so far:
 - **The crane on layers.**
   Crease bands grow the crane's mesh from 270 vertices to 3,000, and a fold takes about 80 s.
   Its second precrease then runs past 20 minutes without settling.
+- **Orders at vertices.**
+  The first orders kept vertices on their sides of other layers.
+  A vertex on a fold's hinge took orders against the layers on both sides, and folding a square in half a third time stalled.
+  A face whose corners all lie on another face's edges took none, so a corner folded alone passed through the layer below.
+- **Orders at one point.**
+  Orders at each triangle's centroid let a vertex poke through between centroids, by 70 µm in pleats folded in half.
+  Gauss's three points keep each triangle's plane on its side.
+- **Hands that hold layers apart.**
+  Without layers to rest on, a hand held all the paper a step leaves in place.
+  That paper included a layer the last fold left open by its margin, so flaps hinged to it landed through the layers they cover.
+  With orders, paper rests on paper again, and a hand holds only the paper on the table.
+- **Paper that comes to overlap.**
+  Pleats folded in half landed between the layers they should cover.
+  The stacking a fold starts from orders none of the paper that first overlaps during the fold.
+  Orders from the stacking the fold reaches wait, and hold that paper once it comes over on its side.
+- **Stiff orders.**
+  At 1e6 Pa/m, drives pushed layers through each other by 100 µm.
+  At 1e8 Pa/m, every basic move folds in its stacking, each within 0.01 mm of its state.
+- **Paths that swap layers in place.**
+  A reverse fold's rigid path keeps two tip layers together while the stacking swaps them.
+  A crease folded flat one way meets its state folded flat the other, so the path never parts them.
+  Paper without thickness follows by passing through, so such paper waits for its new side alone.
+- **The crane in order.**
+  Without thickness, the crane folds in its stacking up to its reverse folds, but for two pairs of its second petal fold.
+  The whole crane takes about 300 s, four times as long as without orders.
+  Its reverse folds stall, and from the second one on, layers misorder.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

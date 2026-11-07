@@ -25,9 +25,10 @@ turns together along one straight line share one band, and bands cross where the
 creases cross. Hands hold the paper beside a band, never the band itself.
 
 Without contact between layers, paper passes through paper as a sheet without
-thickness does. Creases then fold sharp, with no bands, and a hand holds all the paper
-a step leaves in place, since it rests on no other layer. The kernel alone orders the
-layers, so no pair stacks the wrong way round.
+thickness does, and creases fold sharp, with no bands. Orders then keep the layers in
+the stacking. Paper over a layer keeps to its side, as the stacking the fold starts
+from has it, until the paper leaves that layer. Paper that comes over a layer keeps to
+the side the stacking the fold reaches gives it.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
 measure gives how far each face's corners lie from their places in that state, and
@@ -66,6 +67,7 @@ from origamy.space import (
     apply,
     compose,
     crease_angles,
+    embedding,
     invert,
     placements,
     same,
@@ -205,7 +207,8 @@ class Stage:
     """The pairs of the state's stacking, upper face first, that the simulation stacks
     the other way round.
 
-    Without contact between layers, paper keeps no order of its own, so none misorder.
+    A pair misorders where its upper face lies below the lower one by more than half the
+    thickness contact keeps between layers.
     """
 
 
@@ -346,6 +349,8 @@ class _Folder:
             self._move(step, [start[p] for p in under], end)
             frames, converged, iterations = (sheet.positions(0),), True, 0
         else:
+            if not self.physics.settings.contact.layers:
+                self._order(before, after)
             frames, converged, iterations = self._drive(
                 before, after, parents, held[parents]
             )
@@ -440,6 +445,78 @@ class _Folder:
         frames.append(sheet.positions(0))
         return tuple(frames), converged, iterations
 
+    def _order(self, before: Shaped, after: Shaped) -> None:
+        """Keep paper without thickness on its side of the layers it overlaps.
+
+        The stacking the fold starts from orders the paper at once. The stacking it
+        reaches orders paper that comes to overlap, once it comes over the other layer
+        on its side. Paper of a face the fold turns to the other side of another face
+        waits for that side alone. The rigid path may take it there at no motion, a
+        crease folded flat one way meeting its state folded flat the other.
+        """
+        holding = self._orders(before)
+        waiting = self._orders(after)
+        # Where the fold reaches, each triangle and piece lie in faces of its state.
+        reached = np.array(after.state.parents(self.last), dtype=np.int64)
+        sides = {
+            (reached[self.faces[triangle]], reached[piece], front)
+            for triangle, piece, front in waiting
+        }
+        for key in list(holding):
+            triangle, piece, front = key
+            if (reached[self.faces[triangle]], reached[piece], not front) in sides:
+                del holding[key]
+            waiting.pop(key, None)
+        orders = [(key, others, True) for key, others in holding.items()]
+        orders += [(key, others, False) for key, others in waiting.items()]
+        self.simulation.set_orders(
+            0,
+            np.array([triangle for (triangle, _, _), _, _ in orders], dtype=np.int64),
+            [others for _, others, _ in orders],
+            [front for (_, _, front), _, _ in orders],
+            [holds for _, _, holds in orders],
+        )
+
+    def _orders(self, shaped: Shaped) -> dict[tuple[int, int, bool], list[int]]:
+        """The orders a stacking gives, each to the triangles of a piece of paper.
+
+        Each order is a triangle, the last pattern's face it keeps to, and the side,
+        with that face's triangles. Each triangle of a face keeps to the front or back
+        of a face stacked with it, as the stacking has it, where its centroid lies over
+        that face. The triangle keeps to the triangles of the last pattern's face below
+        its centroid, which move as one. Faces that shaping moves apart take no order.
+        """
+        state = shaped.state
+        motions = shaped.form.motions if shaped.form else None
+        owners = np.array(state.parents(self.last), dtype=np.int64)[self.faces]
+        members = [np.flatnonzero(owners == f) for f in range(len(state.faces))]
+        corners = self.mesh.rest[self.mesh.triangles]
+
+        def placed(face: int, points: NDArray[np.float64]) -> NDArray[np.float64]:
+            motion = embedding(state.faces[face].place)
+            turn = np.array(motion[:9]).reshape(3, 3)[:2, :2]
+            return points @ turn.T + np.array(motion[9:11]) * self.scale
+
+        orders: dict[tuple[int, int, bool], list[int]] = {}
+        for upper, lower in state.stacking:
+            if motions is not None and not same(motions[upper], motions[lower]):
+                continue
+            # The upper face lies on the lower face's front where that front faces up.
+            for face, other, front in (
+                (upper, lower, not state.faces[lower].place.flips),
+                (lower, upper, state.faces[upper].place.flips),
+            ):
+                kept, below = members[face], members[other]
+                centroids = placed(face, corners[kept].mean(axis=1))
+                over = _depths(centroids, placed(other, corners[below])) > -_NEAR
+                for i, j in zip(*np.nonzero(over), strict=True):
+                    piece = self.faces[below[j]]
+                    orders.setdefault(
+                        (int(kept[i]), int(piece), front),
+                        below[self.faces[below] == piece].tolist(),
+                    )
+        return orders
+
     def _plan(
         self,
         before: Shaped,
@@ -485,12 +562,12 @@ class _Folder:
     def _hold(self, staying: NDArray[np.bool_]) -> None:
         """Hold down the vertices ``staying`` where they lie on the table.
 
-        A hand holds the paper beside the bands, which bend as they must. Paper that
-        passes through paper rests on none, so the hand then holds all that stays.
+        A hand holds the paper beside the bands, which bend as they must. Where no paper
+        that stays touches the table, the hand holds all that stays.
         """
         staying = staying & ~self.banded
         held = staying & (self.simulation.positions(0)[:, 2] < self.ground)
-        if not held.any() or not self.physics.settings.contact.layers:
+        if not held.any():
             held = staying
         self.simulation.hold(0, np.flatnonzero(held))
 
@@ -579,8 +656,7 @@ class _Folder:
         misordered = tuple(
             (upper, lower)
             for upper, lower in sorted(state.above)
-            if self.physics.settings.contact.layers
-            and (motions is None or same(motions[upper], motions[lower]))
+            if (motions is None or same(motions[upper], motions[lower]))
             and not self._stacked(state, parents, positions, upper, lower)
         )
         return offset, misordered
@@ -596,12 +672,14 @@ class _Folder:
         """Whether the simulated paper lays a face above another where they overlap.
 
         Above is along the upper face's front in the simulated paper, or its back
-        where the face shows the paper's back.
+        where the face shows the paper's back. The upper face may lie below the lower
+        one by up to half the thickness contact keeps, as layers without it do.
         """
         point = center(intersection(state.folded[upper], state.folded[lower]))
         sample = self.sample[np.flatnonzero(parents == upper)[0]]
         a, b, c = positions[self.mesh.triangles[sample]]
         up = np.cross(b - a, c - a) * (-1 if state.faces[upper].place.flips else 1)
+        up /= np.linalg.norm(up)
         high, low = (
             float(
                 self._height(state.faces[face].place, parents == face, positions, point)
@@ -609,7 +687,9 @@ class _Folder:
             )
             for face in (upper, lower)
         )
-        return high > low
+        contact = self.physics.settings.contact
+        kept = self.physics.material.thickness * contact.thickness_share
+        return high > low - 0.5 * kept
 
     def _height(
         self,
@@ -1166,6 +1246,26 @@ def _spans(
 def _left(u: NDArray[np.float64]) -> NDArray[np.float64]:
     """A vector of the plane turned a quarter turn counterclockwise."""
     return np.array([-u[1], u[0]])
+
+
+def _depths(
+    points: NDArray[np.float64], polygons: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """How deep each point lies in each convex polygon.
+
+    A depth is the least distance to the polygon's edges' lines, negative outside. The
+    points are of shape (n, 2), the polygons of shape (m, k, 2), and the depths of shape
+    (n, m).
+    """
+    edges = np.roll(polygons, -1, axis=1) - polygons
+    inward = np.stack([-edges[..., 1], edges[..., 0]], axis=-1)
+    inward /= np.linalg.norm(inward, axis=-1, keepdims=True)
+    # A clockwise polygon, of negative area, has its inside to the right of its edges.
+    x, y = polygons[..., 0], polygons[..., 1]
+    areas = (x * np.roll(y, -1, axis=1) - np.roll(x, -1, axis=1) * y).sum(axis=1)
+    inward *= np.sign(areas)[:, None, None]
+    offsets = points[:, None, None, :] - polygons[None]
+    return np.einsum("nmkd,mkd->nmk", offsets, inward).min(axis=2)
 
 
 def _cross(u: NDArray[np.float64], v: NDArray[np.float64]) -> float:
