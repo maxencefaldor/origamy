@@ -12,8 +12,4 @@ The agent pages show how to hand the fold loop to an AI agent, and why a compile
 
     Facts instead of advice, no legal moves, mechanisms instead of designs, and exact numbers.
 
--   🐉 **[Designing a dragon](dragon.md)**
-
-    An agent's design session, replayed: each refusal origamy stated, and the change that answered it.
-
 </div>

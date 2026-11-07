@@ -152,15 +152,6 @@ Models designed with origamy, each a short composition of the same exact actions
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
--   ![The dragon example](images/gallery-dragon.png)
-
-    **[Dragon](gallery/dragon.html)** · 43 steps
-
-    A wyvern from a bird base: the legs reverse fold into a rising neck and a level tail, whose tip curls up round the outside.
-    The head's snout hooks down, and each wing rises high, then arches down at three fingers that run from its wrist, as a bat's does.
-
-    [Open in 3D](gallery/dragon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dragon.py)
-
 -   ![The window example](images/gallery-window.png)
 
     **[Window](gallery/window.html)** · 10 steps

@@ -29,7 +29,6 @@ nav = [
     "agents/index.md",
     { "Connect an agent" = "agents/connect.md" },
     { "Why a compiler" = "agents/why-a-compiler.md" },
-    { "Designing a dragon" = "agents/dragon.md" },
   ] },
   { "Gallery" = "gallery.md" },
   { "Simulator" = [
