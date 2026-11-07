@@ -144,6 +144,18 @@ pub enum SheetError {
         /// The triangle.
         triangle: usize,
     },
+    /// The sheet has no vertex of this index.
+    #[error("the sheet has no vertex {vertex}")]
+    NoVertex {
+        /// The vertex.
+        vertex: usize,
+    },
+    /// An order names no triangle.
+    #[error("the order of vertex {vertex} names no triangle")]
+    EmptyOrder {
+        /// The order's point.
+        vertex: usize,
+    },
     /// A parameter lies outside its values.
     #[error(transparent)]
     Parameter(#[from] ParameterError),
@@ -154,6 +166,23 @@ pub enum SheetError {
 /// Each edge names its dihedral, and the slots of the dihedral's stencil in the triangle's
 /// stencil of up to six vertices.
 pub(crate) type EdgeStencils = [Option<(u32, [usize; 4])>; 3];
+
+/// A point of the sheet that keeps to one side of some of its triangles while it lies over
+/// them.
+///
+/// Orders keep layers of paper without thickness in their stacking. A penalty pushes the
+/// point back where it lies over a triangle's face on the wrong side. An order lapses once a
+/// time step ends with its point over none of its triangles. Paper may then pass round an
+/// edge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Order {
+    /// The point.
+    pub point: Vertex,
+    /// The triangles it keeps to one side of, by their index in the mesh.
+    pub triangles: Vec<u32>,
+    /// Whether it keeps to the triangles' fronts, where their normals point, or their backs.
+    pub front: bool,
+}
 
 /// A crease across a band of the sheet: the turn of the paper beyond the band about an edge
 /// on the band's near side.
@@ -192,6 +221,7 @@ pub struct Sheet {
     stencils: Vec<EdgeStencils>,
     lengths: Vec<f64>,
     areas: Vec<f64>,
+    orders: Vec<Order>,
 }
 
 impl Sheet {
@@ -245,6 +275,7 @@ impl Sheet {
             stencils,
             lengths,
             areas,
+            orders: Vec::new(),
         })
     }
 
@@ -272,6 +303,48 @@ impl Sheet {
             rest.compression = share.unwrap_or(material.compression);
         }
         Ok(())
+    }
+
+    /// The orders that have not lapsed.
+    #[must_use]
+    pub fn orders(&self) -> &[Order] {
+        &self.orders
+    }
+
+    /// Replaces the sheet's orders.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SheetError::NoVertex`] when an order's point is no vertex of the sheet,
+    /// [`SheetError::EmptyOrder`] when an order names no triangle, and
+    /// [`SheetError::NoTriangle`] when it names one the sheet lacks. A refused list leaves
+    /// the orders as they were.
+    pub fn set_orders(&mut self, orders: Vec<Order>) -> Result<(), SheetError> {
+        for order in &orders {
+            let vertex = order.point as usize;
+            if vertex >= self.mesh.vertex_count() {
+                return Err(SheetError::NoVertex { vertex });
+            }
+            if order.triangles.is_empty() {
+                return Err(SheetError::EmptyOrder { vertex });
+            }
+            if let Some(&t) = order
+                .triangles
+                .iter()
+                .find(|&&t| t as usize >= self.triangles.len())
+            {
+                return Err(SheetError::NoTriangle {
+                    triangle: t as usize,
+                });
+            }
+        }
+        self.orders = orders;
+        Ok(())
+    }
+
+    /// Keeps only the orders `keep` accepts.
+    pub(crate) fn retain_orders(&mut self, keep: impl FnMut(&Order) -> bool) {
+        self.orders.retain(keep);
     }
 
     /// The share of its full stretching energy a triangle keeps where it is compressed.

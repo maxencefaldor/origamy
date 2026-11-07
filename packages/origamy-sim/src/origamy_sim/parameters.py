@@ -359,6 +359,15 @@ class Contact(_Parameters):
     contact still keeps paper above the table and off bodies.
     """
 
+    order_stiffness: Positive = 1e6
+    """The stiffness of the penalty that keeps a point of paper in order, per area round
+    the point, in pascals per meter.
+
+    The penalty is half the stiffness, times the area, times the square of how far the
+    point lies on the wrong side. A point with a square centimeter of paper round it
+    takes 100 N/m.
+    """
+
 
 class Table(_Parameters):
     """A table: the horizontal plane paper cannot pass below."""

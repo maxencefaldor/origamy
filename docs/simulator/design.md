@@ -264,6 +264,16 @@ Creases then fold sharp, with no bands, and origamy's kernel alone proves the la
 Every example then folds end to end in seconds.
 Real thickness stays a choice for the models it can fold.
 
+**Paper in order.**
+Paper without thickness passes through paper, so an order keeps a point of paper on one side of a few triangles.
+Each order names its point, its triangles and the side, the triangles' fronts or backs.
+A point over a triangle's face, on the wrong side, takes a penalty: half the stiffness times its area times its squared depth.
+The area is the paper round the point, so the force scales with the mesh.
+An order lapses once its point lies over none of its triangles at the end of a time step.
+Paper may then pass round an edge.
+The penalty has exact derivatives, as every other energy does.
+The caller sets the orders from the layer order it knows.
+
 **Faster contact.**
 Offset geometric contact bounds how far each vertex may move without any crossing, with no collision detection over the update.
 The simulator evaluates it as a faster filter in phase 7, and keeps the guarantee whichever filter it uses.
@@ -409,7 +419,7 @@ Phase 4 calibrates the crease parameters on published measurements.
 | Strain limit | The tension cap, the fraction of it where the barrier starts, the barrier's energy per volume |
 | Dihedral | Rest angle, for every interior edge, crease or not |
 | Crease | Stiffness, yield moment, hardening, aging moment and aging rate; a band's lines take their share of each |
-| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps, and whether layers push each other apart |
+| Contact | The barrier's activation gap and energy scale, the fade of parallel edges, friction of paper on paper and on each body, the stick distance, the exclusion radius along the sheet, the share of the thickness it keeps, whether layers push each other apart, and the stiffness of orders |
 | Bodies and grips | Shapes, radii, friction, the stiffness of the hand, paths, and the times grips close and open |
 | World | Gravity, the table and its height and friction, the air's density and drag coefficient |
 | Solver | Time step, the shortest time step, the lags of friction, the stiffness and rounds of moving holds, tolerance in meters, the stall share of the energy, iteration limit, trust radius, sufficient decrease, backtracking factor, shortest update |
