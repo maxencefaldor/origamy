@@ -278,7 +278,7 @@ EYE = """(async () => {
   const seen = [];
   window.origamy.go(1, true);
   const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-  await wait(800);
+  while (stage.glide) await wait(20);
   const end = stage.started + stage.duration();
   while (performance.now() < end) {
     const paper = stage.film.positions.slice(0, 3).join();
@@ -287,7 +287,10 @@ EYE = """(async () => {
   }
   return seen;
 })()"""
-"""Play the fold, and note where the eye stands and the paper lies as it plays."""
+"""Play the fold, and note where the eye stands and the paper lies as it plays.
+
+The notes start once the eye has framed the step, however slowly the page draws.
+"""
 
 
 def test_the_eye_holds_still_while_a_film_folds(tmp_path: Path) -> None:
