@@ -85,6 +85,15 @@ Traditional models that end flat, folded step by step as diagrams teach them, wi
 
     [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
 
+-   ![The tulip example](images/gallery-tulip.png)
+
+    **[Tulip](gallery/tulip.html)** · 3 steps
+
+    A triangle whose bottom corners rise past its top as petals, each 22.5° off the flower's axis.
+    Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
+
+    [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
+
 </div>
 
 ## Bases
