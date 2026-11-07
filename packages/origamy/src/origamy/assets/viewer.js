@@ -436,7 +436,8 @@ class Stage {
       return points;
     });
     for (const bend of this.bends) this.bendAt(bend, placed);
-    if (this.line) this.line.visible = t >= 1;
+    // The studio shows the paper alone, without the step's fold line.
+    if (this.line) this.line.visible = t >= 1 && !this.inStudio;
     if (this.inStudio) this.light();
   }
 
@@ -467,6 +468,7 @@ class Stage {
       for (const mesh of [bend.front, bend.back]) mesh.castShadow = mesh.receiveShadow = on;
     }
     this.element.classList.toggle("studio", on);
+    if (this.line) this.line.visible = !on && !this.started;
     if (on && this.faces) this.light();
     return on;
   }
