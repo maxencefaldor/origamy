@@ -57,7 +57,7 @@ PHYSICS: Final = Physics(
 STRAY: Final = 0.03
 """The farthest, in meters, a simulated fold may leave paper from its state for the
 viewer to play the simulation."""
-LONGEST: Final = ("crane", "flapping-bird", "frog-base")
+LONGEST: Final = ("crane", "flapping-bird", "frog-base", "glider")
 """The models whose simulations take longest, which start first."""
 
 
