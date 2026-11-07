@@ -21,6 +21,10 @@ from origamy.viewer import THREE_PACKAGE, film_data, write_viewer
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 THREE = Path(str(files("origamy").joinpath("assets", "three")))
+GLIDE = 700
+"""The milliseconds the viewer's eye takes to frame a film's next step.
+
+The eye starts a moment after the fold's clock, so the test waits 50 more."""
 
 type Colors = Callable[[Path], set[tuple[int, int, int]]]
 
@@ -263,33 +267,35 @@ def test_a_film_rests_exactly_where_each_state_puts_the_paper(
     paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
     folding = simulate(paper.steps)
     film = film_data(BuildResult.of(paper, tmp_path), folding)
-    frames = np.frombuffer(base64.b64decode(film["steps"][1]["frames"]), np.float32)
+    frames = np.frombuffer(base64.b64decode(film["steps"][1]["frames"]), "<i2")
+    frames = frames * film["step"]
     last = frames.reshape(-1, film["vertices"], 3)[-1]
     rest = np.frombuffer(base64.b64decode(film["rest"]), np.float32).reshape(-1, 2)
     # The right half lies folded onto the left, every vertex mirrored in the middle.
     for (x, y), (fx, fy, fz) in zip(rest, last, strict=True):
-        assert fx == pytest.approx(min(x, 1 - x), abs=1e-5)
-        assert fy == pytest.approx(y, abs=1e-5)
-        assert fz == pytest.approx(0, abs=1e-5)
+        assert fx == pytest.approx(min(x, 1 - x), abs=1e-4)
+        assert fy == pytest.approx(y, abs=1e-4)
+        assert fz == pytest.approx(0, abs=1e-4)
 
 
-EYE = """(async () => {
+EYE = """(() => {
   const stage = window.origamy.stage;
-  const seen = [];
   window.origamy.go(1, true);
-  const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-  while (stage.glide) await wait(20);
-  const end = stage.started + stage.duration();
-  while (performance.now() < end) {
-    const paper = stage.film.positions.slice(0, 3).join();
-    seen.push([...stage.camera.position.toArray(), paper]);
-    await wait(60);
+  const [start, span] = [stage.started, stage.duration()];
+  const seen = [];
+  for (let k = 0; k <= 40; k++) {
+    const now = start + (k / 40) * span;
+    stage.steer(now);
+    stage.animate(now);
+    const paper = stage.film.positions.reduce((sum, x, i) => sum + x * (i % 7), 0);
+    seen.push([now - start, ...stage.camera.position.toArray(), paper]);
   }
   return seen;
 })()"""
-"""Play the fold, and note where the eye stands and the paper lies as it plays.
+"""Play the fold on a clock the test keeps, and note the eye and the paper as it plays.
 
-The notes start once the eye has framed the step, however slowly the page draws.
+Each note holds the time since the fold began, where the eye stands, and a sum of
+where the paper lies.
 """
 
 
@@ -319,7 +325,9 @@ def test_the_eye_holds_still_while_a_film_folds(tmp_path: Path) -> None:
 
     errors, seen = asyncio.run(watch())
     assert errors == []
-    # The paper moves while the eye, once it frames the step, stands still.
-    assert len({shot[3] for shot in seen}) > 3
-    eyes = np.array([shot[:3] for shot in seen], dtype=float)
-    assert np.abs(eyes - eyes[-1]).max() < 1e-9
+    # The eye frames the step first, then stands still while the paper moves.
+    notes = np.array(seen, dtype=float)
+    folding = notes[notes[:, 0] >= GLIDE + 50]
+    assert np.abs(notes[0, 1:4] - folding[-1, 1:4]).max() > 1e-6
+    assert np.abs(folding[:, 1:4] - folding[-1, 1:4]).max() < 1e-9
+    assert len(set(folding[:, 4])) > 5

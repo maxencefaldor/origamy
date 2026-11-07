@@ -838,7 +838,7 @@ class Film {
     const rest = decode(film.rest, Float32Array);
     const steps = film.steps.map((step) => ({
       folds: step.folds.map((fold) => ({ ...fold, lifts: decode(fold.lifts, Uint8Array) })),
-      frames: step.frames ? decode(step.frames, Float32Array) : new Float32Array(0),
+      frames: step.frames ? Float32Array.from(decode(step.frames, Int16Array), (k) => k * film.step) : new Float32Array(0),
     }));
     // The paper lies on the table: each frame comes down to where the flat sheet lay, as a
     // hand lowers paper it lifted to fold under.

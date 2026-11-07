@@ -67,6 +67,9 @@ _TILT: Final = (0.35, -0.75, 0.75)
 _STEEPEST: Final = 89.99
 """The steepest elevation an eye takes, so that it still knows which way is up."""
 
+_STEPS: Final = 32000
+"""How many steps a film's frames take from the middle of the table to their reach."""
+
 _STILL_ANGLE: Final = 1e-9
 """The least angle, in radians, between two poses that a turn tells apart."""
 
@@ -129,7 +132,8 @@ def write_viewer(
 def film_data(result: BuildResult, folding: Folding) -> Data:
     """The simulated paper as the viewer plays it: its mesh, and each step's frames.
 
-    Each frame is where every vertex of the mesh lay, in the paper's units. The paper
+    Each frame is where every vertex of the mesh lay, in whole steps of ``step`` of the
+    paper's units. The paper
     rests exactly where each state puts it, and moves between rests as the simulator
     folded it. Each fold names, for each face's copy of a vertex, how many layers lie
     under it, and for each face whether it shows its back. The viewer thus draws
@@ -180,10 +184,15 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
             shaped = frame + (1 - share) * correction + share * after
             frames[stage.step].append(posed.toward(pose, share).moved(shaped))
         before, correction, posed = found, after, pose
+    # Frames keep 16 bits a coordinate: a step a thirty-thousandth of the paper's reach.
+    reach = max((np.abs(np.stack(own)).max() for own in frames if own), default=1.0)
+    step = reach / scale / _STEPS
     for film, own in zip(films, frames, strict=True):
         if own:
-            film["frames"] = _packed((np.stack(own) / scale).astype(np.float32))
+            steps = np.rint(np.stack(own) / scale / step)
+            film["frames"] = _packed(steps.astype("<i2"))
     return {
+        "step": step,
         "rest": _packed((rest / scale).astype(np.float32)),
         "triangles": _packed(folding.mesh.triangles.astype(np.int32)),
         "faces": _packed(folding.faces.astype(np.int32)),
