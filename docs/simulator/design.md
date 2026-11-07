@@ -783,6 +783,27 @@ Phase 6 adds these findings so far:
 - **Folds both up and down.**
   A petal fold turns paper up from the held paper and tucks other paper below it.
   The table leaves no room below, so the hands lift the model by the paper's size, fold it, and lay it back down.
+- **Shaping needs layers.**
+  A crane's back puffs into a pyramid as its wings pull apart and open the square at the paper's center.
+  No rigid motion opens that square's creases even 10°, so its faces must bend.
+  Without contact between layers, pulling the wings peels the body's layers apart instead.
+  Six pulls, with soft or stiff creases and the body pinched or free, left the center's creases at 180°.
+  Layers that push on each other, as real paper's do, must carry the pull to the center.
+- **Later bands disturb earlier folds.**
+  A square folded in half three times jams on its second fold, which folds once the third fold's bands leave the mesh.
+  One of those bands pinches to its crease's end, which lies inside the second fold's band.
+  Bands that run on through the other band let the second fold reach its state.
+  The crane's first fold then took 690 s instead of 80 s, as the cells beside its sharp creases shrank.
+- **A fold across a wrapped edge jams.**
+  The third fold of a square folded in half three times crosses the edge where the second fold wraps two layers.
+  A third of the way through, its creases lag their angles by about 60°.
+  It jams at kami's thickness and at a twentieth of it, with the strain capped at 50%, and without friction.
+  The closest layers lie where the second fold's two nested bends meet the third fold's crease.
+  Real paper crushes there, in its plane and through its thickness.
+  Contact that keeps no thickness at the seven vertices within 2 mm of those crossings changes nothing.
+- **The crane on layers.**
+  Crease bands grow the crane's mesh from 270 vertices to 3,000, and a fold takes about 80 s.
+  Its second precrease then runs past 20 minutes without settling.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
