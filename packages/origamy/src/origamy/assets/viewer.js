@@ -29,7 +29,8 @@ const STROKES = {
 };
 const SVG = "http://www.w3.org/2000/svg";
 
-export function start(root, build) {
+export async function start(root, build) {
+  if (build.film) await inflate(build.film);
   root.innerHTML = page(build);
   root.dataset.state = "ready";
   const stage = new Stage(root.querySelector(".stage"), build);
@@ -697,7 +698,7 @@ class Stage {
 
 // --- The film: a build as origamy's simulator folded it. ---
 
-const FILM_STEP = 40; // milliseconds a simulated increment takes
+const FILM_STEP = 100; // milliseconds a film's frame takes
 const FILM_MOVE = 900; // milliseconds a rigid move of the whole paper takes
 const FILM_LAYER = 1 / 5000; // touching layers' distance as drawn, in paper sizes: about a sheet of kami
 const FILM_MOVED = 1 / 150; // the least move, in paper sizes, that may be a rigid move of the whole paper
@@ -766,6 +767,26 @@ function fibers() {
     texture.anisotropy = 8;
     return texture;
   });
+}
+
+/**
+ * Unpack a film's frames in place: each step's gzipped moves, summed into where every
+ * vertex lies, in the paper's units.
+ */
+async function inflate(film) {
+  const width = 3 * film.vertices;
+  for (const step of film.steps) {
+    if (!step.frames) continue;
+    const stream = new Blob([decode(step.frames, Uint8Array)]).stream().pipeThrough(new DecompressionStream("gzip"));
+    const moves = new Int32Array(await new Response(stream).arrayBuffer());
+    const frames = new Float32Array(moves.length);
+    const at = new Int32Array(width);
+    for (let i = 0; i < moves.length; i++) {
+      at[i % width] += moves[i];
+      frames[i] = at[i % width] * film.step;
+    }
+    step.frames = frames;
+  }
 }
 
 function decode(text, Type) {
@@ -838,7 +859,7 @@ class Film {
     const rest = decode(film.rest, Float32Array);
     const steps = film.steps.map((step) => ({
       folds: step.folds.map((fold) => ({ ...fold, lifts: decode(fold.lifts, Uint8Array) })),
-      frames: step.frames ? Float32Array.from(decode(step.frames, Int16Array), (k) => k * film.step) : new Float32Array(0),
+      frames: step.frames ?? new Float32Array(0),
     }));
     // The paper lies on the table: each frame comes down to where the flat sheet lay, as a
     // hand lowers paper it lifted to fold under.

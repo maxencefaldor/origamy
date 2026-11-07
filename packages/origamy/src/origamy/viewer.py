@@ -11,6 +11,7 @@ headless Chromium, draws any step from any direction.
 """
 
 import base64
+import gzip
 import itertools
 import json
 import os
@@ -67,6 +68,12 @@ _TILT: Final = (0.35, -0.75, 0.75)
 _STEEPEST: Final = 89.99
 """The steepest elevation an eye takes, so that it still knows which way is up."""
 
+_SHOTS: Final = 12
+"""The most frames a film keeps of one simulated fold."""
+
+_SHARE: Final = 1e-9
+"""How far short of a share of a fold's way a frame may lie and still reach it."""
+
 _STEPS: Final = 32000
 """How many steps a film's frames take from the middle of the table to their reach."""
 
@@ -93,7 +100,7 @@ const root = document.getElementById("origamy");
 try {
   const { start } = await import("origamy/viewer.js");
   const build = JSON.parse(document.getElementById("build").textContent);
-  window.origamy = start(root, build);
+  window.origamy = await start(root, build);
 } catch (error) {
   console.error(error);
   root.dataset.state = "failed";
@@ -122,7 +129,8 @@ def write_viewer(
     With ``folding``, the build as the simulator folded it, the viewer plays the
     simulated paper's frames in place of rigid faces.
     """
-    data = build_data(result, name) | {"studio": studio}
+    # A film shows each step's motion, so the rigid faces need none.
+    data = build_data(result, name, motion=folding is None) | {"studio": studio}
     if folding is not None:
         data["film"] = film_data(result, folding)
     path.write_text(_page(data, name), encoding="utf-8")
@@ -133,7 +141,7 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     """The simulated paper as the viewer plays it: its mesh, and each step's frames.
 
     Each frame is where every vertex of the mesh lay, in whole steps of ``step`` of the
-    paper's units. The paper
+    paper's units, less where it lay the frame before, gzipped. The paper
     rests exactly where each state puts it, and moves between rests as the simulator
     folded it. Each fold names, for each face's copy of a vertex, how many layers lie
     under it, and for each face whether it shows its back. The viewer thus draws
@@ -157,13 +165,6 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     posed = _Pose(np.eye(3), np.zeros(3))
     for stage in folding.stages:
         parents = stage.state.parents(last)
-        films[stage.step]["folds"].append(
-            {
-                "count": len(stage.frames),
-                "lifts": _packed(_lifts(stage, parents, copies)),
-                "flips": [stage.state.faces[p].place.flips for p in parents],
-            }
-        )
         # The paper rests exactly where its state puts it. Between rests it keeps the
         # simulator's motion, eased from one rest's mismatch to the next by how far it
         # has come, and turned as a whole from one rest's pose to the next.
@@ -180,17 +181,31 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
         shares = np.cumsum(lengths) / total if total > 0 else np.ones(len(lengths))
         after = reached - found
         pose = _Pose.between(reached, state)
-        for frame, share in zip(stage.frames, shares, strict=True):
-            shaped = frame + (1 - share) * correction + share * after
+        # A fold keeps a few frames, evenly spread along its way, and always its last.
+        marks = np.arange(1, _SHOTS + 1) / _SHOTS - _SHARE
+        kept = sorted({*np.searchsorted(shares, marks).tolist(), len(shares) - 1})
+        for index in kept:
+            share = shares[index]
+            shaped = stage.frames[index] + (1 - share) * correction + share * after
             frames[stage.step].append(posed.toward(pose, share).moved(shaped))
         before, correction, posed = found, after, pose
-    # Frames keep 16 bits a coordinate: a step a thirty-thousandth of the paper's reach.
+        films[stage.step]["folds"].append(
+            {
+                "count": len(kept),
+                "lifts": _packed(_lifts(stage, parents, copies)),
+                "flips": [stage.state.faces[p].place.flips for p in parents],
+            }
+        )
+    # Frames keep whole steps, a thirty-thousandth of the paper's reach. Each frame
+    # stores how far it moved from the one before, and gzip packs the moves.
     reach = max((np.abs(np.stack(own)).max() for own in frames if own), default=1.0)
     step = reach / scale / _STEPS
     for film, own in zip(films, frames, strict=True):
         if own:
-            steps = np.rint(np.stack(own) / scale / step)
-            film["frames"] = _packed(steps.astype("<i2"))
+            steps = np.rint(np.stack(own) / scale / step).astype(np.int64)
+            moves = np.diff(steps, axis=0, prepend=np.zeros_like(steps[:1]))
+            raw = np.ascontiguousarray(moves.astype("<i4")).tobytes()
+            film["frames"] = base64.b64encode(gzip.compress(raw, mtime=0)).decode()
     return {
         "step": step,
         "rest": _packed((rest / scale).astype(np.float32)),

@@ -52,7 +52,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
@@ -63,5 +63,3 @@ jobs:
       - uses: actions/configure-pages@v6
       - id: deployment
         uses: actions/deploy-pages@v5
-        with:
-          timeout: 1800000 # Pages can take many minutes to sync the gallery's viewers

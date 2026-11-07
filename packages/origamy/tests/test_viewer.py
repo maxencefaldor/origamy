@@ -1,6 +1,7 @@
 # Copyright 2026 Maxence Faldor
 import asyncio
 import base64
+import gzip
 import json
 import os
 import re
@@ -267,9 +268,9 @@ def test_a_film_rests_exactly_where_each_state_puts_the_paper(
     paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
     folding = simulate(paper.steps)
     film = film_data(BuildResult.of(paper, tmp_path), folding)
-    frames = np.frombuffer(base64.b64decode(film["steps"][1]["frames"]), "<i2")
-    frames = frames * film["step"]
-    last = frames.reshape(-1, film["vertices"], 3)[-1]
+    packed = gzip.decompress(base64.b64decode(film["steps"][1]["frames"]))
+    moves = np.frombuffer(packed, "<i4").reshape(-1, film["vertices"], 3)
+    last = moves.sum(axis=0) * film["step"]
     rest = np.frombuffer(base64.b64decode(film["rest"]), np.float32).reshape(-1, 2)
     # The right half lies folded onto the left, every vertex mirrored in the middle.
     for (x, y), (fx, fy, fz) in zip(rest, last, strict=True):
