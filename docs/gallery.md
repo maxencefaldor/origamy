@@ -135,10 +135,11 @@ Traditional toys and objects, each ending in space.
 
 -   ![The newspaper hat example](images/gallery-newspaper-hat.png)
 
-    **[Newspaper hat](gallery/newspaper-hat.html)** · 8 steps
+    **[Newspaper hat](gallery/newspaper-hat.html)** · 12 steps
 
     A sheet twice as tall as wide, halved, its top corners folded down to the middle.
     Each brim rolls up twice, the front over the corners and the back behind them.
+    Then each brim turns 20° out off the crown, as a hat's brims do once opened to wear.
 
     [Open in 3D](gallery/newspaper-hat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/newspaper_hat.py)
 
