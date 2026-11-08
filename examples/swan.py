@@ -36,4 +36,6 @@ def fold() -> Paper:
     )
     # Stand the swan on its belly, along the spine.
     paper.tilt(Line.through(tip, back), flap=("1/4", "1/2"), angle=90)
+    # Let every fold ease 15° open, as pressed paper does.
+    paper.settle(ease=15)
     return paper

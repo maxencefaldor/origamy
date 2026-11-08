@@ -23,4 +23,6 @@ def fold() -> Paper:
     paper.mountain(low, flap=("1/2", "1/8"))
     paper.mountain(high, flap=("1/2", "3/8"), layers=2)
     paper.tilt(high, flap=("1/2", "3/4"), angle=90)
+    # Let every fold ease 15° open, as pressed paper does.
+    paper.settle(ease=15)
     return paper

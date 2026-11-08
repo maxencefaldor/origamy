@@ -33,20 +33,22 @@ Models with wings, shaped out of the plane to stand or spread.
 
 -   ![The swan example](images/gallery-swan.png)
 
-    **[Swan](gallery/swan.html)** · 10 steps
+    **[Swan](gallery/swan.html)** · 11 steps
 
     A kite turned over and folded narrower, then halved along its spine.
     The point reverses up as the neck, and its tip reverses forward as the head.
     The swan stands on its belly, the kite's middle showing at its tail.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/swan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swan.py)
 
 -   ![The penguin example](images/gallery-penguin.png)
 
-    **[Penguin](gallery/penguin.html)** · 7 steps
+    **[Penguin](gallery/penguin.html)** · 8 steps
 
     A kite, its white side up, whose sides stop short of the spine, so a white belly shows between black wings.
     The feet fold up and the head down, both black, and the penguin stands on its feet.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/penguin.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/penguin.py)
 
@@ -62,11 +64,12 @@ Models with wings, shaped out of the plane to stand or spread.
 
 -   ![The cicada example](images/gallery-cicada.png)
 
-    **[Cicada](gallery/cicada.html)** · 9 steps
+    **[Cicada](gallery/cicada.html)** · 10 steps
 
     The semi: a triangle whose corners fold up to its tip, then down past its tail as wings.
     Each wing's fold runs through its flap's corner, so the wings part at the tail.
     Two folds of the head show the paper's back as stripes, and the body's sides turn down 75°.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/cicada.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cicada.py)
 
@@ -80,57 +83,63 @@ Heads and bodies folded flat, then stood up or lifted into relief.
 
 -   ![The whale example](images/gallery-whale.png)
 
-    **[Whale](gallery/whale.html)** · 8 steps
+    **[Whale](gallery/whale.html)** · 9 steps
 
     A kite whose blunt corner folds over as the head, halved along its spine.
     The tail reverse folds up between the body's layers, and the whale stands on its belly.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/whale.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/whale.py)
 
 -   ![The fox face example](images/gallery-fox-face.png)
 
-    **[Fox face](gallery/fox-face.html)** · 8 steps
+    **[Fox face](gallery/fox-face.html)** · 9 steps
 
     A triangle whose corners fold down to the chin, then back up past the head as ears.
     Each ear's fold runs from the bottom edge to the spine, never across the flap's hinge.
     The ears lean 25° forward, and the face stands on its chin.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/fox-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fox_face.py)
 
 -   ![The dog face example](images/gallery-dog-face.png)
 
-    **[Dog face](gallery/dog-face.html)** · 7 steps
+    **[Dog face](gallery/dog-face.html)** · 8 steps
 
     A triangle whose corners fold down as ears, the chin's tip turned up as the nose.
     The ears lift 35° off the face, and the face stands on its chin.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/dog-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dog_face.py)
 
 -   ![The cat face example](images/gallery-cat-face.png)
 
-    **[Cat face](gallery/cat-face.html)** · 9 steps
+    **[Cat face](gallery/cat-face.html)** · 10 steps
 
     A triangle whose corners fold up past its top as ears, square to the head's axis.
     Each ear turns about its side's middle, and the chin's tip tucks behind.
     The ears lean 30° forward, and the face stands on its chin.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/cat-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cat_face.py)
 
 -   ![The rabbit face example](images/gallery-rabbit-face.png)
 
-    **[Rabbit face](gallery/rabbit-face.html)** · 9 steps
+    **[Rabbit face](gallery/rabbit-face.html)** · 10 steps
 
     The cat face's triangle, its ears turned about points near the chin, so they rise far past the head.
     The ears lean 15° forward, and the face stands on its chin.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/rabbit-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/rabbit_face.py)
 
 -   ![The bear face example](images/gallery-bear-face.png)
 
-    **[Bear face](gallery/bear-face.html)** · 9 steps
+    **[Bear face](gallery/bear-face.html)** · 10 steps
 
     The cat face's triangle, its ears turned about points near the corners, so they just peek past the head.
     The chin's tip turns up on the front layer as the snout, and the face stands on it.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/bear-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bear_face.py)
 
@@ -153,10 +162,11 @@ Traditional toys and objects, each ending in space.
 
 -   ![The newspaper hat example](images/gallery-newspaper-hat.png)
 
-    **[Newspaper hat](gallery/newspaper-hat.html)** · 8 steps
+    **[Newspaper hat](gallery/newspaper-hat.html)** · 9 steps
 
     A sheet twice as tall as wide, halved, its top corners folded down to the middle.
     Each brim rolls up twice, the front over the corners and the back behind them.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/newspaper-hat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/newspaper_hat.py)
 

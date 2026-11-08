@@ -35,4 +35,6 @@ def fold() -> Paper:
             layers=2,
         )
     paper.tilt(Line.through(("1/16", 0), (0, "1/16")), flap=("1/4", "1/4"), angle=80)
+    # Let every fold ease 15° open, as pressed paper does.
+    paper.settle(ease=15)
     return paper

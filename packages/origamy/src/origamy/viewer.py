@@ -163,14 +163,21 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     correction = np.zeros_like(before)
     copies = _copies(folding.mesh.triangles, folding.faces)
     posed = _Pose(np.eye(3), np.zeros(3))
+    standing = False
     for stage in folding.stages:
         parents = stage.state.parents(last)
         if stage.settled:
             # A settle stage bends the paper away from any state: its frames keep the
             # simulator's paper, posed as the last rest was, the last mismatch fading.
+            # Paper that shaping stood up keeps its pose as a whole: it bends in place
+            # and stays on the table, rather than falling over.
+            start = before + correction
             shares, kept = _shots(before, stage.frames)
             for index in kept:
                 shaped = stage.frames[index] + (1 - shares[index]) * correction
+                if standing:
+                    shaped = _Pose.between(shaped, start).moved(shaped)
+                    shaped[:, 2] += start[:, 2].min() - shaped[:, 2].min()
                 frames[stage.step].append(posed.moved(shaped))
             films[stage.step]["folds"].append(
                 {
@@ -197,6 +204,7 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
             shaped = stage.frames[index] + (1 - share) * correction + share * after
             frames[stage.step].append(posed.toward(pose, share).moved(shaped))
         before, correction, posed = found, after, pose
+        standing = stage.form is not None
         films[stage.step]["folds"].append(
             {
                 "count": len(kept),

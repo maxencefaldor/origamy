@@ -32,4 +32,6 @@ def fold() -> Paper:
     )
     for side, outside in sides:
         paper.shape(side, flap=outside, angle=-75)
+    # Let every fold ease 15° open, as pressed paper does.
+    paper.settle(ease=15)
     return paper

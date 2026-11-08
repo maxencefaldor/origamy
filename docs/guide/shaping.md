@@ -78,6 +78,7 @@ paper.settle(dict.fromkeys(pleats, 90))
 Each crease is named as a flex names it, and turns its own way: 180 pressed flat, 0 open flat.
 The build keeps the exact paper as it was before the step.
 Only the simulator, and the viewer's film that plays it, show the settled paper.
+Paper that shaping stood up keeps its pose as it settles: it bends in place rather than falling over.
 A settle step ends the build: the paper refuses any action after it.
 
 A settle step also eases every fold it does not name, as pressed paper springs open from its creases.

@@ -279,6 +279,21 @@ def test_a_film_rests_exactly_where_each_state_puts_the_paper(
         assert fz == pytest.approx(0, abs=1e-4)
 
 
+def test_paper_stood_up_keeps_its_pose_as_it_settles(tmp_path: Path) -> None:
+    paper = Paper.square()
+    paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    paper.tilt(Line.through((0, 0), (0, 1)), flap=("1/4", "1/2"), angle=70)
+    paper.settle(ease=30)
+    folding = simulate(paper.steps)
+    film = film_data(BuildResult.of(paper, tmp_path), folding)
+    packed = gzip.decompress(base64.b64decode(film["steps"][-1]["frames"]))
+    moves = np.frombuffer(packed, "<i4").reshape(-1, film["vertices"], 3)
+    # The paper leaned 70° off the table, and leans so still once eased.
+    last = moves.sum(axis=0) * film["step"]
+    assert last[:, 2].max() > 0.35
+    assert last[:, 2].min() == pytest.approx(0, abs=1e-3)
+
+
 EYE = """(() => {
   const stage = window.origamy.stage;
   window.origamy.go(1, true);
