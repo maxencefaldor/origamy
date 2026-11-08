@@ -116,6 +116,24 @@ Heads and bodies folded flat, then stood up or lifted into relief.
 
     [Open in 3D](gallery/cat-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cat_face.py)
 
+-   ![The rabbit face example](images/gallery-rabbit-face.png)
+
+    **[Rabbit face](gallery/rabbit-face.html)** · 9 steps
+
+    The cat face's triangle, its ears turned about points near the chin, so they rise far past the head.
+    The ears lean 15° forward, and the face stands on its chin.
+
+    [Open in 3D](gallery/rabbit-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/rabbit_face.py)
+
+-   ![The bear face example](images/gallery-bear-face.png)
+
+    **[Bear face](gallery/bear-face.html)** · 9 steps
+
+    The cat face's triangle, its ears turned about points near the corners, so they just peek past the head.
+    The chin's tip turns up on the front layer as the snout, and the face stands on it.
+
+    [Open in 3D](gallery/bear-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bear_face.py)
+
 </div>
 
 ## Things
