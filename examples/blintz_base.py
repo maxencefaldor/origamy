@@ -15,4 +15,6 @@ def fold() -> Paper:
         ((0, 1), ("1/16", "15/16")),
     ):
         paper.valley(fold_onto(corner, center), flap=flap)
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper

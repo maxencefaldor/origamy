@@ -59,7 +59,9 @@ def fold() -> Paper:
   `flex({crease: angle})` folds creases to angles, from 0 open to 180 pressed flat, and the creases around each vertex follow together.
   `tilt(line, flap, angle)` turns the whole model in space.
   `settle({crease: angle})` turns creases toward angles and lets the simulator bend the paper: fans, opened cups, puffed forms.
+  `settle(ease=15)` opens every other fold by 15°, so pressed paper puffs up; paper shaping stood up keeps standing.
   A settle step ends the build.
+- A crease pattern alone can settle into a curved form no flat state holds: concentric pleats twist into a saddle, and pleats from a polygon's corners gather round it.
 - Within one script, a fold after `shape`, `flex` or `tilt` is refused (`not-flat`).
 - The queries are `where` (unfolded point to where it lies now), `origin` (back), `creases` (crease pattern segments along a line), `layers` (layers at a point) and `thickest` (the most layers at one point).
 

@@ -23,4 +23,6 @@ def fold() -> Paper:
         outward = base - tip
         flap = tip + outward * QUARTER + Point(-outward.y, outward.x) * EIGHTH
         paper.valley(fold_onto(tip, base), flap=flap, layers=1)
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper

@@ -47,4 +47,6 @@ def fold() -> Paper:
     for edge, tip in (("1/8", ("1/16", "1/8")), ("7/8", ("15/16", "1/8"))):
         line = Line.through(paper.where((edge, 0)), paper.where((edge, "1/2")))
         paper.shape(line, flap=paper.where(tip), angle=90, layers=1)
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper

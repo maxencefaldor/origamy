@@ -34,7 +34,7 @@ The paper takes each action or refuses it, with the facts of why and the script 
 
 -   🖼️ **[Gallery](gallery.md)**
 
-    Fifty-seven models in the 3D viewer, from a paper cup to the crane and the circular pleat.
+    Fifty-eight models in the 3D viewer, from a paper cup to the crane and the circular pleat.
 
 -   📚 **[Reference](reference/index.md)**
 

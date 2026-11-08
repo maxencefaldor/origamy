@@ -48,4 +48,6 @@ def fold() -> Paper:
         line = Line.through(paper.where((crease, 0)), paper.where((crease, "1/2")))
         paper.shape(line, flap=paper.where(flap), angle=90, layers=layers)
     paper.turn_over()
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper

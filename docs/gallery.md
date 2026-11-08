@@ -182,10 +182,11 @@ Traditional toys and objects, each ending in space.
 
 -   ![The pinwheel example](images/gallery-pinwheel.png)
 
-    **[Pinwheel](gallery/pinwheel.html)** · 3 steps
+    **[Pinwheel](gallery/pinwheel.html)** · 4 steps
 
     The middle square's sides, the corners' diagonals and four slants, collapsed in one step.
     The pattern turns onto itself a quarter turn, so the four vanes chase each other.
+    A settle step then eases every fold 35° open, and the vanes lift.
 
     [Open in 3D](gallery/pinwheel.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pinwheel.py)
 
@@ -218,10 +219,11 @@ Paper planes whose wings spread level from the body.
 
 -   ![The glider example](images/gallery-glider.png)
 
-    **[Glider](gallery/glider.html)** · 15 steps
+    **[Glider](gallery/glider.html)** · 16 steps
 
     A paper plane whose nose folds back onto the corners' feet, so its wings run wide.
     The new corners fold to the keel again, and the wings spread level from the body.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/glider.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/glider.py)
 
@@ -400,6 +402,15 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
     [Open in 3D](gallery/crown.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crown.py)
 
+-   ![The four-pointed star example](images/gallery-star.png)
+
+    **[Four-pointed star](gallery/star.html)** · 2 steps
+
+    Eight rays from the center, to the corners and the middles of the edges, alternately valley and mountain.
+    Four valleys gather the paper between four mountains, which rise as the star's points.
+
+    [Open in 3D](gallery/star.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/star.py)
+
 -   ![The fluted dish example](images/gallery-fluted-dish.png)
 
     **[Fluted dish](gallery/fluted-dish.html)** · 2 steps
@@ -474,10 +485,11 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
 -   ![The hexagon example](images/gallery-hexagon.png)
 
-    **[Hexagon](gallery/hexagon.html)** · 8 steps
+    **[Hexagon](gallery/hexagon.html)** · 9 steps
 
     The equilateral triangle, its corners folded to its center at height √3/6.
     Each fold cuts a third from both sides at its corner, so the hexagon is regular.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/hexagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hexagon.py)
 
@@ -509,42 +521,47 @@ The bases most traditional models start from: plain folds, collapses and petal f
 
 -   ![The kite base example](images/gallery-kite-base.png)
 
-    **[Kite base](gallery/kite-base.html)** · 3 steps
+    **[Kite base](gallery/kite-base.html)** · 4 steps
 
     Two edges folded onto a diagonal, each fold bisecting a 45° corner.
     The kite's sharp point holds 45° of paper, and its sides turn at 22.5°.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/kite-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/kite_base.py)
 
 -   ![The blintz base example](images/gallery-blintz-base.png)
 
-    **[Blintz base](gallery/blintz-base.html)** · 4 steps
+    **[Blintz base](gallery/blintz-base.html)** · 5 steps
 
     Each corner folded to the center: a square half the paper's area, two layers thick.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/blintz-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/blintz_base.py)
 
 -   ![The cupboard base example](images/gallery-cupboard-base.png)
 
-    **[Cupboard base](gallery/cupboard-base.html)** · 2 steps
+    **[Cupboard base](gallery/cupboard-base.html)** · 3 steps
 
     Two opposite edges folded to the middle, as a cupboard's doors.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/cupboard-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cupboard_base.py)
 
 -   ![The preliminary base example](images/gallery-preliminary-base.png)
 
-    **[Preliminary base](gallery/preliminary-base.html)** · 5 steps
+    **[Preliminary base](gallery/preliminary-base.html)** · 6 steps
 
     Four precreases through the center, collapsed in one step into a square of four flaps.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/preliminary-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/preliminary_base.py)
 
 -   ![The waterbomb base example](images/gallery-waterbomb-base.png)
 
-    **[Waterbomb base](gallery/waterbomb-base.html)** · 4 steps
+    **[Waterbomb base](gallery/waterbomb-base.html)** · 5 steps
 
     Valley diagonals and a mountain midline, collapsed in one step into a triangle.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/waterbomb-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/waterbomb_base.py)
 
@@ -584,18 +601,20 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The window example](images/gallery-window.png)
 
-    **[Window](gallery/window.html)** · 10 steps
+    **[Window](gallery/window.html)** · 11 steps
 
     The corners fold to the center, then each tip folds back to its flap's edge.
     The paper's two colors frame a square pane.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/window.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/window.py)
 
 -   ![The arrowhead example](images/gallery-arrowhead.png)
 
-    **[Arrowhead](gallery/arrowhead.html)** · 11 steps
+    **[Arrowhead](gallery/arrowhead.html)** · 12 steps
 
     A preliminary base whose front and back flaps fold their edges to the center, as a bird base begins, and stop there.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/arrowhead.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/arrowhead.py)
 
@@ -619,10 +638,11 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The winglet dart example](images/gallery-winglet-dart.png)
 
-    **[Winglet dart](gallery/winglet-dart.html)** · 16 steps
+    **[Winglet dart](gallery/winglet-dart.html)** · 17 steps
 
     The classic dart, each wingtip turned up square as a winglet.
     Each winglet's crease lies where the paper's edge folds onto the wing's crease.
+    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/winglet-dart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/winglet_dart.py)
 

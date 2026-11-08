@@ -27,4 +27,6 @@ def fold() -> Paper:
             top = meet(kite, Line.through(center, side))
             paper.valley(kite, flap=midpoint(side, midpoint(corner, top)), layers=1)
         paper.turn_over()
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper

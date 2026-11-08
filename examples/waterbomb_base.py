@@ -14,4 +14,6 @@ def fold() -> Paper:
     paper.precrease(falling, flap=("1/4", "1/8"))
     paper.precrease(level, flap=("1/2", "3/4"), mountain=True)
     paper.collapse(valleys=[rising, falling], mountains=[level], fixed=("1/2", "1/8"))
+    # Let every fold ease 20° open, as pressed paper does.
+    paper.settle(ease=20)
     return paper
