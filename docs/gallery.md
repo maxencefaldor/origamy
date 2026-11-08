@@ -260,6 +260,25 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
     [Open in 3D](gallery/hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hypar.py)
 
+-   ![The circular pleat example](images/gallery-circular-pleat.png)
+
+    **[Circular pleat](gallery/circular-pleat.html)** · 2 steps
+
+    Seven concentric rings of 24 sides, pleated alternately, and radii that keep each face convex.
+    A settle step turns each ring toward 110°, while the radii turn no way and the paper bends across them.
+    The rings shorten as they pleat, and the paper buckles into a saddle.
+
+    [Open in 3D](gallery/circular-pleat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/circular_pleat.py)
+
+-   ![The pleated leaf example](images/gallery-leaf.png)
+
+    **[Pleated leaf](gallery/leaf.html)** · 2 steps
+
+    Pleats square to one diagonal, alternately valley and mountain, and the other diagonal as the midrib.
+    A settle step turns the pleats toward 120° and the midrib toward 40°, and the leaf's halves curl.
+
+    [Open in 3D](gallery/leaf.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/leaf.py)
+
 </div>
 
 ## Tessellations
