@@ -24,10 +24,11 @@ Models with wings, shaped out of the plane to stand or spread.
 
 -   ![The flapping bird example](images/gallery-flapping-bird.png)
 
-    **[Flapping bird](gallery/flapping-bird.html)** · 29 steps
+    **[Flapping bird](gallery/flapping-bird.html)** · 30 steps
 
     A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then raised 30° above level.
     Two precreases mark a quarter of the neck, where the head reverse folds.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/flapping-bird.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/flapping_bird.py)
 
@@ -188,6 +189,15 @@ Traditional toys and objects, each ending in space.
 
     [Open in 3D](gallery/pinwheel.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pinwheel.py)
 
+-   ![The envelope example](images/gallery-envelope.png)
+
+    **[Envelope](gallery/envelope.html)** · 5 steps
+
+    A square on its corner: its side corners fold to the center, and its bottom corner folds up past it.
+    The top corner folds down over them as the flap, and a settle step eases the folds 10° open.
+
+    [Open in 3D](gallery/envelope.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/envelope.py)
+
 </div>
 
 ## Planes
@@ -198,10 +208,11 @@ Paper planes whose wings spread level from the body.
 
 -   ![The paper plane example](images/gallery-paper-plane.png)
 
-    **[Paper plane](gallery/paper-plane.html)** · 14 steps
+    **[Paper plane](gallery/paper-plane.html)** · 15 steps
 
     The classic dart, from A-series paper √2 times as tall as it is wide.
     Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
+    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
 
@@ -298,6 +309,24 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
     [Open in 3D](gallery/hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hypar.py)
 
+-   ![The triangular hypar example](images/gallery-triangular-hypar.png)
+
+    **[Triangular hypar](gallery/triangular-hypar.html)** · 2 steps
+
+    Seven concentric triangles, pleated alternately, and the spokes to the corners, on equilateral paper.
+    Three corners pull where a square has four, and the paper curls them into a twisted star.
+
+    [Open in 3D](gallery/triangular-hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/triangular_hypar.py)
+
+-   ![The pentagonal hypar example](images/gallery-pentagonal-hypar.png)
+
+    **[Pentagonal hypar](gallery/pentagonal-hypar.html)** · 2 steps
+
+    Seven concentric pentagons, pleated alternately, and the spokes to the corners, on pentagonal paper.
+    Five corners pull, and the paper settles into a crown of rises and dips.
+
+    [Open in 3D](gallery/pentagonal-hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pentagonal_hypar.py)
+
 -   ![The hexagonal hypar example](images/gallery-hexagonal-hypar.png)
 
     **[Hexagonal hypar](gallery/hexagonal-hypar.html)** · 2 steps
@@ -316,6 +345,15 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
     The rings shorten as they pleat, and the paper buckles into a saddle.
 
     [Open in 3D](gallery/circular-pleat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/circular_pleat.py)
+
+-   ![The spiral pleat example](images/gallery-spiral-pleat.png)
+
+    **[Spiral pleat](gallery/spiral-pleat.html)** · 2 steps
+
+    Seven concentric dodecagons, each turned 15° on the one inside it, pleated alternately, and the slants between their corners.
+    The pleats shorten the rings and the slants twist them, so the paper settles into a spiral shell.
+
+    [Open in 3D](gallery/spiral-pleat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/spiral_pleat.py)
 
 -   ![The pleated leaf example](images/gallery-leaf.png)
 
