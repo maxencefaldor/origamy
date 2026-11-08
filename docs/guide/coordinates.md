@@ -99,6 +99,7 @@ The constructions build the same lines exactly, after the Huzita-Justin axioms, 
 | `perpendicular(line, through)` | The fold line through a point that folds a line onto itself | 4 |
 | `meet(first, second)` | The point where two lines cross | |
 | `midpoint(p, q)` | The point halfway between two points | |
+| `Point.polar(radius, degrees)` | The point at a radius from the origin, turned by a multiple of 3° | |
 
 ```pycon
 >>> from origamy import Line, bisect, fold_onto, meet, midpoint, perpendicular
@@ -117,6 +118,18 @@ x = 1
 ```
 
 The bisector of a 45° angle makes a 22.5° line, and its equation takes √2.
+Regular polygons need points at fixed angles, and `Point.polar` builds them exactly.
+Every multiple of 3° is 18° less 15°, so its cosine and sine take square roots alone.
+`Point.turned` turns a vector by such an angle.
+
+```pycon
+>>> from origamy import Point
+>>> Point.polar(1, 60) == Point.of(("1/2", "√3/2"))
+True
+>>> Point.of((1, 0)).turned(36) == Point.polar(1, 36)
+True
+```
+
 The first five Huzita-Justin axioms build lines with arithmetic and square roots alone, so every line they build stays exact.
 The cup example brings a corner to the opposite side along the bisector of its angle:
 

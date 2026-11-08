@@ -7,20 +7,16 @@ DISC, PETAL = 60, 80
 """How far the disc's edge and each radiating pleat turn, in degrees."""
 SIDES = 24
 """The disc's sides, and the pleats that radiate from its corners."""
-
-COSINES = ("1", "√6/4 + √2/4", "√3/2", "√2/2", "1/2", "√6/4 - √2/4", "0")
-"""The cosines of each multiple of 15° up to 90°, exact in the tower of square roots."""
+CENTER = Point.of(("1/2", "1/2"))
+"""The paper's center, where the disc lies."""
 
 type Segment = tuple[Point, Point]
 
 
-def direction(k: int) -> Point:
-    """The unit vector k times 15° counterclockwise from the x-axis."""
-    quarter, step = divmod(k % 24, 6)
-    c, s = Number.of(COSINES[step]), Number.of(COSINES[6 - step])
-    for _ in range(quarter):
-        c, s = -s, c
-    return Point(c, s)
+def rim(degrees: int) -> Point:
+    """Where the ray from the center at an angle meets the paper's edge."""
+    unit = Point.polar(1, degrees)
+    return CENTER + unit * (Number.of("1/2") / max(abs(unit.x), abs(unit.y)))
 
 
 def fold() -> Paper:
@@ -31,20 +27,13 @@ def fold() -> Paper:
     flower, while the pleated paper spreads round it as petals.
     """
     paper = Paper.square(front="#e7b93a", back="#f7f0dc")
-    center = Point.of(("1/2", "1/2"))
-
-    def at(k: int) -> Point:
-        unit, reach = direction(k), Number.of("1/4")
-        return Point(center.x + unit.x * reach, center.y + unit.y * reach)
-
-    def edge(k: int) -> Point:
-        unit, half = direction(k), Number.of("1/2")
-        reach = half / max(abs(unit.x), abs(unit.y))
-        return Point(center.x + unit.x * reach, center.y + unit.y * reach)
-
-    disc: list[tuple[Segment, int]] = [((at(k), at(k + 1)), DISC) for k in range(SIDES)]
+    angles = [k * 360 // SIDES for k in range(SIDES + 1)]
+    corners = [CENTER + Point.polar("1/4", angle) for angle in angles]
+    disc: list[tuple[Segment, int]] = [
+        ((corners[k], corners[k + 1]), DISC) for k in range(SIDES)
+    ]
     petals: list[tuple[Segment, int]] = [
-        ((at(k), edge(k)), PETAL if k % 2 else -PETAL) for k in range(SIDES)
+        ((corners[k], rim(angles[k])), PETAL if k % 2 else -PETAL) for k in range(SIDES)
     ]
     paper.crease([segment for segment, _ in disc + petals])
     paper.settle(dict(disc + petals))

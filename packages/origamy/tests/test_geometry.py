@@ -1,5 +1,8 @@
 # Copyright 2026 Maxence Faldor
 
+from math import cos, radians, sin
+
+import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
@@ -100,3 +103,22 @@ def test_halving_any_angle_is_exact() -> None:
     assert image == Point.of((1, 2)) * (1 / Number.of(5).sqrt())
     eleventh = bisect((1, 0), (0, 0), (1, "√2 - 1"))
     assert not eleventh.normal.x.rational or not eleventh.normal.y.rational
+
+
+@given(st.integers(min_value=-120, max_value=120))
+def test_every_multiple_of_three_degrees_turns_exactly(k: int) -> None:
+    unit = Point.polar(1, 3 * k)
+    assert unit.dot(unit) == 1
+    x, y = unit.floats()
+    assert abs(x - cos(radians(3 * k))) < 1e-12
+    assert abs(y - sin(radians(3 * k))) < 1e-12
+
+
+def test_turns_add() -> None:
+    assert Point.polar(1, 27).turned(18) == Point.polar(1, 45)
+    assert Point.polar(1, 90) == Point.of((0, 1))
+
+
+def test_only_multiples_of_three_degrees_turn_exactly() -> None:
+    with pytest.raises(ValueError, match="multiple of 3°"):
+        Point.polar(1, 10)

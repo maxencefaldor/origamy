@@ -23,6 +23,12 @@ type Polygon = tuple[Point, ...]
 _FEWEST_CORNERS: Final = 3
 """The fewest corners a polygon has."""
 
+_EXACT_STEP: Final = 3
+"""The degrees between turns whose cosine and sine the tower holds: 18° less 15°."""
+
+_QUARTER: Final = 90
+"""The degrees in a quarter turn."""
+
 
 @dataclass(frozen=True, slots=True)
 class Point:
@@ -62,6 +68,33 @@ class Point:
         """The opposite vector."""
         return Point(-self.x, -self.y)
 
+    @classmethod
+    def polar(cls, radius: Exact, degrees: Exact) -> Point:
+        """The point ``radius`` from the origin, turned ``degrees`` from the x-axis.
+
+        Examples:
+            >>> Point.polar(2, 30) == Point.of(("√3", 1))
+            True
+        """
+        return cls(Number.of(radius), ZERO).turned(degrees)
+
+    def turned(self, degrees: Exact) -> Point:
+        """The vector turned counterclockwise by a multiple of 3°.
+
+        The tower holds the cosine and sine of every multiple of 3°, since 3° is 18°
+        less 15°, and both of those are constructible.
+
+        Examples:
+            >>> Point.of((1, 0)).turned(45) == Point.of(("√2/2", "√2/2"))
+            True
+        """
+        turn = Number.of(degrees).fraction()
+        if turn.denominator != 1 or turn.numerator % _EXACT_STEP:
+            msg = f"{turn}° is not a multiple of 3°, so no exact turn reaches it"
+            raise ValueError(msg)
+        k = turn.numerator // _EXACT_STEP
+        return _times(self, _times(_unit(18 * k), _unit(-15 * k)))
+
     def dot(self, other: Point) -> Number:
         """The dot product with another vector."""
         return self.x * other.x + self.y * other.y
@@ -83,6 +116,43 @@ class Point:
     def __repr__(self) -> str:
         """Text that reads back as this point, when its radicals are integers."""
         return f"Point.of(({str(self.x)!r}, {str(self.y)!r}))"
+
+
+def _times(vector: Point, unit: Point) -> Point:
+    """A vector turned by the angle of a unit vector: their complex product."""
+    return Point(
+        vector.x * unit.x - vector.y * unit.y, vector.x * unit.y + vector.y * unit.x
+    )
+
+
+@remembered
+def _unit(degrees: int) -> Point:
+    """The unit vector at a multiple of 15° or 18°, counterclockwise of the x-axis."""
+    quarter, rest = divmod(degrees % 360, _QUARTER)
+    match rest:
+        case 0:
+            c, s = ONE, ZERO
+        case 15 | 30 | 45 | 60 | 75:
+            cosines = {
+                15: "√6/4 + √2/4",
+                30: "√3/2",
+                45: "√2/2",
+                60: "1/2",
+                75: "√6/4 - √2/4",
+            }
+            c, s = Number.of(cosines[rest]), Number.of(cosines[_QUARTER - rest])
+        case 18 | 36 | 54 | 72:
+            five = Number.of(5).sqrt()
+            low, high = (10 - 2 * five).sqrt() / 4, (10 + 2 * five).sqrt() / 4
+            golden, small = (five + 1) / 4, (five - 1) / 4
+            cosines = {18: high, 36: golden, 54: low, 72: small}
+            c, s = cosines[rest], cosines[_QUARTER - rest]
+        case _:
+            msg = f"{degrees}° is a multiple of neither 15° nor 18°"
+            raise ValueError(msg)
+    for _ in range(quarter):
+        c, s = -s, c
+    return Point(c, s)
 
 
 @dataclass(frozen=True, slots=True)

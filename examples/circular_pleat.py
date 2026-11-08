@@ -9,20 +9,21 @@ SIDES = 24
 """The sides of each ring: a regular polygon close to a circle."""
 PLEAT = 110
 """How far each ring's pleat turns, in degrees."""
-
-COSINES = ("1", "√6/4 + √2/4", "√3/2", "√2/2", "1/2", "√6/4 - √2/4", "0")
-"""The cosines of each multiple of 15° up to 90°, exact in the tower of square roots."""
+CENTER = Point.of(("1/2", "1/2"))
+"""The paper's center, which every ring surrounds."""
 
 type Segment = tuple[Point, Point]
 
 
-def direction(k: int) -> Point:
-    """The unit vector k times 15° counterclockwise from the x-axis."""
-    quarter, step = divmod(k % 24, 6)
-    c, s = Number.of(COSINES[step]), Number.of(COSINES[6 - step])
-    for _ in range(quarter):
-        c, s = -s, c
-    return Point(c, s)
+def corner(ring: int, k: int) -> Point:
+    """The kth corner of a ring, the rings evenly spaced out to the paper's edge."""
+    return CENTER + Point.polar(f"{ring}/{2 * (RINGS + 1)}", k * 360 // SIDES)
+
+
+def rim(degrees: int) -> Point:
+    """Where the ray from the center at an angle meets the paper's edge."""
+    unit = Point.polar(1, degrees)
+    return CENTER + unit * (Number.of("1/2") / max(abs(unit.x), abs(unit.y)))
 
 
 def fold() -> Paper:
@@ -33,24 +34,16 @@ def fold() -> Paper:
     paper buckles into a saddle.
     """
     paper = Paper.square(front="#efe8d8", back="#2f4f6f")
-    center = Point.of(("1/2", "1/2"))
-
-    def at(ring: int, k: int) -> Point:
-        unit, reach = direction(k), Number.of(f"{ring}/{2 * (RINGS + 1)}")
-        return Point(center.x + unit.x * reach, center.y + unit.y * reach)
-
-    def edge(k: int) -> Point:
-        unit, half = direction(k), Number.of("1/2")
-        reach = half / max(abs(unit.x), abs(unit.y))
-        return Point(center.x + unit.x * reach, center.y + unit.y * reach)
-
     pleats: list[tuple[Segment, int]] = [
-        ((at(ring, k), at(ring, k + 1)), PLEAT if ring % 2 else -PLEAT)
+        ((corner(ring, k), corner(ring, k + 1)), PLEAT if ring % 2 else -PLEAT)
         for ring in range(1, RINGS + 1)
         for k in range(SIDES)
     ]
     radii: list[Segment] = [
-        (at(ring, k), at(ring + 1, k) if ring < RINGS else edge(k))
+        (
+            corner(ring, k),
+            corner(ring + 1, k) if ring < RINGS else rim(k * 360 // SIDES),
+        )
         for ring in range(1, RINGS + 1)
         for k in range(SIDES)
     ]
