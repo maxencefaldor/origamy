@@ -364,6 +364,69 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
     [Open in 3D](gallery/leaf.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/leaf.py)
 
+-   ![The sunflower example](images/gallery-sunflower.png)
+
+    **[Sunflower](gallery/sunflower.html)** · 2 steps
+
+    A 24-sided disc and the pleats that radiate from its corners to the paper's edges.
+    The pleats gather the paper round the disc, which domes up as the flower's heart while the petals spread.
+
+    [Open in 3D](gallery/sunflower.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/sunflower.py)
+
+-   ![The lotus example](images/gallery-lotus.png)
+
+    **[Lotus](gallery/lotus.html)** · 2 steps
+
+    An octagon and the pleats that radiate from its corners, folding toward 110°.
+    The paper gathers into a cup round the octagon, and the pleats between its corners flare out as petals.
+
+    [Open in 3D](gallery/lotus.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/lotus.py)
+
+-   ![The bell example](images/gallery-bell.png)
+
+    **[Bell](gallery/bell.html)** · 2 steps
+
+    A dodecagon and the pleats that radiate from its corners, folding toward 120°.
+    The dodecagon rises as the bell's crown, and the pleated paper falls round it.
+
+    [Open in 3D](gallery/bell.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bell.py)
+
+-   ![The crown example](images/gallery-crown.png)
+
+    **[Crown](gallery/crown.html)** · 2 steps
+
+    The sunflower's crease pattern, its pleats folding far, toward 150°.
+    They gather the paper into a band round the floor, and the paper's corners rise from it as points.
+
+    [Open in 3D](gallery/crown.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crown.py)
+
+-   ![The fluted dish example](images/gallery-fluted-dish.png)
+
+    **[Fluted dish](gallery/fluted-dish.html)** · 2 steps
+
+    A 24-sided floor whose edge turns as a mountain, so it sinks, ringed by pleats that fold toward 60°.
+    The pleats flute the paper round the floor, as a baking cup's.
+
+    [Open in 3D](gallery/fluted-dish.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fluted_dish.py)
+
+-   ![The star bowl example](images/gallery-star-bowl.png)
+
+    **[Star bowl](gallery/star-bowl.html)** · 2 steps
+
+    A dodecagon sunk in pleats that fold toward 100°.
+    The pleats gather the paper into walls round the floor, and the paper's corners stand out as points.
+
+    [Open in 3D](gallery/star-bowl.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/star_bowl.py)
+
+-   ![The tray example](images/gallery-tray.png)
+
+    **[Tray](gallery/tray.html)** · 2 steps
+
+    A square floor whose edges, carried on to the paper's edges, turn up as walls.
+    Each corner square folds in half along its diagonal, and the corner pinches into a fin.
+
+    [Open in 3D](gallery/tray.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tray.py)
+
 </div>
 
 ## Tessellations
