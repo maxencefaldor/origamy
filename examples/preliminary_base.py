@@ -19,6 +19,4 @@ def fold() -> Paper:
     # Four valleys and two mountains meet at the center; the rising diagonal stays
     # flat, inside the flaps.
     paper.collapse(valleys=[upright, level], mountains=[falling], fixed=("7/8", "5/8"))
-    # Let every fold ease 20° open, as pressed paper does.
-    paper.settle(ease=20)
     return paper

@@ -549,19 +549,17 @@ The bases most traditional models start from: plain folds, collapses and petal f
 
 -   ![The preliminary base example](images/gallery-preliminary-base.png)
 
-    **[Preliminary base](gallery/preliminary-base.html)** · 6 steps
+    **[Preliminary base](gallery/preliminary-base.html)** · 5 steps
 
     Four precreases through the center, collapsed in one step into a square of four flaps.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/preliminary-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/preliminary_base.py)
 
 -   ![The waterbomb base example](images/gallery-waterbomb-base.png)
 
-    **[Waterbomb base](gallery/waterbomb-base.html)** · 5 steps
+    **[Waterbomb base](gallery/waterbomb-base.html)** · 4 steps
 
     Valley diagonals and a mountain midline, collapsed in one step into a triangle.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/waterbomb-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/waterbomb_base.py)
 
@@ -601,11 +599,10 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The window example](images/gallery-window.png)
 
-    **[Window](gallery/window.html)** · 11 steps
+    **[Window](gallery/window.html)** · 10 steps
 
     The corners fold to the center, then each tip folds back to its flap's edge.
     The paper's two colors frame a square pane.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/window.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/window.py)
 
