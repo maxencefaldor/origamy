@@ -270,6 +270,16 @@ Traditional models folded step by step as diagrams teach them, with every crease
 
     [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
 
+-   ![The salt cellar example](images/gallery-salt-cellar.png)
+
+    **[Salt cellar](gallery/salt-cellar.html)** · 15 steps
+
+    The fortune teller before its last fold, with both middle lines creased.
+    Murray and Rigney's *Fun with Paper Folding* of 1928 calls this form the salt cellar.
+    A settle step turns the middle lines toward 100° as mountains and eases every other fold 40°, and the four pockets rise.
+
+    [Open in 3D](gallery/salt-cellar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/salt_cellar.py)
+
 </div>
 
 ## Settled forms
@@ -287,6 +297,15 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
     The sheet twists into a saddle, as it does in the hand.
 
     [Open in 3D](gallery/hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hypar.py)
+
+-   ![The hexagonal hypar example](images/gallery-hexagonal-hypar.png)
+
+    **[Hexagonal hypar](gallery/hexagonal-hypar.html)** · 2 steps
+
+    Six concentric hexagons, pleated alternately, and the spokes to the corners, on hexagonal paper.
+    Six corners pull where a square has four, so the paper settles into a saddle with three rises and three dips.
+
+    [Open in 3D](gallery/hexagonal-hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hexagonal_hypar.py)
 
 -   ![The circular pleat example](images/gallery-circular-pleat.png)
 
@@ -333,15 +352,6 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
--   ![The octagon example](images/gallery-octagon.png)
-
-    **[Octagon](gallery/octagon.html)** · 4 steps
-
-    Each corner folds behind along a cut of 1 - √2/2 from both its edges.
-    The eight sides come out equal, at √2 - 1, so the octagon is regular.
-
-    [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
-
 -   ![The equilateral triangle example](images/gallery-equilateral-triangle.png)
 
     **[Equilateral triangle](gallery/equilateral-triangle.html)** · 5 steps
@@ -352,6 +362,15 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
     [Open in 3D](gallery/equilateral-triangle.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/equilateral_triangle.py)
 
+-   ![The pentagon example](images/gallery-pentagon.png)
+
+    **[Pentagon](gallery/pentagon.html)** · 4 steps
+
+    A regular pentagon whose diagonal spans the square, its sides (√5 - 1)/2, the golden ratio's inverse.
+    Its base lies on the bottom edge and its side corners on the square's sides; the rest folds behind.
+
+    [Open in 3D](gallery/pentagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pentagon.py)
+
 -   ![The hexagon example](images/gallery-hexagon.png)
 
     **[Hexagon](gallery/hexagon.html)** · 8 steps
@@ -360,6 +379,24 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
     Each fold cuts a third from both sides at its corner, so the hexagon is regular.
 
     [Open in 3D](gallery/hexagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hexagon.py)
+
+-   ![The octagon example](images/gallery-octagon.png)
+
+    **[Octagon](gallery/octagon.html)** · 4 steps
+
+    Each corner folds behind along a cut of 1 - √2/2 from both its edges.
+    The eight sides come out equal, at √2 - 1, so the octagon is regular.
+
+    [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
+
+-   ![The dodecagon example](images/gallery-dodecagon.png)
+
+    **[Dodecagon](gallery/dodecagon.html)** · 8 steps
+
+    A regular dodecagon whose incircle touches the square's edges, four of its sides on them.
+    Two slanted sides cut each corner of the square, at 30° and 60°, and fold behind.
+
+    [Open in 3D](gallery/dodecagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dodecagon.py)
 
 </div>
 
