@@ -80,6 +80,15 @@ The build keeps the exact paper as it was before the step.
 Only the simulator, and the viewer's film that plays it, show the settled paper.
 A settle step ends the build: the paper refuses any action after it.
 
+A settle step also eases every fold it does not name, as pressed paper springs open from its creases.
+The `ease` argument names the angle each such fold opens by, in degrees.
+
+```python
+paper.settle(ease=15)
+```
+
+Eased, a model leaves the table's plane: its flaps lift and its layers part, as folded paper does in the hand.
+
 ## Rules
 
 Shaped paper takes shape steps, flexes, tilts and turning over, and no more folds.

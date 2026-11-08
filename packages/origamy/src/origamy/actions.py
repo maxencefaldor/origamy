@@ -72,6 +72,8 @@ class Outcome:
     settle: tuple[tuple[Edge, float], ...] = ()
     """The fold angles, in radians, valleys positive, that settling turns creases
     toward; the simulator alone shows the paper they bend."""
+    ease: float = 0.0
+    """The angle, in radians, by which settling opens every fold it does not name."""
 
 
 def fold(

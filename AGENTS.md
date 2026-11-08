@@ -149,6 +149,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | tilt | An action that turns the whole paper in space about a line on the table |
 | flex | An action that folds creases to angles while the other creases follow as rigid origami |
 | settle step | An action that turns creases toward angles while the simulator lets the paper bend; it ends a build |
+| ease | The angle by which a settle step opens every fold it does not name, as pressed paper springs open |
 | form | Where each face lies in space once shaping turns it: a rigid motion of its place |
 | named move | A collapse that computes its own creases, such as a reverse or petal fold |
 | action, step | What a script asks the paper to do, and an action the paper took |

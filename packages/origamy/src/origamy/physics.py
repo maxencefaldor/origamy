@@ -239,7 +239,7 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     scale = physics.size / float(max(right - left, top - bottom))
     folds: list[tuple[int, Shaped, Shaped]] = []
     for index, step in enumerate(steps[1:], 1):
-        if step.settle:
+        if step.action == "settle":
             continue
         before = Shaped(steps[index - 1].state, steps[index - 1].form)
         reached = Shaped(step.state, step.form)
@@ -251,7 +251,7 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
     )
     stages = [folder.fold(index, before, after) for index, before, after in folds]
     for index, step in enumerate(steps[1:], 1):
-        if step.settle:
+        if step.action == "settle":
             stages.append(folder.settle(index, Shaped(step.state, step.form), step))
     return Folding(folder.mesh, folder.faces, folder.creep, tuple(stages))
 
@@ -389,6 +389,11 @@ class _Folder:
             crease = edge.get(frozenset((f, g)))
             if crease in goals:
                 drives[drive] = goals[crease]
+        # Every other fold eases open, toward the flat paper, by the step's ease.
+        for drive in np.flatnonzero(self.made).tolist():
+            angle = float(self.angles[drive])
+            if drive not in drives and abs(angle) > settling.ease:
+                drives[drive] = angle - math.copysign(settling.ease, angle)
         for drive in drives:
             if not self.made[drive]:
                 self._make(drive)

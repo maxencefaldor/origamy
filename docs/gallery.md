@@ -41,6 +41,15 @@ Models with wings, shaped out of the plane to stand or spread.
 
     [Open in 3D](gallery/swan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swan.py)
 
+-   ![The penguin example](images/gallery-penguin.png)
+
+    **[Penguin](gallery/penguin.html)** · 7 steps
+
+    A kite, its white side up, whose sides stop short of the spine, so a white belly shows between black wings.
+    The feet fold up and the head down, both black, and the penguin stands on its feet.
+
+    [Open in 3D](gallery/penguin.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/penguin.py)
+
 -   ![The butterfly example](images/gallery-butterfly.png)
 
     **[Butterfly](gallery/butterfly.html)** · 12 steps
@@ -77,6 +86,16 @@ Heads and bodies folded flat, then stood up or lifted into relief.
     The tail reverse folds up between the body's layers, and the whale stands on its belly.
 
     [Open in 3D](gallery/whale.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/whale.py)
+
+-   ![The fox face example](images/gallery-fox-face.png)
+
+    **[Fox face](gallery/fox-face.html)** · 8 steps
+
+    A triangle whose corners fold down to the chin, then back up past the head as ears.
+    Each ear's fold runs from the bottom edge to the spine, never across the flap's hinge.
+    The ears lean 25° forward, and the face stands on its chin.
+
+    [Open in 3D](gallery/fox-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fox_face.py)
 
 -   ![The dog face example](images/gallery-dog-face.png)
 
@@ -167,6 +186,16 @@ Paper planes whose wings spread level from the body.
 
     [Open in 3D](gallery/glider.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/glider.py)
 
+-   ![The nakamura lock example](images/gallery-nakamura-lock.png)
+
+    **[Nakamura lock](gallery/nakamura-lock.html)** · 9 steps
+
+    A paper plane whose nose folds down, then whose corners fold to the keel above the nose's tip.
+    The tip folds up over the corners and locks them.
+    The wings stay open, raised in a shallow V about the keel.
+
+    [Open in 3D](gallery/nakamura-lock.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/nakamura_lock.py)
+
 </div>
 
 ## Classics
@@ -187,10 +216,11 @@ Traditional models folded step by step as diagrams teach them, with every crease
 
 -   ![The heart example](images/gallery-heart.png)
 
-    **[Heart](gallery/heart.html)** · 10 steps
+    **[Heart](gallery/heart.html)** · 11 steps
 
     A square on its corner: the top corner folds to the center and the bottom corner up to the top edge.
     The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
+    A settle step eases every fold 15° open, and the heart puffs up as pressed paper does.
 
     [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
 
@@ -211,6 +241,24 @@ Traditional models folded step by step as diagrams teach them, with every crease
     The diagonals, creased first, locate every fold.
 
     [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
+
+</div>
+
+## Settled forms
+
+Crease patterns that no flat state holds: a settle step turns their creases, and the simulator lets the paper bend into a curved form.
+
+<div class="grid cards origamy-cards origamy-gallery" markdown>
+
+-   ![The hyperbolic paraboloid example](images/gallery-hypar.png)
+
+    **[Hyperbolic paraboloid](gallery/hypar.html)** · 2 steps
+
+    Eight concentric squares, pleated alternately, and both diagonals, the Bauhaus exercise.
+    No flat state holds the pleats: a settle step turns each crease toward 100°, and the paper bends.
+    The sheet twists into a saddle, as it does in the hand.
+
+    [Open in 3D](gallery/hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hypar.py)
 
 </div>
 
