@@ -43,8 +43,6 @@ def fold() -> Paper:
         )
         paper.turn_over()
     paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
-    # Let every fold ease 15° open, as pressed paper does.
-    paper.settle(ease=15)
     return paper
 
 

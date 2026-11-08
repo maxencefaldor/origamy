@@ -31,6 +31,4 @@ def fold() -> Paper:
     for ear, tip in ears:
         paper.shape(ear, flap=paper.where(tip), angle=30, layers=2)
     paper.tilt(Line.through(("1/32", 0), (0, "1/32")), flap=("1/2", "1/2"), angle=80)
-    # Let every fold ease 15° open, as pressed paper does.
-    paper.settle(ease=15)
     return paper

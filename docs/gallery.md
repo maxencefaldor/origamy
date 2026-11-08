@@ -24,32 +24,29 @@ Models with wings, shaped out of the plane to stand or spread.
 
 -   ![The flapping bird example](images/gallery-flapping-bird.png)
 
-    **[Flapping bird](gallery/flapping-bird.html)** · 30 steps
+    **[Flapping bird](gallery/flapping-bird.html)** · 29 steps
 
     A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then raised 30° above level.
     Two precreases mark a quarter of the neck, where the head reverse folds.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/flapping-bird.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/flapping_bird.py)
 
 -   ![The swan example](images/gallery-swan.png)
 
-    **[Swan](gallery/swan.html)** · 11 steps
+    **[Swan](gallery/swan.html)** · 10 steps
 
     A kite turned over and folded narrower, then halved along its spine.
     The point reverses up as the neck, and its tip reverses forward as the head.
     The swan stands on its belly, the kite's middle showing at its tail.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/swan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swan.py)
 
 -   ![The penguin example](images/gallery-penguin.png)
 
-    **[Penguin](gallery/penguin.html)** · 8 steps
+    **[Penguin](gallery/penguin.html)** · 7 steps
 
     A kite, its white side up, whose sides stop short of the spine, so a white belly shows between black wings.
     The feet fold up and the head down, both black, and the penguin stands on its feet.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/penguin.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/penguin.py)
 
@@ -65,12 +62,11 @@ Models with wings, shaped out of the plane to stand or spread.
 
 -   ![The cicada example](images/gallery-cicada.png)
 
-    **[Cicada](gallery/cicada.html)** · 10 steps
+    **[Cicada](gallery/cicada.html)** · 9 steps
 
     The semi: a triangle whose corners fold up to its tip, then down past its tail as wings.
     Each wing's fold runs through its flap's corner, so the wings part at the tail.
     Two folds of the head show the paper's back as stripes, and the body's sides turn down 75°.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/cicada.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cicada.py)
 
@@ -84,65 +80,41 @@ Heads and bodies folded flat, then stood up or lifted into relief.
 
 -   ![The whale example](images/gallery-whale.png)
 
-    **[Whale](gallery/whale.html)** · 9 steps
+    **[Whale](gallery/whale.html)** · 8 steps
 
     A kite whose blunt corner folds over as the head, halved along its spine.
     The tail reverse folds up between the body's layers, and the whale stands on its belly.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/whale.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/whale.py)
 
 -   ![The fox face example](images/gallery-fox-face.png)
 
-    **[Fox face](gallery/fox-face.html)** · 9 steps
+    **[Fox face](gallery/fox-face.html)** · 8 steps
 
     A triangle whose corners fold down to the chin, then back up past the head as ears.
     Each ear's fold runs from the bottom edge to the spine, never across the flap's hinge.
     The ears lean 25° forward, and the face stands on its chin.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/fox-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fox_face.py)
 
 -   ![The dog face example](images/gallery-dog-face.png)
 
-    **[Dog face](gallery/dog-face.html)** · 8 steps
+    **[Dog face](gallery/dog-face.html)** · 7 steps
 
     A triangle whose corners fold down as ears, the chin's tip turned up as the nose.
     The ears lift 35° off the face, and the face stands on its chin.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/dog-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dog_face.py)
 
 -   ![The cat face example](images/gallery-cat-face.png)
 
-    **[Cat face](gallery/cat-face.html)** · 10 steps
+    **[Cat face](gallery/cat-face.html)** · 9 steps
 
     A triangle whose corners fold up past its top as ears, square to the head's axis.
     Each ear turns about its side's middle, and the chin's tip tucks behind.
     The ears lean 30° forward, and the face stands on its chin.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/cat-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cat_face.py)
-
--   ![The rabbit face example](images/gallery-rabbit-face.png)
-
-    **[Rabbit face](gallery/rabbit-face.html)** · 10 steps
-
-    The cat face's triangle, its ears turned about points near the chin, so they rise far past the head.
-    The ears lean 15° forward, and the face stands on its chin.
-    A settle step then eases every fold 15° open, and the paper puffs up.
-
-    [Open in 3D](gallery/rabbit-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/rabbit_face.py)
-
--   ![The bear face example](images/gallery-bear-face.png)
-
-    **[Bear face](gallery/bear-face.html)** · 10 steps
-
-    The cat face's triangle, its ears turned about points near the corners, so they just peek past the head.
-    The chin's tip turns up on the front layer as the snout, and the face stands on it.
-    A settle step then eases every fold 15° open, and the paper puffs up.
-
-    [Open in 3D](gallery/bear-face.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bear_face.py)
 
 </div>
 
@@ -163,11 +135,10 @@ Traditional toys and objects, each ending in space.
 
 -   ![The newspaper hat example](images/gallery-newspaper-hat.png)
 
-    **[Newspaper hat](gallery/newspaper-hat.html)** · 9 steps
+    **[Newspaper hat](gallery/newspaper-hat.html)** · 8 steps
 
     A sheet twice as tall as wide, halved, its top corners folded down to the middle.
     Each brim rolls up twice, the front over the corners and the back behind them.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/newspaper-hat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/newspaper_hat.py)
 
@@ -182,20 +153,19 @@ Traditional toys and objects, each ending in space.
 
 -   ![The pinwheel example](images/gallery-pinwheel.png)
 
-    **[Pinwheel](gallery/pinwheel.html)** · 4 steps
+    **[Pinwheel](gallery/pinwheel.html)** · 3 steps
 
     The middle square's sides, the corners' diagonals and four slants, collapsed in one step.
     The pattern turns onto itself a quarter turn, so the four vanes chase each other.
-    A settle step then eases every fold 35° open, and the vanes lift.
 
     [Open in 3D](gallery/pinwheel.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pinwheel.py)
 
 -   ![The envelope example](images/gallery-envelope.png)
 
-    **[Envelope](gallery/envelope.html)** · 5 steps
+    **[Envelope](gallery/envelope.html)** · 4 steps
 
     A square on its corner: its side corners fold to the center, and its bottom corner folds up past it.
-    The top corner folds down over them as the flap, and a settle step eases the folds 10° open.
+    The top corner folds down over them as the flap.
 
     [Open in 3D](gallery/envelope.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/envelope.py)
 
@@ -209,21 +179,19 @@ Paper planes whose wings spread level from the body.
 
 -   ![The paper plane example](images/gallery-paper-plane.png)
 
-    **[Paper plane](gallery/paper-plane.html)** · 15 steps
+    **[Paper plane](gallery/paper-plane.html)** · 14 steps
 
     The classic dart, from A-series paper √2 times as tall as it is wide.
     Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
-    A settle step then eases every fold 15° open, and the paper puffs up.
 
     [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
 
 -   ![The glider example](images/gallery-glider.png)
 
-    **[Glider](gallery/glider.html)** · 16 steps
+    **[Glider](gallery/glider.html)** · 15 steps
 
     A paper plane whose nose folds back onto the corners' feet, so its wings run wide.
     The new corners fold to the keel again, and the wings spread level from the body.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/glider.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/glider.py)
 
@@ -247,21 +215,19 @@ Traditional models folded step by step as diagrams teach them, with every crease
 
 -   ![The tulip example](images/gallery-tulip.png)
 
-    **[Tulip](gallery/tulip.html)** · 4 steps
+    **[Tulip](gallery/tulip.html)** · 3 steps
 
     A triangle whose bottom corners rise past its top as petals, each 22.5° off the flower's axis.
     Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
-    A settle step opens the flower: the petals spread and the cup rounds as the paper bends.
 
     [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
 
 -   ![The heart example](images/gallery-heart.png)
 
-    **[Heart](gallery/heart.html)** · 11 steps
+    **[Heart](gallery/heart.html)** · 10 steps
 
     A square on its corner: the top corner folds to the center and the bottom corner up to the top edge.
     The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
-    A settle step eases every fold 15° open, and the heart puffs up as pressed paper does.
 
     [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
 
@@ -283,16 +249,6 @@ Traditional models folded step by step as diagrams teach them, with every crease
 
     [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
 
--   ![The salt cellar example](images/gallery-salt-cellar.png)
-
-    **[Salt cellar](gallery/salt-cellar.html)** · 15 steps
-
-    The fortune teller before its last fold, with both middle lines creased.
-    Murray and Rigney's *Fun with Paper Folding* of 1928 calls this form the salt cellar.
-    A settle step turns the middle lines toward 100° as mountains and eases every other fold 40°, and the four pockets rise.
-
-    [Open in 3D](gallery/salt-cellar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/salt_cellar.py)
-
 </div>
 
 ## Settled forms
@@ -310,24 +266,6 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
     The sheet twists into a saddle, as it does in the hand.
 
     [Open in 3D](gallery/hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hypar.py)
-
--   ![The triangular hypar example](images/gallery-triangular-hypar.png)
-
-    **[Triangular hypar](gallery/triangular-hypar.html)** · 2 steps
-
-    Seven concentric triangles, pleated alternately, and the spokes to the corners, on equilateral paper.
-    Three corners pull where a square has four, and the paper curls them into a twisted star.
-
-    [Open in 3D](gallery/triangular-hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/triangular_hypar.py)
-
--   ![The pentagonal hypar example](images/gallery-pentagonal-hypar.png)
-
-    **[Pentagonal hypar](gallery/pentagonal-hypar.html)** · 2 steps
-
-    Seven concentric pentagons, pleated alternately, and the spokes to the corners, on pentagonal paper.
-    Five corners pull, and the paper settles into a crown of rises and dips.
-
-    [Open in 3D](gallery/pentagonal-hypar.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pentagonal_hypar.py)
 
 -   ![The hexagonal hypar example](images/gallery-hexagonal-hypar.png)
 
@@ -384,24 +322,6 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
     [Open in 3D](gallery/lotus.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/lotus.py)
 
--   ![The bell example](images/gallery-bell.png)
-
-    **[Bell](gallery/bell.html)** · 2 steps
-
-    A dodecagon and the pleats that radiate from its corners, folding toward 120°.
-    The dodecagon rises as the bell's crown, and the pleated paper falls round it.
-
-    [Open in 3D](gallery/bell.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bell.py)
-
--   ![The crown example](images/gallery-crown.png)
-
-    **[Crown](gallery/crown.html)** · 2 steps
-
-    The sunflower's crease pattern, its pleats folding far, toward 150°.
-    They gather the paper into a band round the floor, and the paper's corners rise from it as points.
-
-    [Open in 3D](gallery/crown.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crown.py)
-
 -   ![The four-pointed star example](images/gallery-star.png)
 
     **[Four-pointed star](gallery/star.html)** · 2 steps
@@ -410,33 +330,6 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
     Four valleys gather the paper between four mountains, which rise as the star's points.
 
     [Open in 3D](gallery/star.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/star.py)
-
--   ![The fluted dish example](images/gallery-fluted-dish.png)
-
-    **[Fluted dish](gallery/fluted-dish.html)** · 2 steps
-
-    A 24-sided floor whose edge turns as a mountain, so it sinks, ringed by pleats that fold toward 60°.
-    The pleats flute the paper round the floor, as a baking cup's.
-
-    [Open in 3D](gallery/fluted-dish.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fluted_dish.py)
-
--   ![The star bowl example](images/gallery-star-bowl.png)
-
-    **[Star bowl](gallery/star-bowl.html)** · 2 steps
-
-    A dodecagon sunk in pleats that fold toward 100°.
-    The pleats gather the paper into walls round the floor, and the paper's corners stand out as points.
-
-    [Open in 3D](gallery/star-bowl.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/star_bowl.py)
-
--   ![The tray example](images/gallery-tray.png)
-
-    **[Tray](gallery/tray.html)** · 2 steps
-
-    A square floor whose edges, carried on to the paper's edges, turn up as walls.
-    Each corner square folds in half along its diagonal, and the corner pinches into a fin.
-
-    [Open in 3D](gallery/tray.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tray.py)
 
 </div>
 
@@ -485,11 +378,10 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
 -   ![The hexagon example](images/gallery-hexagon.png)
 
-    **[Hexagon](gallery/hexagon.html)** · 9 steps
+    **[Hexagon](gallery/hexagon.html)** · 8 steps
 
     The equilateral triangle, its corners folded to its center at height √3/6.
     Each fold cuts a third from both sides at its corner, so the hexagon is regular.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/hexagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/hexagon.py)
 
@@ -521,29 +413,26 @@ The bases most traditional models start from: plain folds, collapses and petal f
 
 -   ![The kite base example](images/gallery-kite-base.png)
 
-    **[Kite base](gallery/kite-base.html)** · 4 steps
+    **[Kite base](gallery/kite-base.html)** · 3 steps
 
     Two edges folded onto a diagonal, each fold bisecting a 45° corner.
     The kite's sharp point holds 45° of paper, and its sides turn at 22.5°.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/kite-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/kite_base.py)
 
 -   ![The blintz base example](images/gallery-blintz-base.png)
 
-    **[Blintz base](gallery/blintz-base.html)** · 5 steps
+    **[Blintz base](gallery/blintz-base.html)** · 4 steps
 
     Each corner folded to the center: a square half the paper's area, two layers thick.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/blintz-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/blintz_base.py)
 
 -   ![The cupboard base example](images/gallery-cupboard-base.png)
 
-    **[Cupboard base](gallery/cupboard-base.html)** · 3 steps
+    **[Cupboard base](gallery/cupboard-base.html)** · 2 steps
 
     Two opposite edges folded to the middle, as a cupboard's doors.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/cupboard-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cupboard_base.py)
 
@@ -608,21 +497,11 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The arrowhead example](images/gallery-arrowhead.png)
 
-    **[Arrowhead](gallery/arrowhead.html)** · 12 steps
+    **[Arrowhead](gallery/arrowhead.html)** · 11 steps
 
     A preliminary base whose front and back flaps fold their edges to the center, as a bird base begins, and stop there.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/arrowhead.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/arrowhead.py)
-
--   ![The pleated fan example](images/gallery-pleated-fan.png)
-
-    **[Pleated fan](gallery/pleated-fan.html)** · 10 steps
-
-    Seven precreases, found by halving, collapse at once into alternate pleats, then the stack folds in half.
-    Last, the pleats open while the stack stays folded, so the paper bends: the simulator settles it into a hand fan.
-
-    [Open in 3D](gallery/pleated-fan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pleated_fan.py)
 
 -   ![The swell example](images/gallery-swell.png)
 
@@ -635,11 +514,10 @@ Models designed with origamy, each a short composition of the same exact actions
 
 -   ![The winglet dart example](images/gallery-winglet-dart.png)
 
-    **[Winglet dart](gallery/winglet-dart.html)** · 17 steps
+    **[Winglet dart](gallery/winglet-dart.html)** · 16 steps
 
     The classic dart, each wingtip turned up square as a winglet.
     Each winglet's crease lies where the paper's edge folds onto the wing's crease.
-    A settle step then eases every fold 20° open, and the paper puffs up.
 
     [Open in 3D](gallery/winglet-dart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/winglet_dart.py)
 

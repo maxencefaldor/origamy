@@ -14,7 +14,7 @@ Coordinates are exact numbers built from the rationals by square roots, so every
 The 22.5° angles of the bird base, the 11.25° creases of a crane, and any angle bisected all stay exact.
 
 The [documentation](https://maxencefaldor.github.io/origamy/) teaches the fold scripts, the actions and the rules.
-The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each example in the 3D viewer: traditional models such as the crane, the swan and the salt cellar, geometric exercises, bases, settled forms such as the hyperbolic paraboloid, and original models.
+The [gallery](https://maxencefaldor.github.io/origamy/gallery/) opens each example in the 3D viewer: traditional models such as the crane, the swan and the fortune teller, geometric exercises, bases, settled forms such as the hyperbolic paraboloid, and original models.
 
 ## Install
 

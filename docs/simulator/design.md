@@ -841,6 +841,16 @@ Phase 6 adds these findings so far:
   Without thickness, the crane folds in its stacking up to its reverse folds, but for two pairs of its second petal fold.
   The whole crane takes about 300 s, four times as long as without orders.
   Its reverse folds stall, and from the second one on, layers misorder.
+- **Orders that leak at their edges.**
+  Each stage now measures how deep its paper passes through itself: the farthest an edge's nearer end lies past a triangle it crosses.
+  Folds rest within 0.3 mm, and the viewer draws each rest in its exact state.
+  Settle steps that eased every fold open crossed by 1 to 6 mm in 18 of 21 models.
+  Pressed flaps sprang out through the layers that closed them.
+  Every order held throughout, its three points on their side.
+  Each crossing triangle straddled the other's plane, its points on the wrong side lying beyond the other's edge, where no order presses.
+  Settling folded layers to named angles crossed too, by 2 to 12 mm, while crease patterns settled on open paper never crossed.
+  Easing is gone, and the gallery plays no film whose settled paper crosses deeper than 0.1 mm.
+  Contact that keeps paper from crossing, at any thickness, is what settling folded layers needs.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

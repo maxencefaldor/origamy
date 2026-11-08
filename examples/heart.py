@@ -37,6 +37,4 @@ def fold() -> Paper:
         ((("1/2", 1), ("5/8", "7/8")), ("19/32", "31/32")),
     ):
         paper.mountain(Line.through(*ends), flap=flap)
-    # Let every fold ease open a little, as pressed paper does: the heart puffs up.
-    paper.settle(ease=15)
     return paper

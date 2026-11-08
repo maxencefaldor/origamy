@@ -68,7 +68,7 @@ paper.tilt(shoulders(paper, (0, 0)), flap=paper.where((1, 0)), angle=90)
 
 ## Settling
 
-A settle step turns creases toward angles and lets the paper bend as it must, as a hand opens a fan.
+A settle step turns creases toward angles and lets the paper bend as it must, as pleats curl a sheet into a saddle.
 The simulator turns the creases and lets the paper settle on the table under its weight, its faces free to bend.
 
 ```python
@@ -81,14 +81,9 @@ Only the simulator, and the viewer's film that plays it, show the settled paper.
 Paper that shaping stood up keeps its pose as it settles: it bends in place rather than falling over.
 A settle step ends the build: the paper refuses any action after it.
 
-A settle step also eases every fold it does not name, as pressed paper springs open from its creases.
-The `ease` argument names the angle each such fold opens by, in degrees.
-
-```python
-paper.settle(ease=15)
-```
-
-Eased, a model leaves the table's plane: its flaps lift and its layers part, as folded paper does in the hand.
+The simulator keeps no thickness, and orders keep its layers in their stacking only at a few points of each triangle.
+Settled layers can therefore pass through each other, so settling suits a crease pattern on open paper.
+Each stage of a simulation measures how deep its paper passes through itself, and the gallery plays no film whose settled paper does.
 
 ## Rules
 
@@ -104,7 +99,7 @@ Shaped paper takes shape steps, flexes, tilts and turning over, and no more fold
 | `settled` | Any action after a settle step |
 
 Shape steps and flexes keep every face rigid.
-A cup's mouth opens only as its paper bends, so a flex that opens it is refused, and a settle step opens it.
+A cup's mouth opens only as its paper bends, so a flex that opens it is refused.
 
 ## In pictures, the viewer and FOLD files
 

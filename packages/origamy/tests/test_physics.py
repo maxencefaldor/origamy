@@ -18,6 +18,7 @@ from origamy.physics import (
     Physics,
     _mesh,
     _widths,
+    crossing,
     simulate,
 )
 from origamy.state import Edge, State
@@ -29,6 +30,8 @@ PHYSICS = Physics()
 # The heights at which paper lies on the table: its half thickness, and a layer.
 LYING = PHYSICS.material.thickness / 2
 LAYER = PHYSICS.material.thickness + PHYSICS.settings.contact.gap
+# The deepest simulated paper may pass through paper: a few sheets of kami.
+CROSSING = 1e-4
 
 
 def example(name: str) -> Paper:
@@ -39,14 +42,16 @@ def example(name: str) -> Paper:
 
 
 def assert_folds_as_its_states(folding: Folding) -> None:
-    """Every fold converges, puts each corner at its place and stacks every pair right.
+    """Every fold converges and ends in its state.
 
-    A corner may creep back where a crease wraps layers. No paper passes below the
-    table on the way.
+    Each corner lies at its place, every pair stacks right, and no paper passes through
+    paper. A corner may creep back where a crease wraps layers. No paper passes below
+    the table on the way.
     """
     for stage in folding.stages:
         assert stage.converged, stage.step
         assert stage.misordered == (), stage.step
+        assert stage.crossing < CROSSING, stage.step
         assert stage.offset < 1e-4 + folding.creep, stage.step
         lowest = min(frame[:, 2].min() for frame in stage.frames)
         assert lowest > LYING - 1e-6, stage.step
@@ -66,6 +71,25 @@ def test_a_model_folds_from_the_flat_sheet_in_its_stacking(
     # The model lies flat on the table, its layers stacked one thickness apart.
     heights = folding.stages[-1].frames[-1][:, 2]
     assert heights.max() < LYING + layers * LAYER + 1e-3
+
+
+def test_crossing_measures_paper_through_paper() -> None:
+    # A triangle on the table, and another standing up through it, 0.1 below it.
+    lying = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    standing = [(0.2, 0.2, -0.1), (0.2, 0.2, 0.3), (0.6, 0.6, 0.3)]
+    points = np.array(lying + standing, dtype=np.float64)
+    triangles = np.array([[0, 1, 2], [3, 4, 5]], dtype=np.int64)
+    assert crossing(points, triangles) == pytest.approx(0.1)
+    # Laid on the first, the second only touches it.
+    points[3:] = [(0.2, 0.2, 1e-9), (0.6, 0.2, 1e-9), (0.2, 0.6, 1e-9)]
+    assert crossing(points, triangles) == 0.0
+
+
+def test_triangles_that_share_a_corner_never_cross() -> None:
+    # Two triangles folded flat onto each other about their shared edge.
+    points = np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 1, 1e-3)], dtype=float)
+    triangles = np.array([[0, 1, 2], [0, 1, 3]], dtype=np.int64)
+    assert crossing(points, triangles) == 0.0
 
 
 def test_a_mountain_fold_folds_up_from_the_turned_over_sheet() -> None:

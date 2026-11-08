@@ -18,5 +18,4 @@ def fold() -> Paper:
     paper.valley(fold_onto((0, 0), ("5/8", "5/8")), flap=("1/32", "1/32"))
     # The top corner folds down over it as the flap.
     paper.valley(fold_onto((1, 1), ("1/2", "1/2")), flap=("31/32", "31/32"))
-    paper.settle(ease=10)
     return paper

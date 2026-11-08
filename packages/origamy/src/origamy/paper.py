@@ -29,9 +29,6 @@ DEFAULT_FRONT = "#c8553d"
 DEFAULT_BACK = "#f2ede4"
 """The color of the paper's back."""
 
-_STRAIGHT = 180
-"""Degrees in a straight angle: a fold pressed flat turns this far."""
-
 _NAMED = 4
 """The most creases a flex's or settle step's description names one by one."""
 
@@ -70,8 +67,6 @@ class Step:
     settle: tuple[tuple[Edge, float], ...] = ()
     """The fold angles, in radians, valleys positive, that a settle step turns creases
     toward, while the paper bends as it must."""
-    ease: float = 0.0
-    """The angle, in radians, by which a settle step opens every other fold."""
 
 
 type CreaseLike = Line | tuple[PointLike, PointLike]
@@ -425,28 +420,21 @@ class Paper:
             named = f"{len(targets)} creases to their angles"
         self._act("flex", f"flex: fold {named}", act)
 
-    def settle(
-        self, angles: Mapping[CreaseLike, Exact] | None = None, *, ease: Exact = 0
-    ) -> None:
+    def settle(self, angles: Mapping[CreaseLike, Exact]) -> None:
         """Turn creases toward angles in degrees, and let the paper bend as it must.
 
         Each crease is named as `flex` names it, and turns its own way: 180 pressed
         flat, 0 open flat, and a negative angle the other way. A crease lying flat
-        turns as a valley. Every other fold opens by ``ease`` degrees, as pressed
-        paper eases out of its creases. Faces need not stay rigid: the simulator
-        turns the creases and lets the paper settle on the table, bent as its
-        stiffness and weight decide. The build keeps the exact paper as it was; only
-        the simulator, and the viewer that plays it, show the settled paper. The
-        paper takes no action after it settles.
+        turns as a valley. Faces need not stay rigid: the simulator turns the creases
+        and lets the paper settle on the table, bent as its stiffness and weight
+        decide. The build keeps the exact paper as it was; only the simulator, and
+        the viewer that plays it, show the settled paper. The paper takes no action
+        after it settles.
         """
         targets = [
             (_crease(crease), Fraction(Number.of(angle).fraction()))
-            for crease, angle in (angles or {}).items()
+            for crease, angle in angles.items()
         ]
-        opening = Fraction(Number.of(ease).fraction())
-        if not 0 <= opening < _STRAIGHT:
-            msg = f"a settle step eases its folds by 0° to under 180°, not {opening}°"
-            raise OrigamyError(msg)
 
         def act(paper: Shaped) -> Outcome:
             state = paper.state
@@ -460,20 +448,13 @@ class Paper:
                     sense = -1 if state.assignment(edge) == "M" else 1
                     goals[edge] = sense * radians(angle)
             return Outcome(
-                state,
-                frozenset(),
-                paper.form,
-                settle=tuple(sorted(goals.items())),
-                ease=radians(opening),
+                state, frozenset(), paper.form, settle=tuple(sorted(goals.items()))
             )
 
-        parts = [f"turn {_describe(c)} toward {a}°" for c, a in targets]
-        if len(parts) > _NAMED:
-            parts = [f"turn {len(targets)} creases toward their angles"]
-        if opening:
-            parts.append(f"ease every other fold open by {opening}°")
-        named = ", ".join(parts) or "let the paper rest"
-        self._act("settle", f"settle: {named}, the paper bending", act)
+        named = ", ".join(f"{_describe(c)} toward {a}°" for c, a in targets)
+        if len(targets) > _NAMED:
+            named = f"{len(targets)} creases toward their angles"
+        self._act("settle", f"settle: turn {named}, the paper bending", act)
 
     def tilt(self, line: Line, flap: PointLike, *, angle: Exact) -> None:
         """Turn the whole paper about ``line`` by ``angle`` degrees, in space.
@@ -605,7 +586,6 @@ class Paper:
                 path=outcome.path,
                 through=outcome.through,
                 settle=outcome.settle,
-                ease=outcome.ease,
             )
         )
 

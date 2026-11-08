@@ -41,6 +41,4 @@ def fold() -> Paper:
     paper.collapse(valleys=valleys, mountains=mountains, fixed=("1/2", "1/2"))
     # Stand the pinwheel up, as on its stick.
     paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/2", "1/2"), angle=80)
-    # Let every fold ease 35° open: the vanes lift and catch the wind.
-    paper.settle(ease=35)
     return paper

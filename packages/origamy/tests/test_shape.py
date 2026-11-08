@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from origamy import Line, OrigamyError, Paper, Point, service
+from origamy import Line, Paper, Point, service
 from origamy.draw import Eye, layers
 from origamy.paper import RefusedError
 from origamy.physics import Physics, simulate
@@ -219,24 +219,3 @@ def test_the_simulator_bends_settled_paper_toward_its_angles() -> None:
     first, last = stage.frames[0], stage.frames[-1]
     assert last[:, 2].max() - last[:, 2].min() > 0.3 * physics.size
     assert last[:, 2].max() > first[:, 2].max()
-
-
-def test_a_settle_step_eases_every_other_fold_open() -> None:
-    paper = book()
-    paper.settle(ease=60)
-    step = paper.steps[-1]
-    assert not step.settle
-    assert isclose(step.ease, pi / 3)
-    physics = Physics(
-        settings=Settings(time_step=inf, table=Table(), contact=Contact(layers=False))
-    )
-    stage = simulate(paper.steps, physics).stages[-1]
-    assert stage.settled
-    # The pressed book springs open by 60°: its top page rises off the bottom one.
-    last = stage.frames[-1]
-    assert last[:, 2].max() - last[:, 2].min() > 0.3 * physics.size
-
-
-def test_a_settle_step_eases_by_under_a_straight_angle() -> None:
-    with pytest.raises(OrigamyError):
-        book().settle(ease=180)

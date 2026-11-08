@@ -32,7 +32,8 @@ the side the stacking the fold reaches gives it.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
 measure gives how far each face's corners lie from their places in that state, and
-which overlapping faces stack the other way round.
+which overlapping faces stack the other way round. Every stage also measures how deep
+the paper passes through itself where it ends.
 """
 
 import itertools
@@ -210,6 +211,14 @@ class Stage:
     A pair misorders where its upper face lies below the lower one by more than half the
     thickness contact keeps between layers.
     """
+    crossing: float = 0.0
+    """The deepest the simulated paper passes through itself where the fold ends, in
+    meters.
+
+    An edge of the mesh passes through a triangle where it crosses the triangle's plane
+    inside it, the two sharing no corner. The depth is how far the edge's nearer end
+    lies from that plane, so layers that touch cross by nothing.
+    """
     settled: bool = False
     """Whether the stage settles the paper, bent, away from any exact state."""
 
@@ -254,6 +263,61 @@ def simulate(steps: Sequence[Step], physics: Physics | None = None) -> Folding:
         if step.action == "settle":
             stages.append(folder.settle(index, Shaped(step.state, step.form), step))
     return Folding(folder.mesh, folder.faces, folder.creep, tuple(stages))
+
+
+_CHUNK: Final = 256
+"""The edges a crossing test takes at once, each against every triangle."""
+
+
+def crossing(points: NDArray[np.float64], triangles: NDArray[np.int64]) -> float:
+    """The deepest a mesh passes through itself, in the units of its points.
+
+    An edge passes through a triangle where it crosses the triangle's plane inside it,
+    the two sharing no corner. The depth is how far the edge's nearer end lies from that
+    plane, so layers that touch cross by nothing. Returns 0 for a mesh that never passes
+    through itself.
+    """
+    edges = np.unique(np.sort(triangles[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2)), axis=0)
+    corners = points[triangles]
+    normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    low, high = corners.min(axis=1), corners.max(axis=1)
+    deepest = 0.0
+    for chunk in np.array_split(edges, max(1, len(edges) // _CHUNK)):
+        ends = points[chunk]
+        # Only an edge and a triangle whose boxes overlap can meet.
+        meet = np.all(
+            (ends.min(axis=1)[:, None] <= high) & (ends.max(axis=1)[:, None] >= low),
+            axis=2,
+        )
+        e, t = np.nonzero(meet)
+        shared = (triangles[t, :, None] == chunk[e, None, :]).any(axis=(1, 2))
+        e, t = e[~shared], t[~shared]
+        a, b, origin, normal = ends[e, 0], ends[e, 1], corners[t, 0], normals[t]
+        heights = np.stack(
+            [np.einsum("ij,ij->i", end - origin, normal) for end in (a, b)], axis=1
+        )
+        across = heights[:, 0] * heights[:, 1] < 0
+        a, b, heights, t = a[across], b[across], heights[across], t[across]
+        share = heights[:, 0] / (heights[:, 0] - heights[:, 1])
+        hit = a + share[:, None] * (b - a)
+        inside = np.all(_barycentric(hit, corners[t]) > 0, axis=1)
+        if inside.any():
+            deepest = max(deepest, float(np.abs(heights[inside]).min(axis=1).max()))
+    return deepest
+
+
+def _barycentric(
+    points: NDArray[np.float64], corners: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Each point's barycentric weights in its triangle, in the triangle's plane."""
+    u, v = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
+    w = points - corners[:, 0]
+    uu, uv, vv = (np.einsum("ij,ij->i", p, q) for p, q in ((u, u), (u, v), (v, v)))
+    wu, wv = np.einsum("ij,ij->i", w, u), np.einsum("ij,ij->i", w, v)
+    area = uu * vv - uv * uv
+    second, third = (vv * wu - uv * wv) / area, (uu * wv - uv * wu) / area
+    return np.column_stack([1 - second - third, second, third])
 
 
 class _Folder:
@@ -371,6 +435,7 @@ class _Folder:
             iterations,
             offset,
             misordered,
+            crossing(frames[-1], self.mesh.triangles),
         )
 
     def settle(self, step: int, shaped: Shaped, settling: Step) -> Stage:
@@ -389,11 +454,6 @@ class _Folder:
             crease = edge.get(frozenset((f, g)))
             if crease in goals:
                 drives[drive] = goals[crease]
-        # Every other fold eases open, toward the flat paper, by the step's ease.
-        for drive in np.flatnonzero(self.made).tolist():
-            angle = float(self.angles[drive])
-            if drive not in drives and abs(angle) > settling.ease:
-                drives[drive] = angle - math.copysign(settling.ease, angle)
         for drive in drives:
             if not self.made[drive]:
                 self._make(drive)
@@ -428,6 +488,7 @@ class _Folder:
             iterations,
             0.0,
             (),
+            crossing(frames[-1], self.mesh.triangles),
             settled=True,
         )
 

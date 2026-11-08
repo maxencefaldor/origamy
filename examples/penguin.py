@@ -26,6 +26,4 @@ def fold() -> Paper:
     paper.valley(fold_onto(head, ("1/4", "3/4")), flap=("1/64", "31/32"), layers=1)
     # Stand the penguin on its feet.
     paper.tilt(Line.through(("7/8", 0), (1, "1/8")), flap=("1/2", "1/2"), angle=85)
-    # Let every fold ease 15° open, as pressed paper does.
-    paper.settle(ease=15)
     return paper

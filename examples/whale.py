@@ -28,6 +28,4 @@ def fold() -> Paper:
     )
     # Stand the whale on its belly, the fold along the spine.
     paper.tilt(spine, flap=("1/2", "3/4"), angle=90)
-    # Let every fold ease 15° open, as pressed paper does.
-    paper.settle(ease=15)
     return paper

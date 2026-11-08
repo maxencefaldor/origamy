@@ -338,8 +338,8 @@ class Stage {
     this.scene.add(this.paper);
     this.line = null;
     this.materials = {
-      front: new THREE.MeshStandardMaterial({ color: build.paper.front, side: THREE.FrontSide, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
-      back: new THREE.MeshStandardMaterial({ color: build.paper.back, side: THREE.BackSide, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+      front: new THREE.MeshStandardMaterial({ color: build.paper.front, side: THREE.FrontSide, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: 1 }),
+      back: new THREE.MeshStandardMaterial({ color: build.paper.back, side: THREE.BackSide, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: 1 }),
       edge: new THREE.LineBasicMaterial({ color: "#3a3a3a" }),
       lit: new THREE.LineBasicMaterial({ color: "#e0182d" }),
       fold: new THREE.LineDashedMaterial({ color: "#2c6fbb", dashSize: 0.02, gapSize: 0.014 }),

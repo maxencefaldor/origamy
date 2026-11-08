@@ -14,6 +14,4 @@ def fold() -> Paper:
     paper.precrease(Line.through(point, blunt), flap=("3/4", "1/4"))
     paper.valley(bisect((1, 0), point, blunt), flap=("15/16", "1/4"))
     paper.valley(bisect((0, 1), point, blunt), flap=("1/4", "15/16"))
-    # Let every fold ease 20° open, as pressed paper does.
-    paper.settle(ease=20)
     return paper

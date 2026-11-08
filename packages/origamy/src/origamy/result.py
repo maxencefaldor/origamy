@@ -152,12 +152,6 @@ class StepData(_Data):
         description="The creases a settle step turns, as their two vertices, and the "
         "fold angle in radians, valleys positive, each turns toward.",
     )
-    ease: float = Field(
-        default=0.0,
-        ge=0,
-        description="The angle in radians by which a settle step opens every other "
-        "fold.",
-    )
 
     @classmethod
     def of(cls, step: Step, root: Path) -> Self:
@@ -190,7 +184,6 @@ class StepData(_Data):
             path=tuple(form.motions for form in step.path),
             through=StateData.of(step.through) if step.through else None,
             settle=tuple((u, v, angle) for (u, v), angle in step.settle),
-            ease=step.ease,
         )
 
     def step(self) -> Step:
@@ -221,7 +214,6 @@ class StepData(_Data):
             tuple(Form(motions) for motions in self.path),
             self.through.state() if self.through else None,
             tuple(((u, v), angle) for u, v, angle in self.settle),
-            self.ease,
         )
 
 

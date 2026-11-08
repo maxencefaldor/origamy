@@ -19,6 +19,9 @@
   --origamy-terminal: #1b1a18;
   --origamy-terminal-ink: #ece7de;
 
+  /* The viewer's studio, a soft room behind the paper, which a card's image floats in. */
+  --origamy-studio: radial-gradient(ellipse at 50% 40%, #fbfaf7 0%, #ece8e0 70%, #e2ddd3 100%);
+
   /* A card's top edge is a strip of the front, and its top right corner folds down to show the back. */
   --origamy-band: 6px;
   --origamy-fold: 22px;
@@ -354,10 +357,10 @@
 }
 
 /*
- * A card with an image is a row: the image's 4:3 frame on the left sets the card's height, and the text, kept
- * short enough to fit, centers on the right. Text that runs taller stretches the frame, so the image's panel
- * still reaches the card's bottom. The rows stack in one column, so any number of cards lines up; on a phone
- * the image goes on top.
+ * A card with an image is a row: the 4:3 image on the left sets the card's height, and the text, kept short
+ * enough to fit, centers on the right. The image has no backdrop of its own: its frame paints the viewer's
+ * studio, so text that runs taller only stretches the studio round the image. The rows stack in one column,
+ * so any number of cards lines up; on a phone the image goes on top.
  */
 .md-typeset .grid.cards.origamy-cards {
   grid-template-columns: minmax(0, 1fr);
@@ -384,21 +387,16 @@
   display: flex;
   grid-row: 1 / -1;
   grid-column: 1;
-  align-self: stretch;
   align-items: center;
-  justify-content: center;
   margin: 0;
-  aspect-ratio: 4 / 3;
-  overflow: hidden;
-  background: var(--origamy-panel);
+  background: var(--origamy-studio);
   border-right: 1px solid var(--origamy-line);
 }
 
 .md-typeset .grid.cards.origamy-cards > ul > li > p:first-child img {
   width: 100%;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
+  aspect-ratio: 4 / 3;
+  background: none;
   border: 0;
   border-radius: 0;
 }
