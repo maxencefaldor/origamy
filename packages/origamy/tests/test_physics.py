@@ -276,15 +276,8 @@ def test_creases_a_fold_turns_in_one_line_share_one_band() -> None:
     paper.precrease(Line.through((0, "1/4"), (1, "1/4")), flap=("1/2", "1/8"))
     paper.valley(Line.through((0, "1/8"), (1, "1/8")), flap=("1/2", "1/16"))
     paper.valley(UPRIGHT, flap=("3/4", "1/2"))
-    folds = [
-        (before, after)
-        for before, step in itertools.pairwise(paper.steps)
-        for before, after in itertools.pairwise(
-            (before.state, *((step.through,) if step.through else ()), step.state)
-        )
-    ]
     last = paper.steps[-1].state
-    widths = _widths(folds, last, LAYER)
+    widths = _widths(folds(paper), last, LAYER)
     on = {
         tuple(sorted(float(last.vertices[v].y) for v in edge)): edge
         for edge in last.creases
@@ -296,6 +289,39 @@ def test_creases_a_fold_turns_in_one_line_share_one_band() -> None:
     assert widths[on[0.125, 0.25]] == pytest.approx(wrapping)
     assert widths[on[0.25, 1.0]] == pytest.approx(wrapping)
     assert on[0.0, 0.125] not in widths
+
+
+def test_a_crease_wraps_the_most_layers_anywhere_along_it() -> None:
+    # The newspaper hat's front brim rolls up twice over its corners, folded down.
+    paper = Paper(1, 2)
+    paper.valley(Line.through((0, 1), (1, 1)), flap=("1/2", "7/4"))
+    top = ("1/2", 1)
+    paper.valley(Line.through(top, (0, "1/2")), flap=("1/16", "15/16"))
+    paper.valley(Line.through(top, (1, "1/2")), flap=("15/16", "15/16"))
+    low, high = (Line.through((0, y), (1, y)) for y in ("1/4", "1/2"))
+    paper.valley(low, flap=("1/2", "1/8"), layers=1)
+    paper.valley(high, flap=("1/2", "3/8"), layers=2)
+    last = paper.steps[-1].state
+    widths = _widths(folds(paper), last, LAYER)
+    (brim,) = (
+        edge
+        for edge in last.creases
+        if all(last.vertices[v].y == Fraction(3, 2) for v in edge)
+    )
+    # The corners meet over the middle of the brim's second crease. Beside it, the
+    # crease wraps both layers of a corner and the strip the first roll turned in.
+    assert widths[brim] == pytest.approx(2 * math.pi * LAYER)
+
+
+def folds(paper: Paper) -> list[tuple[State, State]]:
+    """Each fold of a paper's steps: from one state to the next it passes through."""
+    return [
+        (before, after)
+        for before, step in itertools.pairwise(paper.steps)
+        for before, after in itertools.pairwise(
+            (before.state, *((step.through,) if step.through else ()), step.state)
+        )
+    ]
 
 
 def test_paper_turned_both_up_and_down_folds_lifted_off_the_table() -> None:

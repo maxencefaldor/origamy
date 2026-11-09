@@ -40,19 +40,16 @@ import itertools
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from fractions import Fraction
+from functools import cmp_to_key
 from typing import Annotated, Final
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
 
-from origamy.actions import stack_at
 from origamy.errors import OrigamyError
-from origamy.field import Number
 from origamy.flex import path
 from origamy.geometry import (
-    HALF,
     Isometry,
     Point,
     bounds,
@@ -904,33 +901,92 @@ def _lined(before: State, after: State, last: State) -> list[tuple[Edge, Edge, b
 def _wraps(folds: Sequence[tuple[State, State]], last: State) -> dict[Edge, int]:
     """The creases of the last pattern that fold round other layers.
 
-    Each takes the most layers it wraps in any fold.
+    Each takes the most layers it wraps anywhere along it, in any fold.
     """
+    corners = np.array([p.floats() for p in last.vertices])
     wraps: dict[Edge, int] = {}
     for _, after in folds:
+        footprints = _Footprints(after)
         parents = after.parents(last)
         for edge, (f, g) in sorted(last.creases.items()):
             pf, pg = parents[f], parents[g]
             if pf == pg or after.sense(pf, pg) == "F":
                 continue
-            stack = stack_at(after, _beside(after, last, edge, pf))
-            if pf in stack and pg in stack:
-                layers = abs(stack.index(pf) - stack.index(pg)) - 1
-                if layers > wraps.get(edge, 0):
-                    wraps[edge] = layers
+            for point in footprints.beside(corners[list(edge)], pf):
+                stack = footprints.stack(point)
+                if pf in stack and pg in stack:
+                    layers = abs(stack.index(pf) - stack.index(pg)) - 1
+                    if layers > wraps.get(edge, 0):
+                        wraps[edge] = layers
     return wraps
 
 
-_NUDGE: Final = Number.of(Fraction(1, 2**20))
+_NUDGE: Final = 2.0**-20
 """How far beside a folded crease, as a share of the way to its face's center, the
 layers it wraps are counted."""
 
+_CLOSE: Final = 1e-12
+"""The distance, in the paper's units, within which a point of folded paper lies on a
+line."""
 
-def _beside(after: State, last: State, edge: Edge, face: int) -> Point:
-    """A point just beside a folded crease of the last pattern, over one face."""
-    a, b = (last.vertices[v] for v in edge)
-    middle = after.faces[face].place((a + b) * HALF)
-    return middle + (center(after.folded[face]) - middle) * _NUDGE
+
+class _Footprints:
+    """A state's footprints in floats, which count the layers beside its creases."""
+
+    def __init__(self, state: State) -> None:
+        self.state = state
+        footprints = [np.array(polygon) for polygon in state.folded_floats]
+        self.starts = np.concatenate(footprints)
+        """The first corner of each side of each footprint, footprint by footprint."""
+        ends = np.concatenate(
+            [np.roll(footprint, -1, axis=0) for footprint in footprints]
+        )
+        self.sides = ends - self.starts
+        """Each side, from its first corner to its last."""
+        self.firsts = np.cumsum([0, *map(len, footprints[:-1])])
+        """Where each footprint's sides start among them."""
+        self.centers = [footprint.mean(axis=0) for footprint in footprints]
+        """A point inside each footprint."""
+
+    def beside(
+        self, crease: NDArray[np.float64], face: int
+    ) -> list[NDArray[np.float64]]:
+        """Points just beside a folded crease, over a face that holds it.
+
+        ``crease`` gives the crease's two ends unfolded, which the face's place folds.
+        The footprints' sides cut the crease into pieces, with the same layers beside
+        each piece. One point lies beside the middle of each piece.
+        """
+        motion = np.array(embedding(self.state.faces[face].place))
+        a, b = crease @ motion[:9].reshape(3, 3)[:2, :2].T + motion[9:11]
+        along, starts, sides = b - a, self.starts, self.sides
+        across = _crosses(along, sides)
+        length = np.linalg.norm(along)
+        meets = np.abs(across) > _CLOSE * length * np.linalg.norm(sides, axis=1)
+        across = np.where(meets, across, 1.0)
+        on = _crosses(starts - a, along) / across
+        cuts = [
+            [0.0, 1.0],
+            (_crosses(starts - a, sides) / across)[meets & (on >= 0) & (on <= 1)],
+        ]
+        # A side along the crease's line cuts it at its ends.
+        lying = ~meets & (np.abs(_crosses(along, starts - a)) < _CLOSE * length)
+        starts, sides = starts[lying], sides[lying]
+        cuts += [(ends - a) @ along / length**2 for ends in (starts, starts + sides)]
+        shares = np.unique(np.clip(np.concatenate(cuts), 0.0, 1.0))
+        middles = a + np.outer((shares[1:] + shares[:-1]) / 2, along)
+        return list(middles + (self.centers[face] - middles) * _NUDGE)
+
+    def stack(self, point: NDArray[np.float64]) -> list[int]:
+        """The faces whose footprints hold a point inside them, from the top down."""
+        lengths = np.linalg.norm(self.sides, axis=1)
+        depths = _crosses(self.sides, point - self.starts) / lengths
+        inside = np.minimum.reduceat(depths, self.firsts) > _CLOSE
+
+        def order(f: int, g: int) -> int:
+            return -1 if self.state.is_above(f, g) else 1
+
+        return sorted(np.flatnonzero(inside).tolist(), key=cmp_to_key(order))
 
 
 @dataclass(frozen=True)
@@ -1392,6 +1448,11 @@ def _depths(
     inward *= np.sign(areas)[:, None, None]
     offsets = points[:, None, None, :] - polygons[None]
     return np.einsum("nmkd,mkd->nmk", offsets, inward).min(axis=2)
+
+
+def _crosses(u: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The cross products of vectors of the plane, row by row."""
+    return u[..., 0] * v[..., 1] - u[..., 1] * v[..., 0]
 
 
 def _cross(u: NDArray[np.float64], v: NDArray[np.float64]) -> float:
