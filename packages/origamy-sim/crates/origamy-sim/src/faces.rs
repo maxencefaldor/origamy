@@ -310,8 +310,32 @@ fn triangulate(
             cdt.add_constraint(from, to);
         }
     }
+    // A frame around the faces keeps their outline off the triangulation's convex hull. The
+    // refinement splits the outline's edges at points a rounding error off their lines, so
+    // the outline need not stay convex, and points that join on it later must not fall
+    // outside the hull. The frame's triangles lie outside every face, and drop out.
+    let [x0, y0, x1, y1] = named.iter().zip(points).filter(|(n, _)| **n).fold(
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ],
+        |[x0, y0, x1, y1], (_, &[x, y])| [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
+    );
+    let margin = FRAME * (x1 - x0).max(y1 - y0);
+    let [x0, y0, x1, y1] = [x0 - margin, y0 - margin, x1 + margin, y1 + margin];
+    if !faces.is_empty() {
+        for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
+            cdt.insert(Point2::new(x, y))
+                .expect("a corner of a frame around finite points is finite");
+        }
+    }
     Ok((cdt, handles))
 }
+
+/// How far the frame around the faces lies outside them, as a share of their size.
+const FRAME: f64 = 0.05;
 
 /// The distance within which a point lies on a face's edge, in meters.
 const ON_EDGE: f64 = 1e-9;
@@ -434,29 +458,28 @@ fn join(cdt: &mut Cdt, from: FixedVertexHandle, to: FixedVertexHandle, length: f
 /// The vertices along a chain of constraint edges, with the points that split it since it
 /// joined.
 ///
-/// Each step from a vertex follows the constraint edge that heads most nearly toward the
-/// chain's next vertex.
+/// Each step from a vertex follows a constraint edge onward along the line to the chain's
+/// next vertex: of the constraint edges that lead further along it, the one whose end lies
+/// nearest the line. Every step leads further along, so the walk ends.
 fn walk(cdt: &Cdt, chain: &[usize]) -> Vec<usize> {
     let mut walked = vec![chain[0]];
     for pair in chain.windows(2) {
-        let target = cdt
-            .vertex(FixedVertexHandle::from_index(pair[1]))
-            .position();
+        let [start, target] =
+            [pair[0], pair[1]].map(|v| cdt.vertex(FixedVertexHandle::from_index(v)).position());
+        let (dx, dy) = (target.x - start.x, target.y - start.y);
+        let along = |p: Point2<f64>| (p.x - start.x) * dx + (p.y - start.y) * dy;
+        let off = |p: Point2<f64>| ((p.x - start.x) * dy - (p.y - start.y) * dx).abs();
         let mut current = FixedVertexHandle::from_index(pair[0]);
         while current.index() != pair[1] {
-            let here = cdt.vertex(current).position();
-            let (dx, dy) = (target.x - here.x, target.y - here.y);
-            let heading = |p: Point2<f64>| {
-                let (ex, ey) = (p.x - here.x, p.y - here.y);
-                (ex * dx + ey * dy) / (ex.hypot(ey) * dx.hypot(dy))
-            };
+            let reached = along(cdt.vertex(current).position());
             let next = cdt
                 .vertex(current)
                 .out_edges()
                 .filter(|edge| edge.as_undirected().is_constraint_edge())
                 .map(|edge| edge.to())
-                .max_by(|a, b| heading(a.position()).total_cmp(&heading(b.position())))
-                .expect("a vertex of a chain has constraint edges");
+                .filter(|vertex| along(vertex.position()) > reached)
+                .min_by(|a, b| off(a.position()).total_cmp(&off(b.position())))
+                .expect("a chain runs on along constraint edges to its next vertex");
             current = next.fix();
             walked.push(current.index());
         }
@@ -777,6 +800,91 @@ mod tests {
                 .map(|(p, q)| (q[0] - p[0]).hypot(q[1] - p[1]))
                 .fold(0.0, f64::max);
             assert!(doubled > ON_EDGE * longest, "triangle {t:?} is a sliver");
+        }
+    }
+
+    #[test]
+    fn points_joining_on_an_outline_the_refinement_bent_leave_a_valid_mesh() {
+        // Two faces meet along a crease at 60° to the paper's top edge, as an equilateral
+        // triangle's do. The refinement splits the top edge at points a rounding error above
+        // it. Two points join after it: one on that edge, one beside the crease.
+        let points = [
+            [0.0, 0.15],
+            [0.075, 0.15],
+            [0.075, 0.129_903_810_567_665_78],
+            [0.0, 0.129_903_810_567_665_78],
+            [0.063_397_459_621_556_14, 0.15],
+            [0.0735, 0.132_501_886_779_019_1],
+            [0.07125, 0.136_399_001_096_049_08],
+            [0.067_147_459_621_556_13, 0.143_504_809_471_616_7],
+            [0.064_897_459_621_556_14, 0.147_401_923_788_646_67],
+            [0.063_495_404_787_224_79, 0.15],
+            [0.073_646_917_748_502_97, 0.132_586_709_780_666_03],
+        ];
+        let faces = vec![vec![2, 1, 4, 8, 7, 6, 5], vec![2, 5, 6, 7, 8, 4, 0, 3]];
+        let refinement = Refinement {
+            min_area: 6.25e-6,
+            ..Refinement::of_area(4e-4)
+        };
+        let meshed = Faces::new(&points, &faces, &[], refinement).unwrap();
+        let rest = meshed.mesh.rest();
+        let doubled = |[a, b, c]: [[f64; 2]; 3]| {
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        };
+        // No triangle holds a vertex inside it, and the triangles cover the faces exactly.
+        let mut area = 0.0;
+        for t in meshed.mesh.triangles() {
+            let corners = t.map(|v| rest[v as usize]);
+            area += 0.5 * doubled(corners);
+            for (v, &p) in rest.iter().enumerate() {
+                let [a, b, c] = corners;
+                let inside = [[a, b, p], [b, c, p], [c, a, p]].map(|s| doubled(s) > 0.0);
+                assert!(
+                    t.contains(&Vertex::try_from(v).unwrap()) || inside.contains(&false),
+                    "vertex {v} lies inside triangle {t:?}"
+                );
+            }
+        }
+        let faces_area: f64 = faces.iter().map(|f| polygon_area(&points, f)).sum();
+        assert!(
+            (area - faces_area).abs() < 1e-15,
+            "the triangles cover {area}"
+        );
+    }
+
+    #[test]
+    fn a_line_slanting_onto_an_edge_runs_along_its_chain_to_its_end() {
+        // A band's line beside a crease at 60° to the paper's top edge, from inside the face
+        // to a point the face does not name on that edge, as an equilateral triangle's has.
+        let points = [
+            [0.075, 0.15],
+            [0.075, 0.129_903_810_567_665_78],
+            [0.063_397_459_621_556_14, 0.15],
+            [0.0735, 0.132_501_886_779_019_1],
+            [0.07125, 0.136_399_001_096_049_08],
+            [0.067_147_459_621_556_13, 0.143_504_809_471_616_7],
+            [0.064_897_459_621_556_14, 0.147_401_923_788_646_67],
+            [0.064_970_918_495_807_63, 0.147_444_335_289_470_12],
+            [0.063_495_404_787_224_79, 0.15],
+        ];
+        let faces = vec![vec![1, 0, 2, 6, 5, 4, 3]];
+        let refinement = Refinement {
+            min_area: 6.25e-6,
+            ..Refinement::of_area(4e-4)
+        };
+        let meshed = Faces::new(&points, &faces, &[[7, 8]], refinement).unwrap();
+        // The chain runs from the line's start to its end, every vertex on the line and
+        // further along it than the one before.
+        let rest = meshed.mesh.rest();
+        let chain = &meshed.lines[0];
+        assert_eq!((chain[0], chain[chain.len() - 1]), (7, 8));
+        let [a, b] = [points[7], points[8]];
+        let along = |p: [f64; 2]| (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1]);
+        for pair in chain.windows(2) {
+            let [p, q] = [rest[pair[0] as usize], rest[pair[1] as usize]];
+            assert!(along(q) > along(p), "the chain turns back at {q:?}");
+            let off = (q[0] - a[0]) * (b[1] - a[1]) - (q[1] - a[1]) * (b[0] - a[0]);
+            assert!(off.abs() < 1e-15, "{q:?} lies off the line");
         }
     }
 
