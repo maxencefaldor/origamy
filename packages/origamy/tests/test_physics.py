@@ -16,6 +16,7 @@ from origamy.geometry import HALF
 from origamy.physics import (
     Folding,
     Physics,
+    _Folder,
     _mesh,
     _widths,
     crossing,
@@ -311,6 +312,15 @@ def test_a_crease_wraps_the_most_layers_anywhere_along_it() -> None:
     # The corners meet over the middle of the brim's second crease. Beside it, the
     # crease wraps both layers of a corner and the strip the first roll turned in.
     assert widths[brim] == pytest.approx(2 * math.pi * LAYER)
+
+
+def test_every_span_turns_the_paper_across_its_band() -> None:
+    # The swan's neck folds where bands meet at a point, whose far lines there lie
+    # beside the near ones.
+    paper = example("swan")
+    folder = _Folder(paper.steps[-1].state, folds(paper), PHYSICS.size, PHYSICS)
+    # The core takes each span only with a direction across the band from its edge.
+    assert len(folder.spans) > 0
 
 
 def folds(paper: Paper) -> list[tuple[State, State]]:

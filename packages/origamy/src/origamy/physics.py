@@ -1377,7 +1377,7 @@ def _spans(
 
     Each edge of the near line, with the triangle beyond it, gives a span. The span's
     far direction runs from the far line into the triangle beyond it, across from the
-    edge.
+    edge, from the nearest edge of the far line whose triangle lies across.
     ``crease`` is a point of the band's crease.
     """
     rest = mesh.rest
@@ -1406,22 +1406,25 @@ def _spans(
             (a, b) if _cross(rest[b] - rest[a], rest[c] - rest[a]) > 0 else (b, a)
         )
         middle = 0.5 * (rest[a] + rest[b])
-        p, q, r = min(
-            others,
-            key=lambda o: float(
-                np.linalg.norm(0.5 * (rest[o[0]] + rest[o[1]]) - middle)
-            ),
-        )
-        # The far direction runs as square across the band as the triangle lets it.
         along = (rest[end] - rest[start]) / np.linalg.norm(rest[end] - rest[start])
-        foot = min(
-            (p, q),
-            key=lambda v: (
-                abs(float((rest[r] - rest[v]) @ along))
-                / float(np.linalg.norm(rest[r] - rest[v]))
-            ),
-        )
-        stencils.append((start, end, c, foot, r))
+        found = []
+        for p, q, r in others:
+            # The far direction runs as square across the band as the triangle lets it.
+            foot = min(
+                (p, q),
+                key=lambda v, r=r: (
+                    abs(float((rest[r] - rest[v]) @ along))
+                    / float(np.linalg.norm(rest[r] - rest[v]))
+                ),
+            )
+            # It runs to the edge's right, away from the triangle at the edge. Where a
+            # band's lines meet at a point, a far triangle can lie on the near side.
+            if _cross(along, rest[r] - rest[foot]) < 0:
+                distance = np.linalg.norm(0.5 * (rest[p] + rest[q]) - middle)
+                found.append((float(distance), foot, r))
+        if found:
+            _, foot, r = min(found)
+            stencils.append((start, end, c, foot, r))
     return stencils
 
 
