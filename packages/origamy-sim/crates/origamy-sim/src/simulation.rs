@@ -19,7 +19,7 @@ use crate::contact::{self, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
-use crate::energy::{Point, Project};
+use crate::energy::{Point, ProjectMoving};
 use crate::parameter::{ParameterError, finite};
 use crate::settings::Settings;
 use crate::sheet::{Order, Sheet, SheetError};
@@ -2128,10 +2128,10 @@ impl Derivatives {
         }
         scatter_elements(&self.pairs, assembly, projected);
         scatter_elements(&self.orders, assembly, projected);
-        scatter_elements(&self.friction, assembly, false);
-        scatter_elements(&self.drag, assembly, false);
+        scatter_exact(&self.friction, assembly);
+        scatter_exact(&self.drag, assembly);
         scatter_elements(&self.triangles, assembly, projected);
-        scatter_elements(&self.plates, assembly, false);
+        scatter_exact(&self.plates, assembly);
         scatter_elements(&self.dihedrals, assembly, projected);
         scatter_elements(&self.spans, assembly, projected);
     }
@@ -2181,17 +2181,29 @@ fn gather<const N: usize, const D: usize>(elements: &[Element<N, D>], gradient: 
     }
 }
 
+/// Fills an assembly with elements whose Hessians need no projection.
+fn scatter_exact<const N: usize, const D: usize>(
+    elements: &[Element<N, D>],
+    assembly: &mut Assembly,
+) {
+    for (stencil, gradient, hessian) in elements {
+        assembly.add(stencil, gradient, hessian);
+    }
+}
+
 /// Fills an assembly with elements, their Hessians projected in parallel when `projected`.
 fn scatter_elements<const N: usize, const D: usize>(
     elements: &[Element<N, D>],
     assembly: &mut Assembly,
     projected: bool,
 ) where
-    SMatrix<f64, D, D>: Project,
+    SMatrix<f64, D, D>: ProjectMoving,
 {
     if projected {
-        let hessians: Vec<SMatrix<f64, D, D>> =
-            elements.par_iter().map(|(_, _, h)| h.project()).collect();
+        let hessians: Vec<SMatrix<f64, D, D>> = elements
+            .par_iter()
+            .map(|(_, _, h)| h.project_moving())
+            .collect();
         for ((stencil, gradient, _), hessian) in elements.iter().zip(&hessians) {
             assembly.add(stencil, gradient, hessian);
         }

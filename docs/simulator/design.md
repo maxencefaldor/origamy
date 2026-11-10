@@ -249,7 +249,8 @@ Every state the solver visits, not just every state it returns, is free of cross
 
 **Pairs that are not contact.**
 The two sides of a fold meet within the fold's own band.
-Pairs closer along the sheet than the crease band's width do not take the barrier, since their distance is the bend itself.
+A fold that wraps nothing curls in half a circle one thickness across, so points of the curl that far apart along the sheet meet closer than the thickness.
+Pairs closer along the sheet than half a circle round their thickness do not take the barrier, since their distance is the bend itself.
 
 **Folded states come from folding.**
 Paper folded flat has coincident layers, at distance zero, which every barrier forbids.
@@ -393,14 +394,11 @@ A second solver, vertex block descent with offset contact, joins in phase 7 for 
   Below an area bound, the refinement leaves triangles as they are, so close points keep no tiny triangles around them.
   Lines that cross split each other there, and each line's chain keeps every crossing.
   A point a nanometer from a face's edge moves onto it, even past slivers the refinement leaves beside the edge.
-- **Bands that cross.**
-  Creases a fold turns together, end to end along a straight line, share the widest band among them.
-  They do so where they run on along the folded paper, and where they fold back over each other at a joint, both wrapping layers.
-  A band's lines run across their face to its sides, and share a point with each line of another band they cross.
-  A line ends on another band's crease where it meets it, so the two bands overlap where their creases cross.
-  A band's lines meet at its crease's end where a sharp crease meets that end too.
-  A sharp crease folds flat only with no points close beside it, so the cells round its ends stay coarse.
-  A band runs on through a sharp crease that alone crosses it, since its lines then put points only on that crease.
+- **Bands that meet at holes.**
+  Every crease folded flat gets a band, which reaches into the face its widest fold turns over.
+  Each band ends at a cap across it, where it clears every other band round the vertex.
+  The paper round the vertex, between the caps, is cut away, as the offset crease method for thick panels does.
+  A hole holds the triangles round its vertex that its walls enclose.
 - **Grading.**
   Elements shrink toward creases, where curvature concentrates, and grow across flat faces.
 - **Two levels of detail.**
@@ -851,6 +849,41 @@ Phase 6 adds these findings so far:
   Settling folded layers to named angles crossed too, by 2 to 12 mm, while crease patterns settled on open paper never crossed.
   Easing is gone, and the gallery plays no film whose settled paper crosses deeper than 0.1 mm.
   Contact that keeps paper from crossing, at any thickness, is what settling folded layers needs.
+- **Folds without sharp creases.**
+  A sharp crease's two sides meet at one line, so a fold through it splays into a wedge that jams later folds.
+  Every crease folded flat now gets a band, a crease that wraps nothing included.
+- **Bands that narrow to a point.**
+  A band narrowed to a point where a sharp crease met its end, so the fold had to wrap layers with no width there.
+  Folding a square in half three times stopped its second fold 20 mm short of its state there.
+  Bands now end at caps where they clear each other, and the paper between the caps round each vertex is cut away.
+  The offset crease method for thick panels cuts the same holes; Ku and Demaine thicken flat-foldable crease patterns so.
+  Crushed paper in those regions, holding slack and bending freely, still jammed the second fold, by 144 mm.
+- **Curls that cross.**
+  Bands centered on their creases curl each layer of a fold round its own axis.
+  A wider band's curl starts farther back, so an inner layer's curl reached 41 µm past the outer one's.
+  Each band now reaches from its crease into the face its widest fold turns over, so every layer curls round one axis.
+  The second fold of a square folded in half three times then lands within 1.1 mm of its state, against 24 to 150 mm before.
+- **Joined layers creep.**
+  An outer layer travels farther round a fold than an inner one, so their flaps land apart by the difference.
+  Where an earlier fold joins the two layers along another crease, the joined flaps bent like a bimetallic strip, 12 mm off the table.
+  Each band now holds twice the paper its curl needs, and its curl moves across it as the layers creep.
+  Bands driven to even arcs fixed the curl in place, so spans turn each band and its paper bends as contact lets it.
+  Folding a square in half three times then lands within 0.35, 0.63 and 1.10 mm of its three states at kami's thickness.
+- **Layers tied across a fold.**
+  Pleats folded in half tie their four layers along the pleat creases, across the last fold.
+  The tied layers must creep alike, while each layer's band holds slack in proportion to the layers it wraps.
+  Giving every crease of the fold's line the widest band folds the pleats within 1.75 mm.
+  The same bands make each layer's curl as wide as the next one's, and a square folded in half three times then jams upright.
+  Each crease keeps its own band.
+- **One line a side.**
+  Bands of two lines a side, free to bend, twisted where a collapse turns every crease round a vertex at once.
+  The waterbomb base stopped 80 mm short of its state, its bands at the strain cap beside the hole at its center.
+  Bands of one line a side fold it within 0.21 mm, and fold pleats in half within 0.98 mm, both in under four minutes.
+- **Projections without moving alike.**
+  A Hessian the solver cannot factor takes each element's Hessian with its eigenvalues made positive.
+  Those projections took 45% of a fold's time, dihedrals two thirds of it.
+  An element's energy stays the same when all its points move alike, so its Hessian vanishes on those motions.
+  Each projection now works on the other motions alone: a 9 by 9 matrix for a dihedral, in place of 12 by 12, with the same result.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
@@ -877,7 +910,7 @@ A research track runs alongside, with ambitious targets:
 | Fold paths | Creases driven along origamy's rigid folding path, where one exists | Creases turning at even rates, which bend faces off any rigid motion |
 | Weight while folding | Hands carry the weight of the paper a fold moves | Paper lifted only by its creases, which sags kami into other folds |
 | Mountain folds | Folding up from the turned-over sheet, then turning it back | Folding down into the table, which the table forbids |
-| Wrapping creases | Crease bands half a circle round the layers inside, turned by spans across them | Sharp creases, which cannot wrap layers; offset creases, which stretch layers that pleats join |
+| Wrapping creases | Crease bands twice half a circle round the layers inside, reaching into the face the fold turns over, turned by spans across them, with holes round the vertices where they meet | Sharp creases, which cannot wrap layers; bands centered on their creases, whose curls cross; bands just wide enough, which hold creeping layers joined by an earlier fold; bands that narrow to a point where another crease meets them, which cannot wrap layers there |
 | Meshes | A constrained Delaunay triangulation of the crease pattern, refined by Ruppert's algorithm | Regular grids, whose edges cross creases at arbitrary angles |
 | Core language | Rust | C++, NumPy, JAX |
 | Bending | Plate energy of a curvature per triangle, from mid-edge normals | Energy per interior edge, which depends on the mesh's directions |
@@ -893,6 +926,8 @@ A research track runs alongside, with ambitious targets:
 
 ## 9. References
 
+- [Folding flat crease patterns with thick materials](https://doi.org/10.1115/1.4031954), by Jason Ku and Erik Demaine, Journal of Mechanisms and Robotics, 2016.
+- [How to Fold Paper in Half Twelve Times](http://pomonahistorical.org/12times.htm), by Britney Gallivan, Historical Society of Pomona Valley, 2002.
 - [Fast, Interactive Origami Simulation using GPU Computation](https://erikdemaine.org/papers/OrigamiSimulator_Origami7/paper.pdf), by Amanda Ghassaei, Erik Demaine and Neil Gershenfeld, Origami⁷, 2018.
 - [Bar and hinge models for scalable analysis of origami](https://collaborate.princeton.edu/en/publications/bar-and-hinge-models-for-scalable-analysis-of-origami/), by Evgueni Filipov, Ke Liu, Tomohiro Tachi, Mark Schenk and Glaucio Paulino, International Journal of Solids and Structures, 2017.
 - [SWOMPS, the Sequentially Working Origami Multi-Physics Simulator](https://drsl.engin.umich.edu/software/swomps-package), by Yi Zhu and Evgueni Filipov.

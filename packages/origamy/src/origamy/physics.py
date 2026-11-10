@@ -18,11 +18,16 @@ folds with the sheet turned over, as a folder makes a mountain fold, then turns 
 A step that turns paper both up and down folds with the model lifted off the table,
 then lays it back down.
 
-A crease that wraps other layers bends round them over a crease band, half a circle
-round the layers inside. Spans turn the paper beyond one side of the band against the
-paper beyond the other, and the band bends as the layers inside let it. Creases a fold
-turns together along one straight line share one band, and bands cross where their
-creases cross. Hands hold the paper beside a band, never the band itself.
+Every crease folded flat bends over a crease band, as thick paper does. A crease
+that wraps k layers curls in half a circle k + 1 layers across, after Gallivan's model
+of folding thick paper, and its band holds twice that paper. The curl then moves across
+the band as the layers inside it creep. The band reaches from the crease into the face
+its widest fold turns over, so the layers of one fold curl round one axis, each outside
+the next. Spans turn the paper beyond one edge of a band against the paper beyond the
+other, and the band bends as the layers inside let it. Round each vertex, the bands
+stop where they clear each other, and the paper between them is cut away, as the
+offset crease method for thick panels does. Hands hold the paper beside a band, never
+the band itself.
 
 Without contact between layers, paper passes through paper as a sheet without
 thickness does, and creases fold sharp, with no bands. Orders then keep the layers in
@@ -31,7 +36,7 @@ from has it, until the paper leaves that layer. Paper that comes over a layer ke
 the side the stacking the fold reaches gives it.
 
 Each fold ends with the simulated paper measured against the state it reaches. The
-measure gives how far each face's corners lie from their places in that state, and
+measure gives how far the paper beside the bands lies from its place in that state, and
 which overlapping faces stack the other way round. Every stage also measures how deep
 the paper passes through itself where it ends.
 """
@@ -61,8 +66,6 @@ from origamy.space import (
     Form,
     Motion,
     Shaped,
-    Vector,
-    apply,
     compose,
     crease_angles,
     embedding,
@@ -79,6 +82,7 @@ from origamy_sim import (
     Settings,
     Sheet,
     Simulation,
+    Solver,
     Table,
 )
 
@@ -88,25 +92,27 @@ class PhysicsError(OrigamyError):
 
 
 class Bands(BaseModel):
-    """How a crease that wraps other layers bends round them: over a crease band.
+    """How a crease bends round the layers it wraps: over a crease band.
 
-    The band is as wide as half a circle round the layers inside. Spans turn the paper
-    beyond one side of the band against the paper beyond the other, and the band bends
-    as it must between them.
+    The band holds the paper of half a circle round the layers inside, times its slack.
+    Spans turn the paper beyond one edge of the band against the paper beyond the
+    other, and the band bends as it must between them.
     """
 
     model_config = ConfigDict(
         frozen=True, extra="forbid", use_attribute_docstrings=True
     )
 
-    lines: Annotated[int, Field(gt=0)] = 2
-    """The lines of mesh edges on each side of a band's crease."""
+    lines: Annotated[int, Field(gt=0)] = 1
+    """The lines of mesh edges a band's crease spreads over, on each side of it.
+
+    A band that reaches into one face alone takes all of them there.
+    """
 
     edge: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 3e-3
     """The length of the mesh edges along a band at its ends, in meters.
 
-    Creases cross at a band's ends, so the band's mesh is finest there. Cells much
-    smaller than the default beside a sharp crease would stop it closing.
+    Creases meet at a band's ends, so the band's mesh is finest there.
     """
 
     growth: Annotated[float, Field(gt=1, allow_inf_nan=False)] = 1.5
@@ -117,6 +123,13 @@ class Bands(BaseModel):
 
     crease: Crease = Crease()
     """The crease a band's fold leaves, spread over its lines; kami's by default."""
+
+    slack: Annotated[float, Field(ge=1, allow_inf_nan=False)] = 2.0
+    """The paper a band holds, as a multiple of the half circle its curl takes.
+
+    The rest lets the curl move across the band. Inner layers creep there as an outer
+    layer wraps them, where an earlier fold joins them along another crease.
+    """
 
 
 class Physics(BaseModel):
@@ -168,10 +181,13 @@ class Physics(BaseModel):
     A fold that wraps layers a crease joins makes the outer layer travel farther round
     it, and folded kami takes the difference by wrinkling."""
 
-    settings: Settings = Settings(time_step=math.inf, table=Table())
+    settings: Settings = Settings(
+        time_step=math.inf, table=Table(), solver=Solver(tolerance=1e-5)
+    )
     """The simulation's settings.
 
-    The default steps quasi-statically, under gravity, with the paper on a table.
+    The default steps quasi-statically, under gravity, with the paper on a table. A time
+    step ends once a Newton update moves no vertex 10 µm, a seventh of kami's thickness.
     """
 
 
@@ -196,8 +212,11 @@ class Stage:
     iterations: int
     """The Newton iterations of all the fold's time steps."""
     offset: float
-    """The farthest a face's corner lies from its place in the state, in meters.
+    """The farthest a vertex beside the bands lies from its place in the state, in
+    meters.
 
+    A vertex's place is where its face's place puts it. Flat paper is measured across
+    the table alone, since its layers lie at the heights their stacking gives them.
     Shaped paper settles where its weight takes it, so its place in space is matched to
     the simulated paper first, as rigidly as fits best.
     """
@@ -331,11 +350,13 @@ class _Folder:
         contact = physics.settings.contact
         layer = physics.material.thickness * contact.thickness_share + contact.gap
         # Without contact between layers, no layers lie inside a crease to bend round.
-        widths = _widths(folds, last, layer) if contact.layers else {}
-        self.creep = max(widths.values(), default=0.0)
-        self.mesh, self.faces, lines = _mesh(last, scale, widths, physics)
+        extents = (
+            _extents(folds, last, layer, physics.bands.slack) if contact.layers else {}
+        )
+        self.creep = max(extents.values(), default=0.0)
+        self.mesh, self.faces, lines = _mesh(last, scale, extents, physics)
         sheet = Sheet(self.mesh, physics.material)
-        drives = _Drives.of(last, self.mesh, self.faces, lines, physics.bands.lines)
+        drives = _Drives.of(last, self.mesh, self.faces, lines)
         spans = [sheet.add_span(stencil) for stencil in drives.stencils]
         self.simulation = Simulation([sheet], physics.settings)
         self.bands = drives.bands
@@ -757,19 +778,23 @@ class _Folder:
     ) -> tuple[float, tuple[Pair, ...]]:
         """How far paper at positions lies from a state, and which pairs misorder.
 
-        Flat paper lies where its state puts it on the table. Shaped paper is first
-        matched to where its form puts it, by the rigid motion that fits best.
+        Each vertex beside the bands lies where the place of a face round it puts it.
+        Flat paper lies there on the table. Shaped paper is first matched to where its
+        form puts it, by the rigid motion that fits best.
         """
         state = shaped.state
-        placed = placements(state, shaped.form)
-        places: dict[int, Vector] = {}
-        for f, face in enumerate(self.last.faces):
-            for v in face.corners:
-                x, y = self.last.vertices[v].floats()
-                places.setdefault(v, apply(placed[parents[f]], (x, y, 0.0)))
-        vertices = list(places)
-        expected = np.array(list(places.values())) * self.scale
-        found = positions[vertices]
+        placed = np.array(placements(state, shaped.form))
+        owner = np.zeros(len(positions), dtype=np.int64)
+        owner[self.mesh.triangles.ravel()] = np.repeat(self.faces, 3)
+        motions = placed[parents[owner]]
+        flat = np.column_stack(
+            [self.mesh.rest / self.scale, np.zeros(len(self.mesh.rest))]
+        )
+        expected = np.einsum("nij,nj->ni", motions[:, :9].reshape(-1, 3, 3), flat)
+        expected = (expected + motions[:, 9:]) * self.scale
+        # A band's paper curls round the layers inside, off its faces' places.
+        beside = ~self.banded
+        found, expected = positions[beside], expected[beside]
         if shaped.form is None:
             found, expected = found[:, :2], expected[:, :2]
         else:
@@ -838,86 +863,57 @@ class _Folder:
         return weights[best] @ positions[corners[best]]
 
 
-def _widths(
-    folds: Sequence[tuple[State, State]], last: State, layer: float
-) -> dict[Edge, float]:
-    """The width of each crease band of the last pattern, in meters.
+def _extents(
+    folds: Sequence[tuple[State, State]], last: State, layer: float, slack: float
+) -> dict[tuple[Edge, int], float]:
+    """How far each crease band of the last pattern reaches into each of its faces.
 
-    A crease that wraps k layers bends round them in half a circle (k + 1) layers
-    across. Creases a fold turns together, end to end along a straight line, share the
-    widest band among them. They do so where they run on along the folded paper, and
-    where they fold back over each other both wrapping layers, joined at their end.
+    A crease folded flat round k layers curls in half a circle round them, k + 1
+    layers across, after Gallivan's model of folding thick paper. Its band holds
+    ``slack`` times that paper. The band reaches from the crease into the face its
+    widest fold turns over, so the layers of one fold curl round one axis, each outside
+    the last. A band whose fold turns both faces, or neither, reaches half its width
+    into each.
     """
-    wraps = _wraps(folds, last)
-    joined = {edge: edge for edge in last.creases}
-
-    def root(edge: Edge) -> Edge:
-        while joined[edge] != edge:
-            edge = joined[edge]
-        return edge
-
-    for before, after in folds:
-        for first, second, onward in _lined(before, after, last):
-            if onward or (first in wraps and second in wraps):
-                joined[root(max(first, second))] = root(min(first, second))
-    widest: dict[Edge, float] = {}
-    for edge, layers in sorted(wraps.items()):
-        width = 0.5 * math.pi * (layers + 1) * layer
-        widest[root(edge)] = max(widest.get(root(edge), 0.0), width)
-    return {edge: widest[root(edge)] for edge in last.creases if root(edge) in widest}
+    extents: dict[tuple[Edge, int], float] = {}
+    for edge, (layers, moving) in sorted(_wraps(folds, last).items()):
+        width = slack * 0.5 * math.pi * (layers + 1) * layer
+        f, g = last.creases[edge]
+        if moving is None:
+            extents[edge, f] = extents[edge, g] = width / 2
+        else:
+            extents[edge, moving] = width
+    return extents
 
 
-def _lined(before: State, after: State, last: State) -> list[tuple[Edge, Edge, bool]]:
-    """The creases a fold turns that meet end to end along a straight line.
+def _wraps(
+    folds: Sequence[tuple[State, State]], last: State
+) -> dict[Edge, tuple[int, int | None]]:
+    """The creases of the last pattern that fold flat, with the layers they wrap.
 
-    Each pair comes with whether it runs on along the folded paper; a pair that does not
-    folds back over itself.
-    """
-    parents, earlier = after.parents(last), before.parents(last)
-    turned: dict[int, list[Edge]] = {}
-    for edge, (f, g) in sorted(last.creases.items()):
-        sense = "F" if parents[f] == parents[g] else after.sense(parents[f], parents[g])
-        was = "F" if earlier[f] == earlier[g] else before.sense(earlier[f], earlier[g])
-        if sense not in ("F", was):
-            for vertex in edge:
-                turned.setdefault(vertex, []).append(edge)
-    pairs = []
-    vertices = last.vertices
-    for vertex, edges in sorted(turned.items()):
-        for first, second in itertools.combinations(edges, 2):
-            (a,) = set(first) - {vertex}
-            (b,) = set(second) - {vertex}
-            out, back = vertices[a] - vertices[vertex], vertices[b] - vertices[vertex]
-            if out.cross(back).sign() != 0 or out.dot(back).sign() >= 0:
-                continue
-            face = after.faces[parents[last.creases[first][0]]].place
-            other = after.faces[parents[last.creases[second][0]]].place
-            middle = face(vertices[vertex])
-            onward = (face(vertices[a]) - middle).dot(other(vertices[b]) - middle)
-            pairs.append((first, second, onward.sign() < 0))
-    return pairs
-
-
-def _wraps(folds: Sequence[tuple[State, State]], last: State) -> dict[Edge, int]:
-    """The creases of the last pattern that fold round other layers.
-
-    Each takes the most layers it wraps anywhere along it, in any fold.
+    Each takes the most layers it wraps anywhere along it, in any fold, with the face of
+    the last pattern that fold turns over, if it turns one face alone.
     """
     corners = np.array([p.floats() for p in last.vertices])
-    wraps: dict[Edge, int] = {}
-    for _, after in folds:
+    wraps: dict[Edge, tuple[int, int | None]] = {}
+    for before, after in folds:
         footprints = _Footprints(after)
-        parents = after.parents(last)
+        parents, under = after.parents(last), before.parents(after)
         for edge, (f, g) in sorted(last.creases.items()):
             pf, pg = parents[f], parents[g]
             if pf == pg or after.sense(pf, pg) == "F":
                 continue
+            moved = [
+                after.faces[p].place != before.faces[under[p]].place for p in (pf, pg)
+            ]
+            moving = (f, g)[moved.index(True)] if moved.count(True) == 1 else None
+            layers = 0
             for point in footprints.beside(corners[list(edge)], pf):
                 stack = footprints.stack(point)
                 if pf in stack and pg in stack:
-                    layers = abs(stack.index(pf) - stack.index(pg)) - 1
-                    if layers > wraps.get(edge, 0):
-                        wraps[edge] = layers
+                    layers = max(layers, abs(stack.index(pf) - stack.index(pg)) - 1)
+            if edge not in wraps or layers > wraps[edge][0]:
+                wraps[edge] = (layers, moving)
     return wraps
 
 
@@ -1009,52 +1005,87 @@ class _Drives:
         mesh: Mesh,
         faces: NDArray[np.int64],
         lines: Sequence[_Line],
-        count: int,
     ) -> _Drives:
         """The drives of a mesh of the last pattern with the lines of its bands.
 
-        A crease drives the mesh edges along it, or turns its band by spans across it.
-        ``count`` is the lines on each side of a band's crease.
+        A crease without a band drives the mesh edges along it. A band turns by spans
+        across it, from its edge in one face to its edge in the other. A band's edge is
+        its last line in a face, or its crease where it reaches into the other face
+        alone.
         """
         triangles = _beside_edges(mesh)
         between = {frozenset(pair): edge for edge, pair in last.creases.items()}
-        outer = {
-            (line.edge, line.face): line.chain for line in lines if line.rank == count
-        }
-        # A band turns where it has an outer line on both sides.
-        bands: dict[Edge, list[tuple[int, int]]] = {
-            edge: []
-            for edge, pair in last.creases.items()
-            if all((edge, face) in outer for face in pair)
-        }
-        edges: list[tuple[int, int]] = []
-        ends: list[tuple[int, int]] = []
+        creases: dict[Edge, list[tuple[int, int]]] = {}
         for u, v, _, _ in mesh.dihedrals.tolist():
             f, g = (int(faces[t]) for t in triangles[u, v])
-            if f == g:
-                continue
-            edge = between[frozenset((f, g))]
-            if edge in bands:
-                bands[edge].append((u, v))
-            else:
-                edges.append((u, v))
-                ends.append((f, g))
+            if f != g:
+                creases.setdefault(between[frozenset((f, g))], []).append((u, v))
+        banded: dict[Edge, list[_Line]] = {}
         for line in lines:
-            if line.edge in bands:
-                bands[line.edge].extend(
+            banded.setdefault(line.edge, []).append(line)
+        edges: list[tuple[int, int]] = []
+        stencils: list[tuple[int, int, int, int, int]] = []
+        sharp_ends: list[tuple[int, int]] = []
+        span_ends: list[tuple[int, int]] = []
+        bands: list[tuple[list[tuple[int, int]], range]] = []
+        for edge in sorted({*creases, *banded}):
+            pairs = creases.get(edge, [])
+            sides = _band_edges(mesh, last.creases[edge], pairs, banded.get(edge, []))
+            if sides is None:
+                edges.extend(pairs)
+                sharp_ends.extend(last.creases[edge] for _ in pairs)
+                continue
+            middle = np.mean([mesh.rest[v] for side in sides for v in side], axis=0)
+            spans = _spans(mesh, triangles, middle, *sides)
+            band = [*pairs]
+            for line in banded[edge]:
+                band.extend(
                     (min(u, v), max(u, v)) for u, v in itertools.pairwise(line.chain)
                 )
-        stencils: list[tuple[int, int, int, int, int]] = []
-        found = []
-        for edge, band in bands.items():
-            f, g = last.creases[edge]
-            crease = np.mean([mesh.rest[v] for v in edge], axis=0)
-            spans = _spans(mesh, triangles, crease, outer[edge, f], outer[edge, g])
-            first = len(edges) + len(stencils)
-            found.append((band, list(range(first, first + len(spans)))))
+            bands.append((band, range(len(stencils), len(stencils) + len(spans))))
             stencils.extend(spans)
-            ends.extend((f, g) for _ in spans)
-        return cls(edges, stencils, ends, found)
+            span_ends.extend(last.creases[edge] for _ in spans)
+        # The spans follow the sharp drives.
+        return cls(
+            edges,
+            stencils,
+            sharp_ends + span_ends,
+            [(band, [len(edges) + i for i in spans]) for band, spans in bands],
+        )
+
+
+def _band_edges(
+    mesh: Mesh,
+    faces: Pair,
+    pairs: Sequence[tuple[int, int]],
+    lines: Sequence[_Line],
+) -> tuple[list[int], list[int]] | None:
+    """A band's edge in each of its crease's ``faces``, as mesh vertices along it.
+
+    The edge is the band's last line in the face, or the crease's own mesh edges
+    ``pairs`` where the band has no line there. Returns None for a crease without a
+    band, or whose band the holes leave no edge.
+    """
+    if not lines:
+        return None
+    outer: dict[int, _Line] = {}
+    for line in lines:
+        if line.face not in outer or line.rank > outer[line.face].rank:
+            outer[line.face] = line
+    crease: list[int] = []
+    if pairs:
+        start, end = (mesh.rest[v] for v in pairs[0])
+        along = end - start
+        vertices = {v for pair in pairs for v in pair}
+        crease = sorted(vertices, key=lambda v: float(mesh.rest[v] @ along))
+    sides = [outer[face].chain if face in outer else crease for face in faces]
+    if any(len(side) < _SIDES for side in sides):
+        return None
+    return sides[0], sides[1]
+
+
+_SIDES: Final = 2
+"""The fewest vertices a band's edge runs through: one mesh edge."""
 
 
 @dataclass(frozen=True)
@@ -1072,9 +1103,14 @@ class _Line:
 
 
 def _mesh(
-    last: State, scale: float, widths: Mapping[Edge, float], physics: Physics
+    last: State,
+    scale: float,
+    extents: Mapping[tuple[Edge, int], float],
+    physics: Physics,
 ) -> tuple[Mesh, NDArray[np.int64], list[_Line]]:
-    """The last pattern meshed, with a band of ``widths`` along some of its creases.
+    """The last pattern meshed, with crease bands as ``extents`` lays them out.
+
+    The paper is cut away round each vertex where bands meet.
 
     Returns:
         The mesh, each triangle's face, and the lines of the bands.
@@ -1082,8 +1118,14 @@ def _mesh(
     points = _Points([p.floats() for p in last.vertices], scale)
     faces = [face.corners for face in last.faces]
     longest = math.sqrt(4 * physics.refinement.max_area / math.sqrt(3))
-    lines = _Layout(points, last, widths, physics.bands, longest).lines()
+    layout = _Layout(points, last, extents, physics.bands, longest)
+    lines = layout.lines()
     segments = [pair for _, _, _, stops in lines for pair in itertools.pairwise(stops)]
+    segments += [
+        pair
+        for _, hole in layout.holes
+        for pair in itertools.pairwise((*hole, hole[0]))
+    ]
     mesh, owners, chains = Mesh.of_faces(
         points.array(), points.polygons(faces), physics.refinement, segments
     )
@@ -1095,7 +1137,79 @@ def _mesh(
         for _ in range(len(stops) - 1):
             chain.extend(next(pieces).tolist()[1:])
         found.append(_Line(edge, face, rank, chain))
-    return mesh, owners, found
+    if not layout.holes:
+        return mesh, owners, found
+    # Each hole's sides join the chains of its segments, which wall it in.
+    walls = {
+        (min(u, v), max(u, v))
+        for chain in pieces
+        for u, v in itertools.pairwise(chain.tolist())
+    }
+    cut = _holes(mesh, layout.holes, walls, points.array())
+    kept = ~cut
+    used = np.unique(mesh.triangles[kept])
+    index = np.full(len(mesh.rest), -1, dtype=np.int64)
+    index[used] = np.arange(len(used))
+    cut = Mesh(mesh.rest[used], index[mesh.triangles[kept]])
+    # A line keeps its longest run of mesh edges that the holes leave.
+    edges = _beside_edges(cut)
+    lines = []
+    for line in found:
+        runs: list[list[int]] = [[]]
+        for v in index[line.chain].tolist():
+            run = runs[-1]
+            if v < 0 or (run and (min(run[-1], v), max(run[-1], v)) not in edges):
+                runs.append([] if v < 0 else [v])
+            else:
+                run.append(v)
+        longest = max(runs, key=len)
+        if len(longest) >= _SIDES:
+            lines.append(_Line(line.edge, line.face, line.rank, longest))
+    return cut, owners[kept], lines
+
+
+def _holes(
+    mesh: Mesh,
+    holes: Sequence[tuple[int, Sequence[int]]],
+    walls: set[tuple[int, int]],
+    points: NDArray[np.float64],
+) -> NDArray[np.bool_]:
+    """Whether each triangle of a mesh lies in a hole.
+
+    Each hole is a vertex with the points round it, which the mesh's edges ``walls``
+    join. A hole holds the triangles round its vertex inside its points, and every
+    triangle they reach without crossing a wall or going farther from the vertex than
+    its points.
+    """
+    beside = _beside_edges(mesh)
+    cut = np.zeros(len(mesh.triangles), dtype=bool)
+    round_vertex: dict[int, list[int]] = {}
+    for t, corners in enumerate(mesh.triangles.tolist()):
+        for v in corners:
+            round_vertex.setdefault(v, []).append(t)
+    for vertex, hole in holes:
+        polygon = points[list(hole)]
+        reach = float(np.linalg.norm(polygon - points[vertex], axis=1).max())
+        # A vertex on the paper's edge has paper outside its hole round it too.
+        queue = [
+            t
+            for t in round_vertex.get(vertex, [])
+            if _inside(mesh.rest[mesh.triangles[t]].mean(axis=0), polygon)
+        ]
+        while queue:
+            t = queue.pop()
+            if cut[t]:
+                continue
+            corners = mesh.triangles[t]
+            middle = mesh.rest[corners].mean(axis=0)
+            if np.linalg.norm(middle - points[vertex]) > reach:
+                continue
+            cut[t] = True
+            for a, b in itertools.pairwise((*corners.tolist(), int(corners[0]))):
+                edge = (min(a, b), max(a, b))
+                if edge not in walls:
+                    queue.extend(beside[edge])
+    return cut
 
 
 _NEAR: Final = 1e-9
@@ -1147,49 +1261,216 @@ class _Points:
         return polygons
 
 
-type _Frame = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
-"""A band's crease in one of its faces: the crease's first point, its direction, and
-the direction into the face."""
-
-type _Stop = frozenset[int] | None
-"""What a band's line ends on: a face's side, by its corners."""
-
-
 class _Layout:
-    """The lines of a band along each crease of ``widths``, added to ``points``.
+    """The lines of the crease bands and the holes round the vertices, in ``points``.
 
-    Each crease splits at stations, ``bands.edge`` apart at its ends, each piece
-    ``bands.growth`` times the one before, up to ``longest``. The crease then gets
-    ``bands.lines`` lines in each of its faces, parallel to it and evenly spaced, the
-    last half the band's width away. A line runs across its face up to the face's sides,
-    and splits at the stations and wherever it crosses another band's line.
+    Each crease of ``extents`` gets a band reaching as far into each of its faces, as
+    the offset crease method thickens a crease pattern. Each band ends at a cap across
+    it, where it clears every other band round that vertex. The method cuts away the
+    paper round the vertex, between the caps.
+
+    Each band splits at stations, ``bands.edge`` apart at its caps, each piece
+    ``bands.growth`` times the one before, up to ``longest``. The band then gets
+    ``bands.lines`` lines in each face it reaches into, or twice as many where it
+    reaches into one face alone. The lines run parallel to the crease, evenly spaced,
+    the last at the band's edge. A line runs from cap to cap within its face, and splits
+    at the stations and wherever it crosses another band's line.
     """
 
     def __init__(
         self,
         points: _Points,
         last: State,
-        widths: Mapping[Edge, float],
+        extents: Mapping[tuple[Edge, int], float],
         bands: Bands,
         longest: float,
     ) -> None:
-        self.points, self.last, self.widths, self.bands = points, last, widths, bands
-        # The corners of the sharp creases, which keep the cells round them coarse.
-        self.sharp = {v for edge in last.creases if edge not in widths for v in edge}
-        self.frames: dict[tuple[Edge, int], _Frame] = {}
+        self.points, self.last, self.bands = points, last, bands
+        self.extents = extents
+        self.widths: dict[Edge, float] = {}
+        for (edge, _), extent in extents.items():
+            self.widths[edge] = self.widths.get(edge, 0.0) + extent
         self.stations: dict[Edge, list[float]] = {}
-        for edge in widths:
+        # Each crease's caps, by their distance from its first end along it.
+        self.caps: dict[Edge, tuple[float, float]] = {}
+        sides = _sides(last)
+        reach = {
+            (vertex, other): self._reach(vertex, other, sides[vertex])
+            for vertex in sides
+            for other in sides[vertex]
+        }
+        for edge in sorted(self.widths):
             a, b = (points.points[v] for v in edge)
             length = float(np.linalg.norm(b - a))
+            near, far = reach[edge], reach[edge[1], edge[0]]
+            # Caps that would overlap meet in the crease's middle, and its bands' lines
+            # cross the other bands' lines there.
+            share = min(1.0, 0.5 * length / (near + far))
+            low, high = near * share, length - far * share
+            self.caps[edge] = (low, high)
+            self.stations[edge] = [
+                low + d
+                for d in _stations(high - low, bands.edge, bands.growth, longest)
+            ]
             along = (b - a) / length
-            self.stations[edge] = _stations(length, bands.edge, bands.growth, longest)
             for distance in self.stations[edge]:
                 points.add(a + along * distance, frozenset(edge))
-            for face in last.creases[edge]:
-                corners = last.faces[face].corners
-                middle = np.mean([points.points[c] for c in corners], axis=0)
-                inward = _left(along) * np.sign((middle - a) @ _left(along))
-                self.frames[edge, face] = (a, along, inward)
+        self.holes = [
+            (vertex, hole)
+            for vertex in sorted(sides)
+            if (hole := self._hole(vertex, sides[vertex]))
+        ]
+        """Each vertex where bands meet, with its hole's points in order round it."""
+
+    def _extent(self, vertex: int, other: int, side: float) -> float:
+        """How far the band along a side at a vertex reaches to one side of it.
+
+        ``side`` is positive for the left of the side's direction from the vertex. The
+        paper's edge has no band.
+        """
+        edge = (min(vertex, other), max(vertex, other))
+        if edge not in self.widths:
+            return 0.0
+        along = self._direction(vertex, other)
+        for face in self.last.creases[edge]:
+            middle = np.mean(
+                [self.points.points[c] for c in self.last.faces[face].corners], axis=0
+            )
+            if _cross(along, middle - self.points.points[vertex]) * side > 0:
+                return self.extents.get((edge, face), 0.0)
+        return 0.0
+
+    def _within(
+        self, vertex: int, other: int, side: float, point: NDArray[np.float64]
+    ) -> bool:
+        """Whether a point beside a side at a vertex lies in the face on that side.
+
+        A band's cap can reach past its face where the face narrows to a sharp corner,
+        and the band's lines stop at the face's sides there.
+        """
+        edge = (min(vertex, other), max(vertex, other))
+        along = self._direction(vertex, other)
+        for face in self.last.creases[edge]:
+            corners = np.array(
+                [self.points.points[c] for c in self.last.faces[face].corners]
+            )
+            if (
+                _cross(along, corners.mean(axis=0) - self.points.points[vertex]) * side
+                > 0
+            ):
+                return bool(_depths(point[None], corners[None])[0, 0] > -_NEAR)
+        return False
+
+    def _ranks(self, edge: Edge, face: int) -> int:
+        """The lines of a band in one of its crease's faces."""
+        return self._count(edge, self.extents.get((edge, face), 0.0))
+
+    def _count(self, edge: Edge, extent: float) -> int:
+        """The lines of a band within ``extent`` of its crease, on one side of it."""
+        return round(2 * self.bands.lines * extent / self.widths[edge])
+
+    def _direction(self, vertex: int, other: int) -> NDArray[np.float64]:
+        """The unit direction of a side from a vertex."""
+        points = self.points.points
+        along = points[other] - points[vertex]
+        return along / float(np.linalg.norm(along))
+
+    def _reach(self, vertex: int, other: int, others: Sequence[int]) -> float:
+        """How far along a side from a vertex its band clears every other band there.
+
+        The band's outer line toward another side meets that side's outer line toward
+        it, unless the two sides run on straight through the vertex. A band reaches at
+        least half its width.
+        """
+        along = self._direction(vertex, other)
+        reach = max(self._extent(vertex, other, side) for side in (1.0, -1.0))
+        for third in others:
+            if third == other:
+                continue
+            turn = self._direction(vertex, third)
+            cosine = float(along @ turn)
+            side = math.copysign(1.0, _cross(along, turn))
+            sine = abs(_cross(along, turn))
+            if sine < _STRAIGHT:
+                continue
+            near = self._extent(vertex, other, side)
+            facing = self._extent(vertex, third, -side)
+            reach = max(reach, (facing + near * cosine) / sine)
+        return reach
+
+    def _hole(self, vertex: int, others: Sequence[int]) -> list[int]:
+        """The hole round a vertex where its bands meet, as points in order round it.
+
+        The hole runs across each band at its cap, and crosses each other side where
+        the bands round it clear that side, side by side round the vertex. A vertex on
+        the paper's edge is a corner of its hole. Returns an empty list where no band
+        meets the vertex.
+        """
+        key = {other: (min(vertex, other), max(vertex, other)) for other in others}
+        banded = [other for other in others if key[other] in self.widths]
+        if not banded:
+            return []
+        origin = self.points.points[vertex]
+        edges = [other for other in others if key[other] not in self.last.creases]
+        start = self._start(vertex, edges)
+        found: list[int] = [vertex] if edges else []
+        for other in sorted(
+            others, key=lambda o: _angle(start, self._direction(vertex, o))
+        ):
+            along = self._direction(vertex, other)
+            if key[other] not in self.widths:
+                reach = 0.0
+                for third in banded:
+                    turn = self._direction(vertex, third)
+                    sine = abs(_cross(along, turn))
+                    if sine > _STRAIGHT:
+                        side = math.copysign(1.0, _cross(turn, along))
+                        reach = max(reach, self._extent(vertex, third, side) / sine)
+                found.append(
+                    self.points.add(origin + along * reach, frozenset(key[other]))
+                )
+                continue
+            low, high = self.caps[key[other]]
+            length = float(np.linalg.norm(self.points.points[other] - origin))
+            middle = origin + along * (
+                low if vertex == key[other][0] else length - high
+            )
+            # Across the cap, from the band's right edge to its left one.
+            offsets = [
+                side * rank * extent / count
+                for side in (-1.0, 1.0)
+                if (
+                    count := self._count(
+                        key[other], extent := self._extent(vertex, other, side)
+                    )
+                )
+                for rank in (range(count, 0, -1) if side < 0 else range(1, count + 1))
+            ]
+            right = [o for o in offsets if o < 0]
+            left = [o for o in offsets if o > 0]
+            for offset in (*right, 0.0, *left):
+                point = middle + _left(along) * offset
+                if offset == 0.0:
+                    found.append(self.points.add(point, frozenset(key[other])))
+                elif self._within(vertex, other, offset, point):
+                    found.append(self.points.add(point))
+        # Points that coincide, as a side's crossing at the vertex itself, are one.
+        return [v for k, v in enumerate(found) if v != found[k - 1]]
+
+    def _start(self, vertex: int, edges: Sequence[int]) -> NDArray[np.float64]:
+        """The direction round a vertex its hole's points take their angles from.
+
+        On the paper's edge, the paper lies counterclockwise from the edge leaving the
+        vertex, so the angles run from that edge across the paper.
+        """
+        for other in edges:
+            for face in self.last.faces:
+                corners = face.corners
+                if vertex in corners:
+                    i = corners.index(vertex)
+                    if corners[(i + 1) % len(corners)] == other:
+                        return self._direction(vertex, other)
+        return np.array([1.0, 0.0])
 
     def lines(self) -> list[tuple[Edge, int, int, list[int]]]:
         """Each line, with its crease, its face, its rank and its points.
@@ -1198,8 +1479,9 @@ class _Layout:
         """
         lines = [
             (edge, face, rank, stops)
-            for edge, face in self.frames
-            for rank in range(1, self.bands.lines + 1)
+            for edge in sorted(self.widths)
+            for face in self.last.creases[edge]
+            for rank in range(1, self._ranks(edge, face) + 1)
             if (stops := self._line(edge, face, rank))
         ]
         points = self.points.points
@@ -1213,7 +1495,9 @@ class _Layout:
                     continue
                 vertex = self.points.add(point)
                 for crease, line in ((edge, stops), (other, crossed)):
-                    start, along, _ = self.frames[crease, face]
+                    start = points[crease[0]]
+                    along = points[crease[1]] - start
+                    along /= float(np.linalg.norm(along))
                     line.append((float((point - start) @ along), vertex))
         found = []
         for edge, face, rank, stops in lines:
@@ -1225,72 +1509,65 @@ class _Layout:
     def _line(self, edge: Edge, face: int, rank: int) -> list[tuple[float, int]]:
         """The points of a band's line, by their distance along its crease.
 
-        The list is empty where the line misses its face.
+        The line runs between its band's caps, as far as its face reaches. The list is
+        empty where the line misses its face.
         """
-        a, along, inward = self.frames[edge, face]
-        origin = a + inward * rank * self.widths[edge] / (2 * self.bands.lines)
-        corners = self.last.faces[face].corners
         points = self.points.points
+        a, b = (points[v] for v in edge)
+        along = (b - a) / float(np.linalg.norm(b - a))
+        corners = self.last.faces[face].corners
+        middle = np.mean([points[c] for c in corners], axis=0)
+        inward = _left(along) * np.sign((middle - a) @ _left(along))
+        extent = self.extents[edge, face] / self._ranks(edge, face)
+        origin = a + inward * rank * extent
         bounds: list[tuple[NDArray[np.float64], NDArray[np.float64], _Stop]] = [
             (points[c], _left(points[d] - points[c]), frozenset((c, d)))
             for c, d in itertools.pairwise((*corners, corners[0]))
         ]
         (low, start), (high, stop) = _clip(origin, along, bounds)
+        first, last = self.caps[edge]
+        if first > low:
+            low, start = first, None
+        if last < high:
+            high, stop = last, None
         if high - low < _NEAR:
             return []
         return [
-            (low, self._end(edge, origin + along * low, start)),
+            (low, self.points.add(origin + along * low, start)),
             *(
                 (t, self.points.add(origin + along * t))
                 for t in self.stations[edge]
                 if low + _NEAR < t < high - _NEAR
             ),
-            (high, self._end(edge, origin + along * high, stop)),
+            (high, self.points.add(origin + along * high, stop)),
         ]
 
-    def _runs_on(self, edge: Edge, corner: int) -> bool:
-        """Whether a band runs on straight through one of its crease's ends.
 
-        The band runs on into the next crease along its line, where that crease has the
-        same band and one sharp crease alone crosses there, straight through.
-        """
-        vertices = self.last.vertices
-        (a,) = set(edge) - {corner}
-        out = vertices[a] - vertices[corner]
-        onward, crossing = False, list[Point]()
-        for crease in self.last.creases:
-            if corner not in crease or crease == edge:
-                continue
-            (b,) = set(crease) - {corner}
-            back = vertices[b] - vertices[corner]
-            if out.cross(back).sign() == 0 and out.dot(back).sign() < 0:
-                onward = self.widths.get(crease) == self.widths[edge]
-            elif crease in self.widths:
-                return False
-            else:
-                crossing.append(back)
-        match crossing:
-            case [first, second] if onward:
-                straight = first.cross(second).sign() == 0
-                return straight and first.dot(second).sign() < 0
-            case _:
-                return False
+_STRAIGHT: Final = 1e-6
+"""The sine of the angle under which two sides at a vertex run straight on."""
 
-    def _end(self, edge: Edge, point: NDArray[np.float64], stop: _Stop) -> int:
-        """The point a band's line ends at, on a face's side.
+type _Stop = frozenset[int] | None
+"""What a band's line ends on: a face's side, by its corners, or None for a cap."""
 
-        A band's lines meet at its crease's end where a sharp crease meets it too: a
-        sharp crease folds flat only with no points close beside it. The band runs on
-        through a sharp crease that alone crosses it, since its lines then put points
-        only on that crease. Elsewhere a line ends on the side it meets, and crosses the
-        band of a crease there.
-        """
-        if stop is not None and len(shared := stop & set(edge)) == 1:
-            (corner,) = shared
-            if corner in self.sharp and not self._runs_on(edge, corner):
-                return corner
-        # The line's end splits the side as it joins the mesh, after the refinement.
-        return self.points.add(point)
+
+def _sides(state: State) -> dict[int, list[int]]:
+    """The other ends of the face sides at each vertex: creases and the paper's edge."""
+    sides: dict[int, set[int]] = {}
+    for face in state.faces:
+        corners = face.corners
+        for c, d in itertools.pairwise((*corners, corners[0])):
+            sides.setdefault(c, set()).add(d)
+            sides.setdefault(d, set()).add(c)
+    return {vertex: sorted(others) for vertex, others in sorted(sides.items())}
+
+
+def _angle(start: NDArray[np.float64], direction: NDArray[np.float64]) -> float:
+    """The counterclockwise angle from one direction to another, from 0 to a full turn.
+
+    A direction a rounding error clockwise of the start lies at 0.
+    """
+    turn = math.atan2(_cross(start, direction), float(start @ direction))
+    return turn if turn >= -_STRAIGHT else turn + 2 * math.pi
 
 
 def _clip(
@@ -1426,6 +1703,16 @@ def _spans(
             _, foot, r = min(found)
             stencils.append((start, end, c, foot, r))
     return stencils
+
+
+def _inside(point: NDArray[np.float64], polygon: NDArray[np.float64]) -> bool:
+    """Whether a point lies inside a simple polygon, by the sides a ray crosses."""
+    x, y = point
+    inside = False
+    for (ax, ay), (bx, by) in itertools.pairwise((*polygon, polygon[0])):
+        if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+            inside = not inside
+    return inside
 
 
 def _left(u: NDArray[np.float64]) -> NDArray[np.float64]:

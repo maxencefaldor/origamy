@@ -15,10 +15,11 @@ import pytest
 from playwright.async_api import Route, async_playwright
 
 from origamy import Line, Paper, service
-from origamy.physics import simulate
+from origamy.physics import Physics, simulate
 from origamy.render import BROWSER
 from origamy.result import BuildResult
 from origamy.viewer import THREE_PACKAGE, film_data, write_viewer
+from origamy_sim import Contact
 
 EXAMPLES = Path(__file__).parents[3] / "examples"
 THREE = Path(str(files("origamy").joinpath("assets", "three")))
@@ -26,6 +27,11 @@ GLIDE = 700
 """The milliseconds the viewer's eye takes to frame a film's next step.
 
 The eye starts a moment after the fold's clock, so the test waits 50 more."""
+
+LAYERLESS = Physics(
+    settings=Physics().settings.model_copy(update={"contact": Contact(layers=False)})
+)
+"""Paper without thickness, which a film rests in each state."""
 
 type Colors = Callable[[Path], set[tuple[int, int, int]]]
 
@@ -266,7 +272,7 @@ def test_a_film_rests_exactly_where_each_state_puts_the_paper(
 ) -> None:
     paper = Paper.square()
     paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
-    folding = simulate(paper.steps)
+    folding = simulate(paper.steps, LAYERLESS)
     film = film_data(BuildResult.of(paper, tmp_path), folding)
     packed = gzip.decompress(base64.b64decode(film["steps"][1]["frames"]))
     moves = np.frombuffer(packed, "<i4").reshape(-1, film["vertices"], 3)
@@ -277,6 +283,23 @@ def test_a_film_rests_exactly_where_each_state_puts_the_paper(
         assert fx == pytest.approx(min(x, 1 - x), abs=1e-4)
         assert fy == pytest.approx(y, abs=1e-4)
         assert fz == pytest.approx(0, abs=1e-4)
+
+
+def test_a_film_of_thick_paper_plays_as_the_simulator_folded_it(
+    tmp_path: Path,
+) -> None:
+    paper = Paper.square()
+    paper.valley(Line.through(("1/2", 0), ("1/2", 1)), flap=("3/4", "1/2"))
+    folding = simulate(paper.steps)
+    film = film_data(BuildResult.of(paper, tmp_path), folding)
+    packed = gzip.decompress(base64.b64decode(film["steps"][1]["frames"]))
+    moves = np.frombuffer(packed, "<i4").reshape(-1, film["vertices"], 3)
+    # The film's last frame is the simulator's, and no layer lifts in the viewer.
+    last = moves.sum(axis=0) * film["step"]
+    simulated = folding.stages[-1].frames[-1] / folding.mesh.rest[:, 0].max()
+    assert np.abs(last - simulated).max() < 1e-4
+    (fold,) = film["steps"][1]["folds"]
+    assert not np.frombuffer(base64.b64decode(fold["lifts"]), np.uint8).any()
 
 
 def test_paper_stood_up_keeps_its_pose_as_it_settles(tmp_path: Path) -> None:

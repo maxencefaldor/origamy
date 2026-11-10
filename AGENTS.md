@@ -162,6 +162,7 @@ Each concept has exactly one name, used alike in code, docs, messages and pictur
 | dihedral | An interior edge of a mesh with its two triangles, where the sheet bends |
 | crease band | The strip along a crease where the paper has yielded, a few tenths of a millimeter wide: parallel lines of edges that share the crease's turn |
 | sharp crease | A crease band narrowed onto mesh edges, for coarse meshes |
+| hole | The paper cut away round a vertex where crease bands meet, as thick folding needs |
 | wrinkle | A buckle of compressed paper finer than the mesh, which lets a triangle shrink at almost no cost |
 | springback | The angle a released crease opens by: its yield moment over its stiffness |
 | plastic rotation | The rotation a crease has yielded and crept through, which hardening reads |

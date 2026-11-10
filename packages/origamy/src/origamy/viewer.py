@@ -141,11 +141,12 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     """The simulated paper as the viewer plays it: its mesh, and each step's frames.
 
     Each frame is where every vertex of the mesh lay, in whole steps of ``step`` of the
-    paper's units, less where it lay the frame before, gzipped. The paper
-    rests exactly where each state puts it, and moves between rests as the simulator
-    folded it. Each fold names, for each face's copy of a vertex, how many layers lie
-    under it, and for each face whether it shows its back. The viewer thus draws
-    touching layers in their stacking.
+    paper's units, less where it lay the frame before, gzipped. Paper with thickness
+    plays exactly as the simulator folded it, its layers apart as contact kept them.
+    Paper without thickness rests exactly where each state puts it, and moves between
+    rests as the simulator folded it. Each fold then names, for each face's copy of a
+    vertex, how many layers lie under it, so the viewer draws touching layers in their
+    stacking. Each fold names, for each face, whether it shows its back.
     """
     steps = [data.step() for data in result.steps]
     last = steps[-1].state
@@ -164,7 +165,15 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
     copies = _copies(folding.mesh.triangles, folding.faces)
     posed = _Pose(np.eye(3), np.zeros(3))
     standing = False
-    for stage in folding.stages:
+    # Paper with thickness keeps its layers apart itself.
+    for stage in folding.stages if folding.creep > 0 else ():
+        _, kept = _shots(before, stage.frames)
+        frames[stage.step].extend(stage.frames[index] for index in kept)
+        films[stage.step]["folds"].append(
+            _fold(stage, last, len(kept), copies, lift=False)
+        )
+        before = stage.frames[-1]
+    for stage in folding.stages if folding.creep == 0 else ():
         parents = stage.state.parents(last)
         if stage.settled:
             # A settle stage bends the paper away from any state: its frames keep the
@@ -179,13 +188,7 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
                     shaped = _Pose.between(shaped, start).moved(shaped)
                     shaped[:, 2] += start[:, 2].min() - shaped[:, 2].min()
                 frames[stage.step].append(posed.moved(shaped))
-            films[stage.step]["folds"].append(
-                {
-                    "count": len(kept),
-                    "lifts": _packed(_lifts(stage, parents, copies)),
-                    "flips": [stage.state.faces[p].place.flips for p in parents],
-                }
-            )
+            films[stage.step]["folds"].append(_fold(stage, last, len(kept), copies))
             before, correction = stage.frames[-1], np.zeros_like(correction)
             continue
         # The paper rests exactly where its state puts it. Between rests it keeps the
@@ -205,23 +208,8 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
             frames[stage.step].append(posed.toward(pose, share).moved(shaped))
         before, correction, posed = found, after, pose
         standing = stage.form is not None
-        films[stage.step]["folds"].append(
-            {
-                "count": len(kept),
-                "lifts": _packed(_lifts(stage, parents, copies)),
-                "flips": [stage.state.faces[p].place.flips for p in parents],
-            }
-        )
-    # Frames keep whole steps, a thirty-thousandth of the paper's reach. Each frame
-    # stores how far it moved from the one before, and gzip packs the moves.
-    reach = max((np.abs(np.stack(own)).max() for own in frames if own), default=1.0)
-    step = reach / scale / _STEPS
-    for film, own in zip(films, frames, strict=True):
-        if own:
-            steps = np.rint(np.stack(own) / scale / step).astype(np.int64)
-            moves = np.diff(steps, axis=0, prepend=np.zeros_like(steps[:1]))
-            raw = np.ascontiguousarray(moves.astype("<i4")).tobytes()
-            film["frames"] = base64.b64encode(gzip.compress(raw, mtime=0)).decode()
+        films[stage.step]["folds"].append(_fold(stage, last, len(kept), copies))
+    step = _pack(films, frames, scale)
     return {
         "step": step,
         "rest": _packed((rest / scale).astype(np.float32)),
@@ -229,6 +217,53 @@ def film_data(result: BuildResult, folding: Folding) -> Data:
         "faces": _packed(folding.faces.astype(np.int32)),
         "vertices": len(folding.mesh.rest),
         "steps": films,
+    }
+
+
+def _pack(
+    films: Sequence[Data], frames: Sequence[Sequence[NDArray[np.float64]]], scale: float
+) -> float:
+    """Pack each step's frames into its film, and return the step they count in.
+
+    Frames keep whole steps, a thirty-thousandth of the paper's reach. Each frame
+    stores how far it moved from the one before, and gzip packs the moves.
+    """
+    reach = max(
+        (float(np.abs(np.stack(own)).max()) for own in frames if own), default=1.0
+    )
+    step = reach / scale / _STEPS
+    for film, own in zip(films, frames, strict=True):
+        if own:
+            steps = np.rint(np.stack(own) / scale / step).astype(np.int64)
+            moves = np.diff(steps, axis=0, prepend=np.zeros_like(steps[:1]))
+            raw = np.ascontiguousarray(moves.astype("<i4")).tobytes()
+            film["frames"] = base64.b64encode(gzip.compress(raw, mtime=0)).decode()
+    return step
+
+
+def _fold(
+    stage: Stage,
+    last: State,
+    count: int,
+    copies: NDArray[np.int64],
+    *,
+    lift: bool = True,
+) -> Data:
+    """A fold of a film: its frames, its lifts, and the faces that show their backs.
+
+    The lifts count the layers under each face's copy of a vertex. Without ``lift``,
+    the paper keeps its layers apart itself, and no copy lifts.
+    """
+    parents = stage.state.parents(last)
+    lifts = (
+        _lifts(stage, parents, copies)
+        if lift
+        else np.zeros(len(copies), dtype=np.uint8)
+    )
+    return {
+        "count": count,
+        "lifts": _packed(lifts),
+        "flips": [stage.state.faces[p].place.flips for p in parents],
     }
 
 

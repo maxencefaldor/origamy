@@ -54,7 +54,73 @@ macro_rules! project {
     )*};
 }
 
-project!(2, 3, 9, 12, 15, 18);
+project!(2, 3, 6, 9, 12, 15, 18);
+
+/// A symmetric matrix over points that moving them all alike leaves at zero, made positive
+/// semi-definite as [`Project`] does.
+///
+/// The energy of an element of paper stays the same when all its points move alike, so its
+/// Hessian vanishes on those motions. The projection then works on the rest of the motions
+/// alone, three fewer, and leaves the same matrix at a fraction of the cost.
+pub(crate) trait ProjectMoving {
+    /// The projected matrix.
+    fn project_moving(&self) -> Self;
+}
+
+/// Implements [`ProjectMoving`] for a Hessian of `$size` coordinates over `$points` points,
+/// with `$rest` = `$size` − 3 motions that do not move all the points alike.
+macro_rules! project_moving {
+    ($(($size:literal, $rest:literal, $points:literal)),*) => {$(
+        impl ProjectMoving for SMatrix<f64, $size, $size> {
+            fn project_moving(&self) -> Self {
+                if self.cholesky().is_some() || self.amax() == 0.0 {
+                    return *self;
+                }
+                let basis = moving_basis::<$size, $rest>($points);
+                let reduced = basis.transpose() * self * basis;
+                if reduced.cholesky().is_some() {
+                    return *self;
+                }
+                (basis * reduced.project() * basis.transpose()).symmetrize()
+            }
+        }
+    )*};
+}
+
+project_moving!((9, 6, 3), (12, 9, 4), (15, 12, 5), (18, 15, 6));
+
+/// An orthonormal basis of the motions of `points` points that do not move them all alike.
+///
+/// Along each axis, the j-th motion moves the first j points one way and the next point j
+/// times as far the other way, as Helmert's contrasts do.
+fn moving_basis<const S: usize, const R: usize>(points: usize) -> SMatrix<f64, S, R> {
+    let mut basis = SMatrix::<f64, S, R>::zeros();
+    for axis in 0..3 {
+        for j in 1..points {
+            let column = axis * (points - 1) + j - 1;
+            #[allow(clippy::cast_precision_loss)]
+            let scale = 1.0 / ((j * (j + 1)) as f64).sqrt();
+            for point in 0..j {
+                basis[(3 * point + axis, column)] = scale;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let last = -(j as f64) * scale;
+            basis[(3 * j + axis, column)] = last;
+        }
+    }
+    basis
+}
+
+/// A matrix made exactly symmetric.
+trait Symmetrize {
+    fn symmetrize(self) -> Self;
+}
+
+impl<const S: usize> Symmetrize for SMatrix<f64, S, S> {
+    fn symmetrize(self) -> Self {
+        (self + self.transpose()) * 0.5
+    }
+}
 
 /// The barrier that keeps a quantity `d` above zero: zero from `onset` up, smooth, and growing
 /// without bound as `d` falls to zero.
@@ -172,6 +238,21 @@ mod tests {
             for (e, f) in expected.iter().zip(&found) {
                 proptest::prop_assert!((e - f).abs() <= 1e-12 * size);
             }
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn projection_without_moving_alike_matches_the_full_one(
+            entries in proptest::collection::vec(-1e3..1e3f64, 81),
+        ) {
+            // A symmetric matrix over four points that vanishes when all move alike.
+            let raw = SMatrix::<f64, 9, 9>::from_column_slice(&entries);
+            let basis = moving_basis::<12, 9>(4);
+            let matrix = basis * (raw + raw.transpose()) * basis.transpose();
+            let size = matrix.norm();
+            let difference = matrix.project_moving() - matrix.project();
+            proptest::prop_assert!(difference.abs().max() <= 1e-10 * size);
         }
     }
 

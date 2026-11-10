@@ -393,14 +393,18 @@ pub(crate) fn candidates(
     pairs
 }
 
-/// Whether a pair lies within `gap` of its thickness in its flat sheet, so that its closeness is
-/// the sheet's own shape rather than contact.
+/// Whether a pair lies within half a circle round its reach in its flat sheet, so that its
+/// closeness is the sheet's own shape rather than contact.
+///
+/// The reach is the pair's thickness plus `gap`. A sheet folded flat round no other layer
+/// curls in half a circle that wide, so points of the curl that far apart in the flat sheet
+/// meet closer than the thickness.
 fn resting(primitives: &Primitives, pair: &Pair, gap: f64) -> bool {
     if pair.vertices.iter().any(|&v| primitives.is_body(v)) {
         return false;
     }
     let sheet = primitives.sheet[pair.vertices[0] as usize];
-    let reach = primitives.thickness(pair) + gap;
+    let reach = std::f64::consts::FRAC_PI_2 * (primitives.thickness(pair) + gap);
     pair.vertices
         .iter()
         .all(|&v| primitives.sheet[v as usize] == sheet)
@@ -487,6 +491,37 @@ mod tests {
         );
         // Without contact between layers, no pair of paper is a candidate.
         assert!(candidates(&primitives, &trees, &x, &x, 0.1, false).is_empty());
+    }
+
+    #[test]
+    fn a_curl_one_thickness_across_is_the_sheet_itself() {
+        // Two points of one sheet, a thickness apart in the flat sheet and then half a
+        // circle round it, meet across a curl one thickness across.
+        let thickness = 0.1;
+        let pair = |apart: f64| {
+            let primitives = Primitives {
+                triangles: Vec::new(),
+                edges: vec![[0, 1], [2, 3]],
+                axes: Vec::new(),
+                sheet: vec![0; 4],
+                rest: vec![
+                    Point::new(0.0, 0.0, 0.0),
+                    Point::new(0.0, 1.0, 0.0),
+                    Point::new(apart, 0.0, 0.0),
+                    Point::new(apart, 1.0, 0.0),
+                ],
+                half: vec![0.5 * thickness; 4],
+            };
+            let pair = Pair {
+                kind: Kind::EdgeEdge,
+                vertices: [0, 1, 2, 3],
+            };
+            resting(&primitives, &pair, 0.0)
+        };
+        let half_circle = std::f64::consts::FRAC_PI_2 * thickness;
+        assert!(pair(1.01 * thickness));
+        assert!(pair(0.99 * half_circle));
+        assert!(!pair(1.01 * half_circle));
     }
 
     #[test]

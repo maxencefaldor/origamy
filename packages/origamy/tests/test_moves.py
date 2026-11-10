@@ -8,7 +8,6 @@ test. A fold at a tipping point folds on some machines and not on others, so its
 expected failure may pass.
 """
 
-import math
 from collections.abc import Callable
 from typing import Final
 
@@ -16,7 +15,7 @@ import pytest
 
 from origamy import Line, Paper
 from origamy.physics import Physics, PhysicsError, simulate
-from origamy_sim import Contact, Settings, Table
+from origamy_sim import Contact
 
 UPRIGHT = Line.through(("1/2", 0), ("1/2", 1))
 LEVEL = Line.through((0, "1/2"), (1, "1/2"))
@@ -122,9 +121,8 @@ def _marks(stop: str | None) -> list[pytest.MarkDecorator]:
 )
 def test_a_move_folds_to_its_states(name: str, share: float) -> None:
     contact = Contact(thickness_share=share) if share else Contact(layers=False)
-    physics = Physics(
-        settings=Settings(time_step=math.inf, table=Table(), contact=contact)
-    )
+    settings = Physics().settings.model_copy(update={"contact": contact})
+    physics = Physics(settings=settings)
     try:
         folding = simulate(MOVES[name]().steps, physics)
     except PhysicsError as error:
