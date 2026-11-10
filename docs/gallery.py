@@ -13,7 +13,8 @@ Each viewer plays the model's film: the model as origamy's simulator folds it, f
 flat sheet, in the viewer's studio. The paper keeps its thickness, and contact keeps
 its layers apart, so the film plays exactly as the simulator folded it. A model whose
 simulation strays from its states, or settles with paper through paper, stops the
-script. Worker processes simulate the models in parallel, the longest first.
+script once every other viewer is written. Worker processes simulate the models in
+parallel, the longest first.
 
 Writing a viewer needs no browser, so the docs workflow runs this script on a plain
 runner. The viewers are build output, left out of the repository. With
@@ -148,11 +149,20 @@ async def main() -> None:
             loop.run_in_executor(pool, write_gallery_viewer, name, *cards[name])
             for name in order
         ]
+        strays: list[str] = []
         for job in asyncio.as_completed(jobs):
-            path, found = await job
+            try:
+                path, found = await job
+            except SystemExit as stray:
+                strays.append(str(stray))
+                print(stray)
+                continue
             size = path.stat().st_size / 1000
             print(f"wrote {path.relative_to(ROOT)}: {size:,.0f} kB, {found}")
-    print(f"wrote {len(cards)} viewers in {time.perf_counter() - started:.1f} s")
+    took = time.perf_counter() - started
+    print(f"wrote {len(cards) - len(strays)} viewers in {took:.1f} s")
+    if strays:
+        raise SystemExit("\n".join(strays))
     if "--thumbnails" in sys.argv:
         await draw_thumbnails(list(cards))
 

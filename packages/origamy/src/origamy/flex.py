@@ -13,7 +13,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import accumulate, pairwise
-from math import atan2, ceil, copysign, cos, inf, pi, radians, remainder, sin, sqrt, tau
+from math import atan2, ceil, cos, inf, pi, radians, remainder, sin, sqrt, tau
 from typing import Final, cast
 
 import numpy as np
@@ -308,13 +308,6 @@ def path(
     of the path's length. Share zero is where they lay before the step, and share one
     where they lie after it. No forms come back when no face keeps its place, or when
     no continuous rigid motion reaches the step's end.
-
-    A crease pressed flat one way that ends pressed flat the other, as a reverse fold's
-    spine does, turns through flat. No rigid motion turns it so while the paper round
-    it stays pressed, so the paper opens first. The crease turns to flat, and every
-    other crease follows as the loops need, the faces that keep their places parting.
-    The creases the step folds from flat then turn to their ends, and the others
-    follow, the parted faces closing again.
     """
     parents = before.parents(after)
     start = [embedding(before.faces[p].place) for p in parents]
@@ -333,18 +326,11 @@ def path(
     still = {i for i, e in enumerate(creases) if set(after.creases[e]) <= kept}
     first = [begin[e] for e in creases]
     turns = [finish[e] - begin[e] for e in creases]
-    flipped = {i for i, turn in enumerate(turns) if abs(turn) > pi}
-    if flipped:
-        legs = _through_flat(loops, first, turns, flipped)
-    else:
-        nearest = _Nearest(loops, first, turns, still)
-        walk = _walk(loops, first, nearest, still)
-        legs = None if walk is None else [(walk, still)]
-    if legs is None:
+    count = max(1, ceil(max(map(abs, turns), default=0.0) / _STEP))
+    nearest = _Nearest(loops, first, turns, count, still)
+    walk = _walk(loops, first, nearest, still)
+    if walk is None:
         return None
-    walk = [legs[0][0][0]] + [angles for leg, _ in legs for angles in leg[1:]]
-    # Each point past the first belongs to the leg that reached it.
-    holds = [held for leg, held in legs for _ in leg[1:]]
     lengths = list(accumulate(_apart(p, q) for p, q in pairwise(walk)))
     forms = []
     for share in shares:
@@ -352,44 +338,10 @@ def path(
             forms.append(_form(after, start))
             continue
         angles = _along(walk, lengths, share)
-        held = holds[min(bisect_left(lengths, share * lengths[-1]), len(holds) - 1)]
-        if not _close(loops, angles, held):
+        if not _close(loops, angles, still):
             return None
         forms.append(_form(after, _place(after, creases, angles, root, end[root])))
     return tuple(forms)
-
-
-def _through_flat(
-    loops: _Loops, first: list[float], turns: list[float], flipped: set[int]
-) -> list[tuple[list[list[float]], set[int]]] | None:
-    """The walks of a step whose creases ``flipped`` turn flat the other way.
-
-    The first walk turns those creases to a small turn short of flat, the rest
-    following, and the second turns the creases that start flat to their ends. Each
-    walk holds the creases it turns, and returns with them. Each closure starts from
-    the last one found, so the creases that follow move on from where they lie.
-    """
-    opened = [
-        angle + (turn / 2 - copysign(_STEP, turn) if i in flipped else 0.0)
-        for i, (angle, turn) in enumerate(zip(first, turns, strict=True))
-    ]
-    ends = [angle + turn for angle, turn in zip(first, turns, strict=True)]
-    folding = {
-        i
-        for i, (angle, turn) in enumerate(zip(first, turns, strict=True))
-        if abs(angle) < _STEP < abs(turn)
-    }
-    legs: list[tuple[list[list[float]], set[int]]] = []
-    start = first
-    for goal, held in ((opened, flipped), (ends, folding or flipped)):
-        leg = [g - h for g, h in zip(goal, start, strict=True)]
-        nearest = _Nearest(loops, start, leg, held, follow=True)
-        walk = _walk(loops, start, nearest, held)
-        if walk is None:
-            return None
-        legs.append((walk, held))
-        start = walk[-1]
-    return legs
 
 
 def _walk(
@@ -454,35 +406,20 @@ class _Nearest:
         loops: _Loops,
         first: list[float],
         turns: list[float],
+        steps: int,
         held: set[int],
-        *,
-        follow: bool = False,
     ) -> None:
         self.loops, self.first, self.turns = loops, first, turns
-        self.held, self.follow = held, follow
-        self.steps = max(1, ceil(max(map(abs, turns), default=0.0) / _STEP))
+        self.steps, self.held = steps, held
         self.found: dict[int, list[float] | None] = {}
 
     def __call__(self, step: int) -> list[float] | None:
-        """The closed loops nearest the even turns of a step, counted from 0.
-
-        With ``follow``, the creases not held start from the last loops found before
-        the step, rather than from their even turns.
-        """
+        """The closed loops nearest the even turns of a step, counted from 0."""
         if step not in self.found:
             share = (step + 1) / self.steps
             angles = [
                 a + t * share for a, t in zip(self.first, self.turns, strict=True)
             ]
-            found = [
-                k for k, near in self.found.items() if k < step and near is not None
-            ]
-            if self.follow and found:
-                last = cast("list[float]", self.found[max(found)])
-                angles = [
-                    angle if i in self.held else last[i]
-                    for i, angle in enumerate(angles)
-                ]
             closed = _close(self.loops, angles, self.held)
             self.found[step] = angles if closed else None
         return self.found[step]

@@ -928,13 +928,6 @@ Phase 6 adds these findings so far:
   The mesher then split the edge 0.44 µm from the line's end, leaving a sliver triangle across the line.
   Bands that yield as their spans turn bent the sliver to the strain cap, and the pentagon's first fold stopped 18 mm short.
   A point found again on a side now lies on that side, and the pentagon folds within 0.68 mm.
-- **Reverse folds that open through flat.**
-  An inside reverse fold's spine ends pressed flat the other way, and no rigid motion turns it so while the layers stay pressed.
-  The planner took a flat crease to lie where it lies flat the other way, so it kept the spine pressed and swung the flap round the outside.
-  The paper then ended 8.7 mm off, its layers in the wrong order.
-  The planner now opens such a crease to nearly flat, the other creases following, then folds the step's new creases to their ends.
-  Each closure starts from the last, so the creases that follow move on from where they lie.
-  A square folded on its diagonal, its corner reversed inside, now lands within 0.34 mm, every layer in order.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
