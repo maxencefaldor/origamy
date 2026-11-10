@@ -185,12 +185,16 @@ class Physics(BaseModel):
     real kami does where it crushes."""
 
     settings: Settings = Settings(
-        time_step=math.inf, table=Table(), solver=Solver(tolerance=1e-5)
+        time_step=math.inf,
+        table=Table(),
+        solver=Solver(tolerance=1e-5, iteration_limit=400),
     )
     """The simulation's settings.
 
     The default steps quasi-statically, under gravity, with the paper on a table. A time
     step ends once a Newton update moves no vertex 10 µm, a seventh of kami's thickness.
+    A crease band yields line by line as it turns, and each line's yield slows Newton's
+    method, so a time step may take 400 iterations.
     """
 
 

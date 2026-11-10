@@ -901,6 +901,15 @@ Phase 6 adds these findings so far:
   The trust radius now follows the same forecast, so a settling leaf no longer halves each update ten times.
   The radius shrinks only after the line search shortens a step, since a forecast near convergence is mostly rounding.
   The leaf settles in 19 s, and the square folded in half three times lands within 1.12 mm.
+- **Bands that yield line by line.**
+  A crease band yields one line after another as it turns, and Newton's method crawls past each yield.
+  In those slow steps the creases' elastic energy turns into yielding, and each step lowers the energy twice as far as its model foretells.
+  The model holds curvature the yielding lines no longer have, so the steps stay short.
+  The thin top corner stopped 200 iterations into one time step, 15 µm short.
+  Origamy's folds allow 400 iterations a step, and the top corner then converges.
+  A yield that sets in smoothly converged in half the iterations, but its creases flowed a little at every step, held or not.
+  Dropping the curvature of the angle from the creases' Hessians, as Gauss-Newton does, took 30,570 iterations where the full Hessian took 26,283.
+  Clearing curvature wherever a step decreased the energy as foretold or better saved a fifth of the iterations, but left a settling leaf unconverged.
 - **Paper that tears at 2%.**
   A fold across an edge folded before jams where the folds cross.
   The fox face's corners stopped upright, 71 mm high, the tension beside the crossing at the 0.5% cap.
