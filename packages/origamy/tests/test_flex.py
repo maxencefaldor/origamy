@@ -164,3 +164,22 @@ def test_a_petal_fold_follows_one_continuous_path() -> None:
     # The path ends where the faces lie after the step.
     for motion in forms[-1].motions:
         assert motion == pytest.approx(STILL, abs=1e-9)
+
+
+def test_a_reverse_fold_opens_its_spine_through_flat() -> None:
+    # The square folded in half on its diagonal, its corner reversed inside along a
+    # line slanted to the spine.
+    paper = Paper.square()
+    paper.valley(Line.through((0, 0), (1, 1)), flap=("3/4", "1/4"))
+    paper.reverse(Line.through(("5/8", 1), ("3/4", "3/4")), flap=("15/16", "31/32"))
+    before, after = paper.steps[-2].state, paper.steps[-1].state
+    forms = path(before, after, [k / 60 for k in range(61)])
+    assert forms is not None
+    for form in forms:
+        assert_form_whole(after, form)
+    # The reversed part of the spine turns from flat one way to flat the other, so the
+    # paper opens to nearly flat on the way.
+    angles = [crease_angles(after, placements(after, form)) for form in forms]
+    assert min(max(map(abs, turns.values())) for turns in angles) < math.radians(10)
+    for motion in forms[-1].motions:
+        assert motion == pytest.approx(STILL, abs=1e-9)

@@ -29,6 +29,15 @@ Heads and bodies folded flat, then stood up or lifted into relief.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
+-   ![The whale example](images/gallery-whale.png)
+
+    **[Whale](gallery/whale.html)** · 8 steps
+
+    A kite whose blunt corner folds over as the head, halved along its spine.
+    The tail reverse folds up between the body's layers, and the whale stands on its belly.
+
+    [Open in 3D](gallery/whale.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/whale.py)
+
 -   ![The fox face example](images/gallery-fox-face.png)
 
     **[Fox face](gallery/fox-face.html)** · 8 steps
