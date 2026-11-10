@@ -101,15 +101,6 @@ Paper planes whose wings spread level from the body.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
--   ![The paper plane example](images/gallery-paper-plane.png)
-
-    **[Paper plane](gallery/paper-plane.html)** · 14 steps
-
-    The classic dart, from A-series paper √2 times as tall as it is wide.
-    Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
-
-    [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
-
 -   ![The nakamura lock example](images/gallery-nakamura-lock.png)
 
     **[Nakamura lock](gallery/nakamura-lock.html)** · 9 steps
@@ -136,24 +127,6 @@ Traditional models folded step by step as diagrams teach them, with every crease
     Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
 
     [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
-
--   ![The cup example](images/gallery-cup.png)
-
-    **[Cup](gallery/cup.html)** · 9 steps
-
-    A traditional paper cup, from simple folds only.
-    Each side corner travels along its angle's bisector, found by a precrease.
-
-    [Open in 3D](gallery/cup.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cup.py)
-
--   ![The fortune teller example](images/gallery-fortune-teller.png)
-
-    **[Fortune teller](gallery/fortune-teller.html)** · 13 steps
-
-    Corners to the center on both sides, then folded in half: the flat form before the fingers go in.
-    The diagonals, creased first, locate every fold.
-
-    [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
 
 </div>
 
@@ -314,14 +287,6 @@ The bases most traditional models start from: plain folds, collapses and petal f
     Two opposite edges folded to the middle, as a cupboard's doors.
 
     [Open in 3D](gallery/cupboard-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cupboard_base.py)
-
--   ![The preliminary base example](images/gallery-preliminary-base.png)
-
-    **[Preliminary base](gallery/preliminary-base.html)** · 5 steps
-
-    Four precreases through the center, collapsed in one step into a square of four flaps.
-
-    [Open in 3D](gallery/preliminary-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/preliminary_base.py)
 
 -   ![The waterbomb base example](images/gallery-waterbomb-base.png)
 
