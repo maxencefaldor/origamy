@@ -251,7 +251,10 @@ class Folding:
     faces: NDArray[np.int64]
     """Each triangle's face in the last step's state."""
     creep: float
-    """The farthest a face may creep back where its creases wrap layers, in meters."""
+    """The farthest a face may creep back where its creases wrap layers, in meters.
+
+    A face lands back by the band paper its curl leaves flat, folded back with it, and
+    by the curl itself: at most twice the widest band, all its paper folded back."""
     stages: tuple[Stage, ...]
     """Each fold, in order."""
 
@@ -356,7 +359,7 @@ class _Folder:
         extents = (
             _extents(folds, last, layer, physics.bands.slack) if contact.layers else {}
         )
-        self.creep = max(extents.values(), default=0.0)
+        self.creep = 2 * max(extents.values(), default=0.0)
         self.mesh, self.faces, lines = _mesh(last, scale, extents, physics)
         sheet = Sheet(self.mesh, physics.material)
         drives = _Drives.of(last, self.mesh, self.faces, lines)

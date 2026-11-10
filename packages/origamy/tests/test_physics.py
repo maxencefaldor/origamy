@@ -46,8 +46,8 @@ def assert_folds_as_its_states(folding: Folding) -> None:
     """Every fold converges and ends in its state.
 
     Every vertex beside the bands lies at its place, every pair stacks right, and no
-    paper passes through paper. A vertex may creep as far as a band is wide. No paper
-    passes below the table on the way.
+    paper passes through paper. A vertex may creep back by twice the widest band, all
+    its paper folded back. No paper passes below the table on the way.
     """
     for stage in folding.stages:
         assert stage.converged, stage.step
@@ -151,7 +151,7 @@ def test_a_crease_bends_round_the_layer_it_wraps() -> None:
     # The crease bends over a band twice half a circle round the strip and itself. The
     # band reaches below the crease, into the doubled strip the fold turns up.
     width = physics.bands.slack * math.pi * LAYER
-    assert folding.creep == pytest.approx(width)
+    assert folding.creep == pytest.approx(2 * width)
     crease = physics.size / 4
     count = 2 * physics.bands.lines
     for rank in range(count + 1):
