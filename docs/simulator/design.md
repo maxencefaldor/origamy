@@ -357,11 +357,15 @@ Each time step minimizes the incremental potential with a projected Newton metho
 
 - **Hessian.**
   Each energy term contributes its exact Hessian.
-  Where their sum is not positive definite, each element's Hessian takes the absolute value of its eigenvalues, so every Newton direction descends.
-  Flipping negative curvature, rather than clearing it, keeps its size in the step and converges faster.
+  Where their sum is not positive definite, each element's Hessian filters its negative eigenvalues, so every Newton direction descends.
+  The filter follows Chen et al.'s trust-region eigenvalue filtering.
+  Where the last step's decrease of energy came within a tenth of its model's forecast, the filter clears negative curvature, staying close to Newton's method.
+  Elsewhere, and at a time step's first iteration, it flips negative curvature, keeping its size in a more cautious step.
 - **Trust radius.**
   No Newton update moves a vertex farther than a trust radius in meters.
-  The radius doubles each time an update it shortened is taken whole.
+  The radius follows how well each update's quadratic model foretells the decrease of energy its step takes, as in a trust-region method.
+  A decrease under a quarter of the forecast shrinks the radius to a quarter of the step.
+  A decrease over three quarters of it, from an update the radius shortened and the step took whole, doubles the radius.
   Where some motion costs nearly no energy, as for a sheet held along one line, the update would otherwise run off by millions of meters.
   Where some motion costs no energy at all, the Hessian is singular, and a Levenberg–Marquardt shift of |g|∞ / r takes its place.
   The shift sends that motion down the gradient g by at most the trust radius r.
@@ -880,10 +884,27 @@ Phase 6 adds these findings so far:
   The waterbomb base stopped 80 mm short of its state, its bands at the strain cap beside the hole at its center.
   Bands of one line a side fold it within 0.21 mm, and fold pleats in half within 0.98 mm, both in under four minutes.
 - **Projections without moving alike.**
-  A Hessian the solver cannot factor takes each element's Hessian with its eigenvalues made positive.
+  A Hessian the solver cannot factor takes each element's Hessian with its negative eigenvalues projected away.
   Those projections took 45% of a fold's time, dihedrals two thirds of it.
   An element's energy stays the same when all its points move alike, so its Hessian vanishes on those motions.
   Each projection now works on the other motions alone: a 9 by 9 matrix for a dihedral, in place of 12 by 12, with the same result.
+- **Contact pairs left out as they are found.**
+  Each Newton iteration sorted every candidate pair, then measured each one's distance in the flat sheet.
+  Those two passes took most of a settling leaf's time.
+  Each search now leaves out a pair of one sheet as it finds it, after comparing their boxes in the flat sheet first.
+  The pairs come once each, so nothing sorts them, and the leaf settles in 70 s in place of 82 s.
+- **Filters that follow the fit.**
+  Flipped curvature stiffens a fold's turn wherever a narrow band bends, and Newton's method then crawls.
+  Folding a square in half three times took 7,151 iterations and landed 1.79 mm off, two folds unconverged.
+  Clearing curvature took 5,681 and landed 1.20 mm off, all converged, but a sheet hanging from a capsule stopped converging.
+  Chen et al.'s trust-region filter clears curvature where the last step's decrease came within a tenth of its forecast, and flips it elsewhere.
+  The trust radius now follows the same forecast, so a settling leaf no longer halves each update ten times.
+  The leaf settles in 31 s, and the preliminary base folds in 26,283 iterations in place of 30,013.
+- **Paper that tears at 2%.**
+  A fold across an edge folded before jams where the folds cross.
+  The fox face's corners stopped upright, 71 mm high, the tension beside the crossing at the 0.5% cap.
+  Real kami crushes and creeps there, and paper stretches 1% to 3% before it tears.
+  Origamy's folds cap tension at 2%, and the fox face folds within 1.13 mm of every state.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

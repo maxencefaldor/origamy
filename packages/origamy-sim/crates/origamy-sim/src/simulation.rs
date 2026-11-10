@@ -19,7 +19,7 @@ use crate::contact::{self, Pair, Primitives, Trees, ccd, distance};
 use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
-use crate::energy::{Point, ProjectMoving};
+use crate::energy::{Filter, Point, ProjectMoving};
 use crate::parameter::{ParameterError, finite};
 use crate::settings::Settings;
 use crate::sheet::{Order, Sheet, SheetError};
@@ -122,6 +122,62 @@ impl Potential {
 
 /// The share of the energy's size under which a change of energy is rounding.
 const ROUNDING: f64 = 1e-12;
+
+/// A step a Newton iteration took, and what it teaches the next iteration.
+struct Taken {
+    /// The largest vertex move of the Newton update, before any trust radius shrank it.
+    update: f64,
+    /// Whether the trust radius shrank the update.
+    clamped: bool,
+    /// The gradient along the update the line search took fractions of.
+    slope: f64,
+    /// The fraction of that update the step took.
+    fraction: f64,
+    /// The decrease of the potential the step brought.
+    decrease: f64,
+    /// The change of the potential that is rounding.
+    rounding: f64,
+}
+
+impl Taken {
+    /// The trust radius and the filter for the next iteration, from the radius `radius` this
+    /// step had.
+    ///
+    /// The radius follows how well the update's quadratic model foretold the decrease the step
+    /// took, as in a trust-region method. A poor forecast shrinks the radius to a quarter of
+    /// the step; a close one, from an update the radius shrank and the step took whole,
+    /// doubles it. A forecast within rounding tells nothing, and leaves the radius to grow. A
+    /// model that fits clears negative curvature from the next Hessian projected; one that
+    /// does not flips it.
+    fn teach(&self, radius: f64) -> (f64, Filter) {
+        let reach = if self.clamped {
+            radius / self.update
+        } else {
+            1.0
+        };
+        let foretold = -self.slope * self.fraction * (1.0 - 0.5 * self.fraction * reach);
+        let ratio = self.decrease / foretold;
+        let telling = foretold > self.rounding;
+        let whole = self.clamped && self.fraction >= 1.0;
+        let radius = if telling && ratio < 0.25 {
+            0.25 * self.fraction * self.update.min(radius)
+        } else if (!telling || ratio > 0.75) && whole {
+            2.0 * radius
+        } else {
+            radius
+        };
+        let filter = if telling && (ratio - 1.0).abs() <= FIT {
+            Filter::Clear
+        } else {
+            Filter::Flip
+        };
+        (radius, filter)
+    }
+}
+
+/// How far the decrease of energy a step takes may stray, as a share of the decrease its
+/// model foretold, for the model to fit: Chen et al.'s threshold for clearing curvature.
+const FIT: f64 = 0.1;
 
 /// What a time step did.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1127,6 +1183,8 @@ impl Simulation {
         let (mut converged, mut iterations, mut update) = (false, 0, f64::INFINITY);
         let mut previous = f64::INFINITY;
         let mut radius = self.settings.solver.trust_radius;
+        // Flipped curvature until a step shows how well the model fits.
+        let mut filter = Filter::Flip;
         while iterations < self.settings.solver.iteration_limit {
             iterations += 1;
             let near = self.candidates(&x, &x);
@@ -1136,12 +1194,12 @@ impl Simulation {
             // The exact Hessian gives Newton's quadratic convergence wherever it is positive
             // definite; elsewhere each element's Hessian is projected to be.
             let mut assembly = Assembly::new(pattern, &self.fixed);
-            derivatives.scatter(&mut assembly, false);
+            derivatives.scatter(&mut assembly, None);
             let factor = if let Ok(factor) = assembly.factor() {
                 factor
             } else {
                 assembly = Assembly::new(pattern, &self.fixed);
-                derivatives.scatter(&mut assembly, true);
+                derivatives.scatter(&mut assembly, Some(filter));
                 assembly.factor_within(radius, self.rounding(&x))?
             };
             let negative: Vec<f64> = assembly.gradient.iter().map(|g| -g).collect();
@@ -1194,18 +1252,25 @@ impl Simulation {
             };
             match self.line_search(&x, &direction, &search) {
                 Some((next, next_potential, fraction)) => {
+                    let decrease = potential.total() - next_potential.total();
+                    let taken = Taken {
+                        update,
+                        clamped,
+                        slope,
+                        fraction,
+                        decrease,
+                        rounding: ROUNDING * potential.size(),
+                    };
+                    (radius, filter) = taken.teach(radius);
                     x = next;
                     potential = next_potential;
-                    // An update the radius shrank, taken whole, says the model holds farther.
-                    if clamped && fraction >= 1.0 {
-                        radius *= 2.0;
-                    }
                 }
                 // An update no fraction of which lowers the energy runs where its model fails,
                 // as soft motion into contact does: the radius shrinks below it, down to the
                 // tolerance.
                 None if update.min(radius) > self.settings.solver.tolerance => {
                     radius = update.min(radius) * self.settings.solver.backtracking;
+                    filter = Filter::Flip;
                 }
                 None => break,
             }
@@ -2119,21 +2184,21 @@ struct Derivatives {
 impl Derivatives {
     /// Fills an assembly. With `projected`, each element's Hessian is projected to be positive
     /// semi-definite first.
-    fn scatter(&self, assembly: &mut Assembly, projected: bool) {
+    fn scatter(&self, assembly: &mut Assembly, filter: Option<Filter>) {
         for &(vertex, force, diagonal) in &self.vertices {
             assembly.add_vertex(vertex, force, diagonal);
         }
         for &(vertex, slope, curvature) in &self.table {
             assembly.add_vertex_z(vertex, slope, curvature);
         }
-        scatter_elements(&self.pairs, assembly, projected);
-        scatter_elements(&self.orders, assembly, projected);
+        scatter_elements(&self.pairs, assembly, filter);
+        scatter_elements(&self.orders, assembly, filter);
         scatter_exact(&self.friction, assembly);
         scatter_exact(&self.drag, assembly);
-        scatter_elements(&self.triangles, assembly, projected);
+        scatter_elements(&self.triangles, assembly, filter);
         scatter_exact(&self.plates, assembly);
-        scatter_elements(&self.dihedrals, assembly, projected);
-        scatter_elements(&self.spans, assembly, projected);
+        scatter_elements(&self.dihedrals, assembly, filter);
+        scatter_elements(&self.spans, assembly, filter);
     }
 
     /// The pairs of vertices that contact, friction and orders join, which the sheets'
@@ -2195,14 +2260,14 @@ fn scatter_exact<const N: usize, const D: usize>(
 fn scatter_elements<const N: usize, const D: usize>(
     elements: &[Element<N, D>],
     assembly: &mut Assembly,
-    projected: bool,
+    filter: Option<Filter>,
 ) where
     SMatrix<f64, D, D>: ProjectMoving,
 {
-    if projected {
+    if let Some(filter) = filter {
         let hessians: Vec<SMatrix<f64, D, D>> = elements
             .par_iter()
-            .map(|(_, _, h)| h.project_moving())
+            .map(|(_, _, h)| h.project_moving(filter))
             .collect();
         for ((stencil, gradient, _), hessian) in elements.iter().zip(&hessians) {
             assembly.add(stencil, gradient, hessian);
@@ -2662,7 +2727,7 @@ mod tests {
             let mut assembly = Assembly::new(&pattern, &free);
             simulation
                 .derivatives(y, &incremental, &pairs)
-                .scatter(&mut assembly, false);
+                .scatter(&mut assembly, None);
             assembly
         };
         let gradient = |y: &[Point]| assemble(y).gradient;

@@ -45,8 +45,9 @@ pub struct Solver {
     pub hold_rounds: usize,
     /// The longest move of any vertex a time step's first Newton update may take, in meters.
     ///
-    /// A longer update shrinks to this trust radius. An update shrunk and then taken whole
-    /// doubles the radius for the next update of the time step.
+    /// A longer update shrinks to this trust radius. A step whose decrease of energy falls
+    /// well short of its update's quadratic model shrinks the radius to a quarter of the step.
+    /// An update shrunk and then taken whole, its decrease close to the model's, doubles it.
     pub trust_radius: f64,
     /// The fraction of the predicted decrease of energy a line search requires, between 0 and 1.
     pub sufficient_decrease: f64,

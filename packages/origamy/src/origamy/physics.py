@@ -83,6 +83,7 @@ from origamy_sim import (
     Sheet,
     Simulation,
     Solver,
+    StrainLimit,
     Table,
 )
 
@@ -174,12 +175,14 @@ class Physics(BaseModel):
     bands: Bands = Bands()
     """How creases that wrap other layers bend round them."""
 
-    material: Material = Material(compression=1e-3)
+    material: Material = Material(compression=1e-3, strain_limit=StrainLimit(cap=0.02))
     """The paper's material: kami, which wrinkles under compression, keeping a
-    thousandth of its stiffness there.
+    thousandth of its stiffness there, and stretches up to 2% before it tears.
 
     A fold that wraps layers a crease joins makes the outer layer travel farther round
-    it, and folded kami takes the difference by wrinkling."""
+    it, and folded kami takes the difference by wrinkling. Where a fold crosses an edge
+    folded before it, the paper round the crossing stretches past half a percent, as
+    real kami does where it crushes."""
 
     settings: Settings = Settings(
         time_step=math.inf, table=Table(), solver=Solver(tolerance=1e-5)

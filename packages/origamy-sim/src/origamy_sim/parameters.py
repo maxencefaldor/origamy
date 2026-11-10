@@ -292,8 +292,10 @@ class Solver(_Parameters):
     trust_radius: Positive = 0.25
     """The longest vertex move of a time step's first Newton update, in meters.
 
-    A longer update shrinks to this trust radius. An update shrunk and then taken whole
-    doubles the radius for the next update of the time step.
+    A longer update shrinks to this trust radius. A step whose decrease of energy falls
+    well short of its update's quadratic model shrinks the radius to a quarter of the
+    step. An update shrunk and then taken whole, its decrease close to the model's,
+    doubles it.
     """
 
     sufficient_decrease: Fraction = 1e-4

@@ -18,15 +18,33 @@ pub(crate) struct Local<const D: usize> {
     pub hessian: SMatrix<f64, D, D>,
 }
 
-/// A symmetric matrix made positive semi-definite by taking the absolute value of each
-/// eigenvalue.
+/// How a projection makes a symmetric matrix positive semi-definite.
 ///
-/// Flipping negative curvature, rather than clearing it, keeps its size in the Newton step,
-/// which then converges faster. The filter follows Chen et al., Stabler Neo-Hookean
-/// Simulation: Absolute Eigenvalue Filtering for Projected Newton, 2024.
+/// The choice follows Chen et al., Trust-Region Eigenvalue Filtering for Projected Newton,
+/// 2024. Clearing negative curvature stays closest to Newton's method, where the model of the
+/// energy fits. Flipping it keeps its size, a step more cautious where the model fits badly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Filter {
+    /// Each negative eigenvalue becomes zero, after Teran et al., 2005.
+    Clear,
+    /// Each eigenvalue becomes its absolute value, after Chen et al., 2024.
+    Flip,
+}
+
+impl Filter {
+    /// An eigenvalue as the filter leaves it.
+    fn apply(self, eigenvalue: f64) -> f64 {
+        match self {
+            Self::Clear => eigenvalue.max(0.0),
+            Self::Flip => eigenvalue.abs(),
+        }
+    }
+}
+
+/// A symmetric matrix made positive semi-definite by a [`Filter`] on its eigenvalues.
 pub(crate) trait Project {
     /// The projected matrix.
-    fn project(&self) -> Self;
+    fn project(&self, filter: Filter) -> Self;
 }
 
 /// Implements [`Project`] for the sizes of the elements' Hessians, where nalgebra's eigen
@@ -34,7 +52,7 @@ pub(crate) trait Project {
 macro_rules! project {
     ($($size:literal),*) => {$(
         impl Project for SMatrix<f64, $size, $size> {
-            fn project(&self) -> Self {
+            fn project(&self, filter: Filter) -> Self {
                 // A matrix with a Cholesky factor is already positive definite. A matrix that
                 // gains one from a shift at the scale of rounding is semi-definite already.
                 if self.cholesky().is_some() || self.amax() == 0.0 {
@@ -45,10 +63,10 @@ macro_rules! project {
                     return *self;
                 }
                 let eigen = self.symmetric_eigen();
-                let flipped = eigen.eigenvectors
-                    * SMatrix::from_diagonal(&eigen.eigenvalues.abs())
+                let filtered = eigen.eigenvectors
+                    * SMatrix::from_diagonal(&eigen.eigenvalues.map(|e| filter.apply(e)))
                     * eigen.eigenvectors.transpose();
-                (flipped + flipped.transpose()) * 0.5
+                (filtered + filtered.transpose()) * 0.5
             }
         }
     )*};
@@ -64,7 +82,7 @@ project!(2, 3, 6, 9, 12, 15, 18);
 /// alone, three fewer, and leaves the same matrix at a fraction of the cost.
 pub(crate) trait ProjectMoving {
     /// The projected matrix.
-    fn project_moving(&self) -> Self;
+    fn project_moving(&self, filter: Filter) -> Self;
 }
 
 /// Implements [`ProjectMoving`] for a Hessian of `$size` coordinates over `$points` points,
@@ -72,7 +90,7 @@ pub(crate) trait ProjectMoving {
 macro_rules! project_moving {
     ($(($size:literal, $rest:literal, $points:literal)),*) => {$(
         impl ProjectMoving for SMatrix<f64, $size, $size> {
-            fn project_moving(&self) -> Self {
+            fn project_moving(&self, filter: Filter) -> Self {
                 if self.cholesky().is_some() || self.amax() == 0.0 {
                     return *self;
                 }
@@ -81,7 +99,7 @@ macro_rules! project_moving {
                 if reduced.cholesky().is_some() {
                     return *self;
                 }
-                (basis * reduced.project() * basis.transpose()).symmetrize()
+                (basis * reduced.project(filter) * basis.transpose()).symmetrize()
             }
         }
     )*};
@@ -224,19 +242,22 @@ mod tests {
 
     proptest::proptest! {
         #[test]
-        fn projection_takes_each_eigenvalue_in_size(
+        fn projection_filters_each_eigenvalue(
             entries in proptest::collection::vec(-1e3..1e3f64, 144),
         ) {
             let raw = SMatrix::<f64, 12, 12>::from_column_slice(&entries);
             let matrix = raw + raw.transpose();
             let size = matrix.norm();
-            let mut expected: Vec<f64> =
-                matrix.symmetric_eigenvalues().iter().map(|v| v.abs()).collect();
-            let mut found: Vec<f64> = matrix.project().symmetric_eigenvalues().iter().copied().collect();
-            expected.sort_by(f64::total_cmp);
-            found.sort_by(f64::total_cmp);
-            for (e, f) in expected.iter().zip(&found) {
-                proptest::prop_assert!((e - f).abs() <= 1e-12 * size);
+            for filter in [Filter::Clear, Filter::Flip] {
+                let mut expected: Vec<f64> =
+                    matrix.symmetric_eigenvalues().iter().map(|&v| filter.apply(v)).collect();
+                let mut found: Vec<f64> =
+                    matrix.project(filter).symmetric_eigenvalues().iter().copied().collect();
+                expected.sort_by(f64::total_cmp);
+                found.sort_by(f64::total_cmp);
+                for (e, f) in expected.iter().zip(&found) {
+                    proptest::prop_assert!((e - f).abs() <= 1e-12 * size);
+                }
             }
         }
     }
@@ -251,19 +272,22 @@ mod tests {
             let basis = moving_basis::<12, 9>(4);
             let matrix = basis * (raw + raw.transpose()) * basis.transpose();
             let size = matrix.norm();
-            let difference = matrix.project_moving() - matrix.project();
-            proptest::prop_assert!(difference.abs().max() <= 1e-10 * size);
+            for filter in [Filter::Clear, Filter::Flip] {
+                let difference = matrix.project_moving(filter) - matrix.project(filter);
+                proptest::prop_assert!(difference.abs().max() <= 1e-10 * size);
+            }
         }
     }
 
     #[test]
-    fn projection_flips_negative_eigenvalues() {
+    fn projection_clears_or_flips_negative_eigenvalues() {
         // The eigenvalues are 3 and −1, along (1, 1) and (1, −1).
         let matrix = SMatrix::<f64, 2, 2>::new(1.0, 2.0, 2.0, 1.0);
-        let projected = matrix.project();
-        let expected = SMatrix::<f64, 2, 2>::new(2.0, 1.0, 1.0, 2.0);
-        assert!((projected - expected).abs().max() < 1e-12);
+        let cleared = SMatrix::<f64, 2, 2>::new(1.5, 1.5, 1.5, 1.5);
+        let flipped = SMatrix::<f64, 2, 2>::new(2.0, 1.0, 1.0, 2.0);
+        assert!((matrix.project(Filter::Clear) - cleared).abs().max() < 1e-12);
+        assert!((matrix.project(Filter::Flip) - flipped).abs().max() < 1e-12);
         let definite = SMatrix::<f64, 2, 2>::new(2.0, 1.0, 1.0, 2.0);
-        assert_eq!(definite.project(), definite);
+        assert_eq!(definite.project(Filter::Clear), definite);
     }
 }

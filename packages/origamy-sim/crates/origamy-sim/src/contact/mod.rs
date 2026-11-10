@@ -336,6 +336,7 @@ pub(crate) fn candidates(
                     kind: Kind::PointTriangle,
                     vertices: [v, a, b, c],
                 })
+                .filter(|pair| !resting(primitives, pair, gap))
                 .collect()
         })
         .collect();
@@ -357,6 +358,7 @@ pub(crate) fn candidates(
                     kind: Kind::EdgeEdge,
                     vertices: [a[0], a[1], b[0], b[1]],
                 })
+                .filter(|pair| !resting(primitives, pair, gap))
                 .collect()
         })
         .collect();
@@ -381,16 +383,14 @@ pub(crate) fn candidates(
                 }),
         );
     }
-    let mut pairs: Vec<Pair> = point_pairs
+    // Each pair comes once: a point meets each triangle once, an edge each later edge, and an
+    // axis each edge and point. A body's pairs are never the sheet's own shape.
+    point_pairs
         .into_iter()
         .flatten()
         .chain(edge_pairs.into_iter().flatten())
         .chain(axis_pairs)
-        .collect();
-    pairs.sort_unstable();
-    pairs.dedup();
-    pairs.retain(|pair| !resting(primitives, pair, gap));
-    pairs
+        .collect()
 }
 
 /// Whether a pair lies within half a circle round its reach in its flat sheet, so that its
@@ -404,11 +404,36 @@ fn resting(primitives: &Primitives, pair: &Pair, gap: f64) -> bool {
         return false;
     }
     let sheet = primitives.sheet[pair.vertices[0] as usize];
-    let reach = std::f64::consts::FRAC_PI_2 * (primitives.thickness(pair) + gap);
-    pair.vertices
+    if pair
+        .vertices
         .iter()
-        .all(|&v| primitives.sheet[v as usize] == sheet)
-        && distance::squared(pair.kind, &pair.at(&primitives.rest)) < reach * reach
+        .any(|&v| primitives.sheet[v as usize] != sheet)
+    {
+        return false;
+    }
+    let reach = std::f64::consts::FRAC_PI_2 * (primitives.thickness(pair) + gap);
+    let rest = pair.at(&primitives.rest);
+    // Primitives whose boxes lie that far apart in the flat sheet lie at least as far apart.
+    let (first, second) = match pair.kind {
+        Kind::PointTriangle => (&rest[..1], &rest[1..]),
+        Kind::PointEdge => (&rest[..1], &rest[1..3]),
+        Kind::EdgeEdge => (&rest[..2], &rest[2..]),
+    };
+    let (low, high) = bounds(first);
+    let (other_low, other_high) = bounds(second);
+    let apart = (other_low - high)
+        .sup(&(low - other_high))
+        .sup(&Point::zeros());
+    apart.norm_squared() < reach * reach && distance::squared(pair.kind, &rest) < reach * reach
+}
+
+/// The box round some points.
+fn bounds(points: &[Point]) -> Bounds {
+    points
+        .iter()
+        .fold((points[0], points[0]), |(low, high), p| {
+            (low.inf(p), high.sup(p))
+        })
 }
 
 #[cfg(test)]
