@@ -335,12 +335,14 @@ def test_a_tilt_stands_the_whole_paper_up_on_the_table() -> None:
     paper = Paper.square()
     paper.valley(UPRIGHT, flap=("3/4", "1/2"))
     paper.tilt(Line.through((0, 0), (1, 0)), flap=("1/4", "1/2"), angle=90)
-    stage = simulate(paper.steps).stages[-1]
+    folding = simulate(paper.steps)
+    stage = folding.stages[-1]
     assert stage.form is not None
     heights = stage.frames[-1][:, 2]
     assert heights.min() == pytest.approx(LYING, abs=PHYSICS.settings.contact.gap)
     assert heights.max() == pytest.approx(LYING + PHYSICS.size, abs=1e-3)
-    assert stage.offset < 1e-4
+    # The tilt carries the folded paper whole, as far off its state as the fold left it.
+    assert stage.offset < 1e-4 + folding.creep
 
 
 @pytest.mark.parametrize(
