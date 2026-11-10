@@ -65,6 +65,14 @@ def pleats_in_half() -> Paper:
     return paper
 
 
+def inside_reverse() -> Paper:
+    """A square folded on its diagonal, its corner reversed between the layers."""
+    paper = Paper.square()
+    paper.valley(Line.through((0, 0), (1, 1)), flap=("3/4", "1/4"))
+    paper.reverse(Line.through(("5/8", 1), ("3/4", "3/4")), flap=("15/16", "31/32"))
+    return paper
+
+
 FULL, THIN, NONE = 1.0, 0.05, 0.0
 """The shares of kami's thickness that contact keeps: all of it, a twentieth, and none.
 
@@ -77,6 +85,7 @@ MOVES: dict[str, Callable[[], Paper]] = {
     "half three times": half_three_times,
     "top corner": top_corner,
     "pleats in half": pleats_in_half,
+    "inside reverse": inside_reverse,
 }
 
 TIPPING: Final = "the second fold folds on some machines and stops short on others"
@@ -92,8 +101,11 @@ STOPS: dict[tuple[str, float], str | None] = {
     ("top corner", FULL): None,
     ("top corner", THIN): None,
     ("pleats in half", FULL): None,
-    ("pleats in half", THIN): "the last fold stops short of its state",
+    ("pleats in half", THIN): None,
+    ("inside reverse", FULL): None,
+    ("inside reverse", THIN): "a time step of the reverse fold does not converge",
     **{(name, NONE): None for name in MOVES},
+    ("inside reverse", NONE): "a time step of the reverse fold does not converge",
 }
 """Each move at each share of the thickness, with what stops it if the simulator cannot
 fold it yet."""

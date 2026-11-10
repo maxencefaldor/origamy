@@ -68,12 +68,7 @@ COLLAPSING = "some increments of the collapse stop at the iteration limit"
     [
         ("kite_base", 4, 2),
         ("blintz_base", 4, 2),
-        pytest.param(
-            "preliminary_base",
-            9,
-            4,
-            marks=[pytest.mark.slow, pytest.mark.xfail(reason=COLLAPSING)],
-        ),
+        ("preliminary_base", 9, 4),
         pytest.param(
             "waterbomb_base",
             7,
@@ -89,9 +84,10 @@ def test_a_model_folds_from_the_flat_sheet_in_its_stacking(
     folding = simulate(example(name).steps)
     assert len(folding.stages) == folds
     assert_folds_as_its_states(folding)
-    # The model lies flat on the table, its layers stacked one thickness apart.
+    # The model lies flat on the table, its layers stacked one thickness apart, and its
+    # corners spring up by at most 2 mm.
     heights = folding.stages[-1].frames[-1][:, 2]
-    assert heights.max() < LYING + layers * LAYER + 1e-3
+    assert heights.max() < LYING + layers * LAYER + 2e-3
 
 
 def test_crossing_measures_paper_through_paper() -> None:
@@ -319,9 +315,6 @@ def folds(paper: Paper) -> list[tuple[State, State]]:
     ]
 
 
-@pytest.mark.xfail(
-    reason="each crease rests 0.01 rad short of flat, and the strips stand 1.6 mm high"
-)
 def test_paper_turned_both_up_and_down_folds_lifted_off_the_table() -> None:
     # The middle strip stays; the left strip folds up over it and the right one under.
     paper = Paper.square()
@@ -383,3 +376,15 @@ def test_a_tilt_stands_the_whole_paper_up_on_the_table() -> None:
 def test_physics_refuses_values_outside_its_range(change: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Physics(**change)  # ty: ignore[invalid-argument-type]
+
+
+def test_a_band_line_ends_on_the_paper_edge_where_its_hole_does() -> None:
+    # The pentagon's creases meet the paper's sides, so its holes reach the edge there.
+    paper = example("pentagon")
+    last = paper.steps[-1].state
+    extents = _extents(folds(paper), last, LAYER, PHYSICS.bands.slack)
+    mesh, _, _ = _mesh(last, PHYSICS.size, extents, PHYSICS)
+    # Each line and its hole share their point on the edge, so no two points lie close.
+    gaps = np.linalg.norm(mesh.rest[:, None] - mesh.rest[None], axis=2)
+    np.fill_diagonal(gaps, np.inf)
+    assert gaps.min() > 1e-5

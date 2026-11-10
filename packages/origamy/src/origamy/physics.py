@@ -24,7 +24,8 @@ of folding thick paper, and its band holds twice that paper. The curl then moves
 the band as the layers inside it creep. The band reaches from the crease into the face
 its widest fold turns over, so the layers of one fold curl round one axis, each outside
 the next. Spans turn the paper beyond one edge of a band against the paper beyond the
-other, and the band bends as the layers inside let it. Round each vertex, the bands
+other, and the band bends as the layers inside let it. The band yields as the spans
+turn, each line in proportion to how far it bends. Round each vertex, the bands
 stop where they clear each other, and the paper between them is cut away, as the
 offset crease method for thick panels does. Hands hold the paper beside a band, never
 the band itself.
@@ -97,7 +98,8 @@ class Bands(BaseModel):
 
     The band holds the paper of half a circle round the layers inside, times its slack.
     Spans turn the paper beyond one edge of the band against the paper beyond the
-    other, and the band bends as it must between them.
+    other, and the band bends as it must between them. The band yields the spans'
+    turn, each line in proportion to how far it bends.
     """
 
     model_config = ConfigDict(
@@ -341,7 +343,10 @@ def _barycentric(
     w = points - corners[:, 0]
     uu, uv, vv = (np.einsum("ij,ij->i", p, q) for p, q in ((u, u), (u, v), (v, v)))
     wu, wv = np.einsum("ij,ij->i", w, u), np.einsum("ij,ij->i", w, v)
-    area = uu * vv - uv * uv
+    # The squared cross product equals uu vv - uv², and keeps its precision where a
+    # triangle is crushed nearly to a line.
+    cross = np.cross(u, v)
+    area = np.einsum("ij,ij->i", cross, cross)
     second, third = (vv * wu - uv * wv) / area, (uu * wv - uv * wu) / area
     return np.column_stack([1 - second - third, second, third])
 
@@ -370,6 +375,15 @@ class _Folder:
         spans = [sheet.add_span(stencil) for stencil in drives.stencils]
         self.simulation = Simulation([sheet], physics.settings)
         self.bands = drives.bands
+        dihedral = {
+            (min(u, v), max(u, v)): d
+            for d, (u, v, _, _) in enumerate(self.mesh.dihedrals.tolist())
+        }
+        self.lines = [
+            np.array([dihedral[min(e), max(e)] for e in band], dtype=np.int64)
+            for band, _ in self.bands
+        ]
+        """Each band's lines, as the dihedrals of its edges."""
         self.banded = np.zeros(len(self.mesh.rest), dtype=bool)
         for band, _ in self.bands:
             self.banded[np.array(band, dtype=np.int64).ravel()] = True
@@ -417,14 +431,38 @@ class _Folder:
             sheet.set_span_crease(0, int(self.spans[drive - sharp]), self.physics.drive)
         self.made[drive] = True
 
-    def _rest(self, drive: int, angle: float) -> None:
-        """Set the angle a drive rests at."""
-        sheet, sharp = self.simulation, len(self.edges)
-        if drive < sharp:
-            u, v = self.edges[drive].tolist()
-            sheet.set_rest_angle(0, (u, v), angle)
-        else:
-            sheet.set_span_rest_angle(0, int(self.spans[drive - sharp]), angle)
+    def _rest(self, rests: Mapping[int, float]) -> None:
+        """Set the angles drives rest at, and yield their bands as they turn.
+
+        A band yields its spans' turn, each line in proportion to how far it bends, as
+        plastic flow under proportional loading does. A band still flat yields evenly.
+        Each line keeps what it has yielded before.
+        """
+        simulation, sharp = self.simulation, len(self.edges)
+        sheet = simulation.sheet(0)
+        turns: dict[int, float] = {}
+        for drive, angle in rests.items():
+            if drive < sharp:
+                u, v = self.edges[drive].tolist()
+                simulation.set_rest_angle(0, (u, v), angle)
+            else:
+                span = int(self.spans[drive - sharp])
+                turns[drive] = angle - sheet.span_rest_angle(span)
+                simulation.set_span_rest_angle(0, span, angle)
+        bends = np.abs(simulation.fold_angles(0))
+        count = 2 * self.physics.bands.lines + 1
+        for (band, drives), lines in zip(self.bands, self.lines, strict=True):
+            turned = [turns[drive] for drive in drives if drive in turns]
+            if not turned:
+                continue
+            bend = bends[lines]
+            mean = float(bend.mean())
+            shares = bend / mean if mean > _FLAT else np.ones(len(band))
+            turn = math.fsum(turned) / len(turned) / count
+            for edge, share in zip(band, shares.tolist(), strict=True):
+                simulation.set_rest_angle(
+                    0, edge, sheet.rest_angle(edge) + turn * share
+                )
 
     def fold(self, step: int, before: Shaped, after: Shaped) -> Stage:
         """Fold the paper from one state to the next, and measure it there.
@@ -494,9 +532,13 @@ class _Folder:
         count = self.physics.increments
         for i in range(1, count + 1):
             share = (1 - math.cos(math.pi * i / count)) / 2
-            for drive, goal in drives.items():
-                aim = float(np.clip(goal, -closed, closed))
-                self._rest(drive, start[drive] + (aim - start[drive]) * share)
+            self._rest(
+                {
+                    drive: start[drive]
+                    + (float(np.clip(goal, -closed, closed)) - start[drive]) * share
+                    for drive, goal in drives.items()
+                }
+            )
             report = sheet.step()
             converged &= report.converged
             iterations += report.iterations
@@ -576,8 +618,7 @@ class _Folder:
             frames.append(sheet.positions(0))
         converged, iterations = True, 0
         for angles in self._plan(before, after, pairs[made], goals):
-            for drive, angle in zip(made.tolist(), angles.tolist(), strict=True):
-                self._rest(drive, angle)
+            self._rest(dict(zip(made.tolist(), angles.tolist(), strict=True)))
             report = sheet.step()
             converged &= report.converged
             iterations += report.iterations
@@ -1227,6 +1268,10 @@ def _holes(
     return cut
 
 
+_FLAT: Final = 1e-3
+"""The mean bend of a band's lines, in radians, under which the band lies flat."""
+
+
 _NEAR: Final = 1e-9
 """The distance under which two points of a mesh are one, in meters."""
 
@@ -1244,14 +1289,21 @@ class _Points:
     def add(
         self, point: NDArray[np.float64], side: frozenset[int] | None = None
     ) -> int:
-        """The index of a point, added if new, on a face's side if ``side`` names it."""
+        """The index of a point, added if new, on a face's side if ``side`` names it.
+
+        A point found again on a side lies on it too, however it was first found.
+        """
         near = np.linalg.norm(np.array(self.points) - point, axis=1) < _NEAR
         if near.any():
-            return int(np.argmax(near))
-        self.points.append(point)
-        if side is not None:
-            self.on.setdefault(side, []).append(len(self.points) - 1)
-        return len(self.points) - 1
+            index = int(np.argmax(near))
+        else:
+            index = len(self.points)
+            self.points.append(point)
+        if side is not None and index not in side:
+            on = self.on.setdefault(side, [])
+            if index not in on:
+                on.append(index)
+        return index
 
     def array(self) -> NDArray[np.float64]:
         """Every point, of shape (n, 2)."""

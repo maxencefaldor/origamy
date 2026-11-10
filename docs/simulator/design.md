@@ -915,6 +915,26 @@ Phase 6 adds these findings so far:
   The fox face's corners stopped upright, 71 mm high, the tension beside the crossing at the 0.5% cap.
   Real kami crushes and creeps there, and paper stretches 1% to 3% before it tears.
   Origamy's folds cap tension at 2%, and the fox face folds within 1.13 mm of every state.
+- **Bands that yield as their spans turn.**
+  A band's lines kept their rest angles as its spans turned, and Newton's method crawled past each line's yield.
+  The preliminary base took 15,940 iterations and 363 s to fold.
+  Each line of a band now turns its rest angle by a share of the spans' turn, and keeps what it has yielded before.
+  A line's share grows with how far it bends, as plastic flow under proportional loading does, and a flat band yields evenly.
+  The preliminary base folds in 7,259 iterations and 110 s, every time step converged.
+  Even shares stiffened the curls of layers nested in a paper plane's wing, and its last turn stopped 13 mm short.
+  Setting each line's rest to its share outright erased what it had yielded, and the preliminary base's collapse jammed upright.
+- **Points found again on a side.**
+  A hole's corner on the paper's edge came in first without its side, and a band's line found it there again.
+  The mesher then split the edge 0.44 µm from the line's end, leaving a sliver triangle across the line.
+  Bands that yield as their spans turn bent the sliver to the strain cap, and the pentagon's first fold stopped 18 mm short.
+  A point found again on a side now lies on that side, and the pentagon folds within 0.68 mm.
+- **Reverse folds that open through flat.**
+  An inside reverse fold's spine ends pressed flat the other way, and no rigid motion turns it so while the layers stay pressed.
+  The planner took a flat crease to lie where it lies flat the other way, so it kept the spine pressed and swung the flap round the outside.
+  The paper then ended 8.7 mm off, its layers in the wrong order.
+  The planner now opens such a crease to nearly flat, the other creases following, then folds the step's new creases to their ends.
+  Each closure starts from the last, so the creases that follow move on from where they lie.
+  A square folded on its diagonal, its corner reversed inside, now lands within 0.34 mm, every layer in order.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.
