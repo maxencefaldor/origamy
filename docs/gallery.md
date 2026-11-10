@@ -21,16 +21,6 @@ Models with wings, shaped out of the plane to stand or spread.
 
     [Open in 3D](gallery/penguin.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/penguin.py)
 
--   ![The cicada example](images/gallery-cicada.png)
-
-    **[Cicada](gallery/cicada.html)** · 9 steps
-
-    The semi: a triangle whose corners fold up to its tip, then down past its tail as wings.
-    Each wing's fold runs through its flap's corner, so the wings part at the tail.
-    Two folds of the head show the paper's back as stripes, and the body's sides turn down 75°.
-
-    [Open in 3D](gallery/cicada.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cicada.py)
-
 </div>
 
 ## Animals and faces
@@ -94,15 +84,6 @@ Traditional toys and objects, each ending in space.
 
     [Open in 3D](gallery/newspaper-hat.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/newspaper_hat.py)
 
--   ![The house example](images/gallery-house.png)
-
-    **[House](gallery/house.html)** · 8 steps
-
-    A sheet halved, its roof's corners folded behind, its sides folded in as doors.
-    The doors open 70°, and the house stands up on its floor.
-
-    [Open in 3D](gallery/house.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/house.py)
-
 -   ![The envelope example](images/gallery-envelope.png)
 
     **[Envelope](gallery/envelope.html)** · 4 steps
@@ -128,15 +109,6 @@ Paper planes whose wings spread level from the body.
     Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
 
     [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
-
--   ![The glider example](images/gallery-glider.png)
-
-    **[Glider](gallery/glider.html)** · 15 steps
-
-    A paper plane whose nose folds back onto the corners' feet, so its wings run wide.
-    The new corners fold to the keel again, and the wings spread level from the body.
-
-    [Open in 3D](gallery/glider.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/glider.py)
 
 -   ![The nakamura lock example](images/gallery-nakamura-lock.png)
 
@@ -383,14 +355,5 @@ Models designed with origamy, each a short composition of the same exact actions
     A preliminary base whose front and back flaps fold their edges to the center, as a bird base begins, and stop there.
 
     [Open in 3D](gallery/arrowhead.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/arrowhead.py)
-
--   ![The swell example](images/gallery-swell.png)
-
-    **[Swell](gallery/swell.html)** · 4 steps
-
-    A Miura-ori whose columns each grow a quarter wider than the last, their zigzags growing with them.
-    Every zigzag keeps one slope, so every vertex keeps the Miura-ori's angles and the paper still opens rigidly, swelling as it goes.
-
-    [Open in 3D](gallery/swell.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swell.py)
 
 </div>

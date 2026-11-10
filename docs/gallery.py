@@ -62,7 +62,7 @@ THUMBNAIL: Final = ViewportSize(width=800, height=600)
 """The size of every card image, in pixels: the 4:3 of a card's frame."""
 BARE: Final = "body, #origamy .stage.studio { background: none; }"
 """The style that leaves a card image without a backdrop."""
-LONGEST: Final = ("fortune-teller", "cup", "swell", "window")
+LONGEST: Final = ("fortune-teller", "cup", "window", "arrowhead")
 """The models whose simulations take longest, which start first."""
 
 
