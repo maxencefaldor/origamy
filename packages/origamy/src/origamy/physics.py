@@ -1021,6 +1021,7 @@ class _Drives:
         """
         triangles = _beside_edges(mesh)
         between = {frozenset(pair): edge for edge, pair in last.creases.items()}
+        interior = {(min(u, v), max(u, v)) for u, v, _, _ in mesh.dihedrals.tolist()}
         creases: dict[Edge, list[tuple[int, int]]] = {}
         for u, v, _, _ in mesh.dihedrals.tolist():
             f, g = (int(faces[t]) for t in triangles[u, v])
@@ -1044,9 +1045,13 @@ class _Drives:
             middle = np.mean([mesh.rest[v] for side in sides for v in side], axis=0)
             spans = _spans(mesh, triangles, middle, *sides)
             band = [*pairs]
+            # A line may run along a hole's wall or the paper's outline, which bends
+            # about no edge.
             for line in banded[edge]:
                 band.extend(
-                    (min(u, v), max(u, v)) for u, v in itertools.pairwise(line.chain)
+                    pair
+                    for u, v in itertools.pairwise(line.chain)
+                    if (pair := (min(u, v), max(u, v))) in interior
                 )
             bands.append((band, range(len(stencils), len(stencils) + len(spans))))
             stencils.extend(spans)
