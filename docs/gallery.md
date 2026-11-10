@@ -110,6 +110,15 @@ Paper planes whose wings spread level from the body.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
+-   ![The paper plane example](images/gallery-paper-plane.png)
+
+    **[Paper plane](gallery/paper-plane.html)** · 14 steps
+
+    The classic dart, from A-series paper √2 times as tall as it is wide.
+    Each wing folds square to the keel, halfway along the tail, then spreads level from the body.
+
+    [Open in 3D](gallery/paper-plane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/paper_plane.py)
+
 -   ![The nakamura lock example](images/gallery-nakamura-lock.png)
 
     **[Nakamura lock](gallery/nakamura-lock.html)** · 9 steps
@@ -136,6 +145,33 @@ Traditional models folded step by step as diagrams teach them, with every crease
     Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
 
     [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
+
+-   ![The heart example](images/gallery-heart.png)
+
+    **[Heart](gallery/heart.html)** · 10 steps
+
+    A square on its corner: the top corner folds to the center and the bottom corner up to the top edge.
+    The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
+
+    [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
+
+-   ![The cup example](images/gallery-cup.png)
+
+    **[Cup](gallery/cup.html)** · 9 steps
+
+    A traditional paper cup, from simple folds only.
+    Each side corner travels along its angle's bisector, found by a precrease.
+
+    [Open in 3D](gallery/cup.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cup.py)
+
+-   ![The fortune teller example](images/gallery-fortune-teller.png)
+
+    **[Fortune teller](gallery/fortune-teller.html)** · 13 steps
+
+    Corners to the center on both sides, then folded in half: the flat form before the fingers go in.
+    The diagonals, creased first, locate every fold.
+
+    [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
 
 </div>
 
@@ -263,6 +299,15 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
     The eight sides come out equal, at √2 - 1, so the octagon is regular.
 
     [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
+
+-   ![The dodecagon example](images/gallery-dodecagon.png)
+
+    **[Dodecagon](gallery/dodecagon.html)** · 8 steps
+
+    A regular dodecagon whose incircle touches the square's edges, four of its sides on them.
+    Two slanted sides cut each corner of the square, at 30° and 60°, and fold behind.
+
+    [Open in 3D](gallery/dodecagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dodecagon.py)
 
 </div>
 

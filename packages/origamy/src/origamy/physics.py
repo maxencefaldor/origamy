@@ -384,6 +384,15 @@ class _Folder:
             for band, _ in self.bands
         ]
         """Each band's lines, as the dihedrals of its edges."""
+        rest = self.mesh.rest
+        self.stations = []
+        """Each band edge's station: the span it lies beside, among its band's."""
+        for band, across in self.bands:
+            ends = np.array(drives.stencils)[np.array(across) - len(drives.edges), :2]
+            stations = rest[ends].mean(axis=1)
+            middles = rest[np.array(band)].mean(axis=1)
+            gaps = np.linalg.norm(middles[:, None] - stations[None], axis=2)
+            self.stations.append(np.argmin(gaps, axis=1))
         self.banded = np.zeros(len(self.mesh.rest), dtype=bool)
         for band, _ in self.bands:
             self.banded[np.array(band, dtype=np.int64).ravel()] = True
@@ -435,8 +444,10 @@ class _Folder:
         """Set the angles drives rest at, and yield their bands as they turn.
 
         A band yields its spans' turn, each line in proportion to how far it bends, as
-        plastic flow under proportional loading does. A band still flat yields evenly.
-        Each line keeps what it has yielded before.
+        plastic flow under proportional loading does. The lines beside each span share
+        the turn there, and lines still flat share it evenly. Each line keeps what it
+        has yielded before, and rests a margin short of a half turn at most, as a drive
+        does.
         """
         simulation, sharp = self.simulation, len(self.edges)
         sheet = simulation.sheet(0)
@@ -451,17 +462,24 @@ class _Folder:
                 simulation.set_span_rest_angle(0, span, angle)
         bends = np.abs(simulation.fold_angles(0))
         count = 2 * self.physics.bands.lines + 1
-        for (band, drives), lines in zip(self.bands, self.lines, strict=True):
+        closed = math.pi - self.physics.margin
+        for (band, drives), lines, stations in zip(
+            self.bands, self.lines, self.stations, strict=True
+        ):
             turned = [turns[drive] for drive in drives if drive in turns]
             if not turned:
                 continue
             bend = bends[lines]
-            mean = float(bend.mean())
-            shares = bend / mean if mean > _FLAT else np.ones(len(band))
+            # The lines at each station share the turn there.
+            totals = np.bincount(stations, weights=bend)[stations]
+            sizes = np.bincount(stations)[stations]
+            bent = totals > _FLAT * sizes
+            shares = np.divide(bend * sizes, totals, out=np.ones(len(band)), where=bent)
             turn = math.fsum(turned) / len(turned) / count
             for edge, share in zip(band, shares.tolist(), strict=True):
+                rest = sheet.rest_angle(edge) + turn * share
                 simulation.set_rest_angle(
-                    0, edge, sheet.rest_angle(edge) + turn * share
+                    0, edge, float(np.clip(rest, -closed, closed))
                 )
 
     def fold(self, step: int, before: Shaped, after: Shaped) -> Stage:
