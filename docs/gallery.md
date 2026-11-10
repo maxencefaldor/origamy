@@ -146,15 +146,6 @@ Traditional models folded step by step as diagrams teach them, with every crease
 
     [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
 
--   ![The fortune teller example](images/gallery-fortune-teller.png)
-
-    **[Fortune teller](gallery/fortune-teller.html)** · 13 steps
-
-    Corners to the center on both sides, then folded in half: the flat form before the fingers go in.
-    The diagonals, creased first, locate every fold.
-
-    [Open in 3D](gallery/fortune-teller.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/fortune_teller.py)
-
 </div>
 
 ## Settled forms
