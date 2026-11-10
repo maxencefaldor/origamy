@@ -133,6 +133,8 @@ struct Taken {
     slope: f64,
     /// The fraction of that update the step took.
     fraction: f64,
+    /// The fraction collision detection allowed, from which the line search backtracked.
+    safe: f64,
     /// The decrease of the potential the step brought.
     decrease: f64,
     /// The change of the potential that is rounding.
@@ -144,11 +146,11 @@ impl Taken {
     /// step had.
     ///
     /// The radius follows how well the update's quadratic model foretold the decrease the step
-    /// took, as in a trust-region method. A poor forecast shrinks the radius to a quarter of
-    /// the step; a close one, from an update the radius shrank and the step took whole,
-    /// doubles it. A forecast within rounding tells nothing, and leaves the radius to grow. A
-    /// model that fits clears negative curvature from the next Hessian projected; one that
-    /// does not flips it.
+    /// took, as in a trust-region method. A poor forecast, from a step the line search
+    /// shortened, shrinks the radius to a quarter of the step; a close one, from an update the
+    /// radius shrank and the step took whole, doubles it. A forecast within rounding tells
+    /// nothing, and leaves the radius to grow. A model that fits clears negative curvature
+    /// from the next Hessian projected; one that does not flips it.
     fn teach(&self, radius: f64) -> (f64, Filter) {
         let reach = if self.clamped {
             radius / self.update
@@ -159,7 +161,8 @@ impl Taken {
         let ratio = self.decrease / foretold;
         let telling = foretold > self.rounding;
         let whole = self.clamped && self.fraction >= 1.0;
-        let radius = if telling && ratio < 0.25 {
+        let shortened = self.fraction < self.safe;
+        let radius = if telling && shortened && ratio < 0.25 {
             0.25 * self.fraction * self.update.min(radius)
         } else if (!telling || ratio > 0.75) && whole {
             2.0 * radius
@@ -1258,6 +1261,7 @@ impl Simulation {
                         clamped,
                         slope,
                         fraction,
+                        safe,
                         decrease,
                         rounding: ROUNDING * potential.size(),
                     };

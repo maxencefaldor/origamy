@@ -364,7 +364,7 @@ Each time step minimizes the incremental potential with a projected Newton metho
 - **Trust radius.**
   No Newton update moves a vertex farther than a trust radius in meters.
   The radius follows how well each update's quadratic model foretells the decrease of energy its step takes, as in a trust-region method.
-  A decrease under a quarter of the forecast shrinks the radius to a quarter of the step.
+  A decrease under a quarter of the forecast, from a step the line search shortened, shrinks the radius to a quarter of the step.
   A decrease over three quarters of it, from an update the radius shortened and the step took whole, doubles the radius.
   Where some motion costs nearly no energy, as for a sheet held along one line, the update would otherwise run off by millions of meters.
   Where some motion costs no energy at all, the Hessian is singular, and a Levenberg–Marquardt shift of |g|∞ / r takes its place.
@@ -899,7 +899,8 @@ Phase 6 adds these findings so far:
   Clearing curvature took 5,681 and landed 1.20 mm off, all converged, but a sheet hanging from a capsule stopped converging.
   Chen et al.'s trust-region filter clears curvature where the last step's decrease came within a tenth of its forecast, and flips it elsewhere.
   The trust radius now follows the same forecast, so a settling leaf no longer halves each update ten times.
-  The leaf settles in 31 s, and the preliminary base folds in 26,283 iterations in place of 30,013.
+  The radius shrinks only after the line search shortens a step, since a forecast near convergence is mostly rounding.
+  The leaf settles in 19 s, and the square folded in half three times lands within 1.12 mm.
 - **Paper that tears at 2%.**
   A fold across an edge folded before jams where the folds cross.
   The fox face's corners stopped upright, 71 mm high, the tension beside the crossing at the 0.5% cap.
