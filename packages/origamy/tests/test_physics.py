@@ -53,7 +53,7 @@ def assert_folds_as_its_states(folding: Folding) -> None:
         assert stage.converged, stage.step
         assert stage.misordered == (), stage.step
         assert stage.crossing < CROSSING, stage.step
-        assert stage.offset < 1e-4 + folding.creep, stage.step
+        assert stage.offset < 1e-4 + folding.creep, (stage.step, stage.offset)
         lowest = min(frame[:, 2].min() for frame in stage.frames)
         assert lowest > LYING - 1e-6, stage.step
 
