@@ -77,12 +77,12 @@ Layers sit a small gap apart, and a fold's crease bends round from one layer to 
 
 A viewer can also play a film: the build as origamy's simulator folds it, from the flat sheet.
 The gallery's viewers play films.
-Each step's paper moves as the simulated paper moved, and rests exactly where the step's state puts it.
+The simulated paper has kami's thickness, and the film plays it exactly as the simulator folded it.
+Contact keeps its layers apart, and each crease curls round the layers it wraps.
 Between steps, a hand slides the paper back to the middle of the table.
 The eye frames each step before its paper moves, and stands still while it folds.
-Each layer lies a sheet's thickness above the layers under it, so a stack thickens only where its own layers reach.
 
-![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](../images/viewer.png)
+![The viewer playing the samurai helmet as the simulator folded it, its crease pattern beside the paper in 3D](../images/viewer.png)
 
 | Control | Does |
 | --- | --- |

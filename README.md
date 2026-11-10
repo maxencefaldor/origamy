@@ -63,7 +63,7 @@ The viewer shows the crease pattern beside the folded paper, and animates each s
 Each folded edge bends round, and people can orbit, view from above or below, and see through the layers.
 Hovering a face lights it in both views, and each step names its script line and its facts.
 
-![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](docs/images/viewer.png)
+![The viewer playing the samurai helmet as the simulator folded it, its crease pattern beside the paper in 3D](docs/images/viewer.png)
 
 ## Collapse
 

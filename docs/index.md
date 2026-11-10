@@ -64,7 +64,7 @@ No list of legal moves exists: the agent proposes any action, and the build stat
 Every build also writes a standalone page that replays the fold in 3D, beside the crease pattern.
 Hovering a face lights it in both views, and each step names its script line and its facts.
 
-![The viewer replaying the bird base, its crease pattern beside the folded paper in 3D](images/viewer.png)
+![The viewer playing the samurai helmet as the simulator folded it, its crease pattern beside the paper in 3D](images/viewer.png)
 
 ## Install
 

@@ -3,7 +3,7 @@
 The models below each fold with one command from [`examples/`](https://github.com/maxencefaldor/origamy/tree/main/examples).
 Each opens in the 3D viewer, to replay its steps, orbit the paper and see every layer in x-ray.
 The viewer opens in its studio, lighting the paper as paper; its Studio button turns the view into a diagram.
-Each viewer plays the model as origamy's simulator folds it, from the flat sheet, each step resting exactly in its state.
+Each viewer plays the model exactly as origamy's simulator folds it from the flat sheet: kami with its thickness, each crease curling round the layers it wraps.
 The viewer also traces each face back to the crease pattern.
 
 ## Birds and insects
@@ -11,35 +11,6 @@ The viewer also traces each face back to the crease pattern.
 Models with wings, shaped out of the plane to stand or spread.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
-
--   ![The crane example](images/gallery-crane.png)
-
-    **[Crane](gallery/crane.html)** · 33 steps
-
-    The orizuru: a bird base, narrowed on both sides, with its neck, tail and head reverse folded up.
-    Narrowing the legs bisects 22.5° angles, so its creases live at 11.25°, exactly.
-    Its wings then rise 30° above level, and the crane stands up on its shoulders.
-
-    [Open in 3D](gallery/crane.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/crane.py)
-
--   ![The flapping bird example](images/gallery-flapping-bird.png)
-
-    **[Flapping bird](gallery/flapping-bird.html)** · 29 steps
-
-    A bird base with its two lower flaps reversed up as neck and tail, and its wings folded down, then raised 30° above level.
-    Two precreases mark a quarter of the neck, where the head reverse folds.
-
-    [Open in 3D](gallery/flapping-bird.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/flapping_bird.py)
-
--   ![The swan example](images/gallery-swan.png)
-
-    **[Swan](gallery/swan.html)** · 10 steps
-
-    A kite turned over and folded narrower, then halved along its spine.
-    The point reverses up as the neck, and its tip reverses forward as the head.
-    The swan stands on its belly, the kite's middle showing at its tail.
-
-    [Open in 3D](gallery/swan.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swan.py)
 
 -   ![The penguin example](images/gallery-penguin.png)
 
@@ -49,16 +20,6 @@ Models with wings, shaped out of the plane to stand or spread.
     The feet fold up and the head down, both black, and the penguin stands on its feet.
 
     [Open in 3D](gallery/penguin.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/penguin.py)
-
--   ![The butterfly example](images/gallery-butterfly.png)
-
-    **[Butterfly](gallery/butterfly.html)** · 12 steps
-
-    A waterbomb base whose front flaps fold up into a diamond.
-    Its apex folds down past the base, and its tip folds back over the edge as a lock.
-    The wings then rise in a V, 25° each side of the body.
-
-    [Open in 3D](gallery/butterfly.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/butterfly.py)
 
 -   ![The cicada example](images/gallery-cicada.png)
 
@@ -77,15 +38,6 @@ Models with wings, shaped out of the plane to stand or spread.
 Heads and bodies folded flat, then stood up or lifted into relief.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
-
--   ![The whale example](images/gallery-whale.png)
-
-    **[Whale](gallery/whale.html)** · 8 steps
-
-    A kite whose blunt corner folds over as the head, halved along its spine.
-    The tail reverse folds up between the body's layers, and the whale stands on its belly.
-
-    [Open in 3D](gallery/whale.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/whale.py)
 
 -   ![The fox face example](images/gallery-fox-face.png)
 
@@ -151,15 +103,6 @@ Traditional toys and objects, each ending in space.
 
     [Open in 3D](gallery/house.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/house.py)
 
--   ![The pinwheel example](images/gallery-pinwheel.png)
-
-    **[Pinwheel](gallery/pinwheel.html)** · 3 steps
-
-    The middle square's sides, the corners' diagonals and four slants, collapsed in one step.
-    The pattern turns onto itself a quarter turn, so the four vanes chase each other.
-
-    [Open in 3D](gallery/pinwheel.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/pinwheel.py)
-
 -   ![The envelope example](images/gallery-envelope.png)
 
     **[Envelope](gallery/envelope.html)** · 4 steps
@@ -221,15 +164,6 @@ Traditional models folded step by step as diagrams teach them, with every crease
     Each petal's tip lies on a bisector at the base's middle, and its fold bisects the angle from its corner to that tip.
 
     [Open in 3D](gallery/tulip.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/tulip.py)
-
--   ![The heart example](images/gallery-heart.png)
-
-    **[Heart](gallery/heart.html)** · 10 steps
-
-    A square on its corner: the top corner folds to the center and the bottom corner up to the top edge.
-    The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
-
-    [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
 
 -   ![The cup example](images/gallery-cup.png)
 
@@ -333,24 +267,6 @@ Crease patterns that no flat state holds: a settle step turns their creases, and
 
 </div>
 
-## Tessellations
-
-Patterns of repeated creases, collapsed at once and opened as rigid origami.
-
-<div class="grid cards origamy-cards origamy-gallery" markdown>
-
--   ![The Miura-ori example](images/gallery-miura-ori.png)
-
-    **[Miura-ori](gallery/miura-ori.html)** · 4 steps
-
-    A grid of parallelograms: zigzags alternate mountain and valley, and each column alternates along its length.
-    Its 112 creases collapse into one flat stack, then open as rigid origami, the zigzags following the columns.
-    Opened, the sheet lies down on its ridges.
-
-    [Open in 3D](gallery/miura-ori.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/miura_ori.py)
-
-</div>
-
 ## Geometry
 
 Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Paper Folding* of 1893 teaches.
@@ -393,15 +309,6 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
     The eight sides come out equal, at √2 - 1, so the octagon is regular.
 
     [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
-
--   ![The dodecagon example](images/gallery-dodecagon.png)
-
-    **[Dodecagon](gallery/dodecagon.html)** · 8 steps
-
-    A regular dodecagon whose incircle touches the square's edges, four of its sides on them.
-    Two slanted sides cut each corner of the square, at 30° and 60°, and fold behind.
-
-    [Open in 3D](gallery/dodecagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dodecagon.py)
 
 </div>
 
@@ -452,32 +359,6 @@ The bases most traditional models start from: plain folds, collapses and petal f
 
     [Open in 3D](gallery/waterbomb-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/waterbomb_base.py)
 
--   ![The bird base example](images/gallery-bird-base.png)
-
-    **[Bird base](gallery/bird-base.html)** · 15 steps
-
-    A preliminary base with a petal fold on its front and its back.
-    Each petal fold lifts a layer while its sides fold in along creases made before.
-
-    [Open in 3D](gallery/bird-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/bird_base.py)
-
-</div>
-
-## Crease patterns
-
-Models creased on the open paper from their crease pattern, then collapsed in one step.
-
-<div class="grid cards origamy-cards origamy-gallery" markdown>
-
--   ![The frog base example](images/gallery-frog-base.png)
-
-    **[Frog base](gallery/frog-base.html)** · 2 steps
-
-    A preliminary base with all four flaps squashed and petal folded, collapsed from its pattern at once.
-    Its kites fold at 22.5°, and sixteen layers meet in its thickest point.
-
-    [Open in 3D](gallery/frog-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/frog_base.py)
-
 </div>
 
 ## Originals
@@ -511,14 +392,5 @@ Models designed with origamy, each a short composition of the same exact actions
     Every zigzag keeps one slope, so every vertex keeps the Miura-ori's angles and the paper still opens rigidly, swelling as it goes.
 
     [Open in 3D](gallery/swell.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/swell.py)
-
--   ![The winglet dart example](images/gallery-winglet-dart.png)
-
-    **[Winglet dart](gallery/winglet-dart.html)** · 16 steps
-
-    The classic dart, each wingtip turned up square as a winglet.
-    Each winglet's crease lies where the paper's edge folds onto the wing's crease.
-
-    [Open in 3D](gallery/winglet-dart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/winglet_dart.py)
 
 </div>

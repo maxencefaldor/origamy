@@ -10,11 +10,10 @@ Each script in ``examples`` folds in its own process, and its viewer goes to
 three.js from jsDelivr when opened.
 
 Each viewer plays the model's film: the model as origamy's simulator folds it, from the
-flat sheet, in the viewer's studio. The simulation keeps no thickness, and orders hold
-its layers in the stacking. The film rests in each step's exact state, and a settle
-step rests where the simulator leaves the paper. A model whose simulation strays from
-its states, or settles with paper through paper, shows as rigid faces.
-Worker processes simulate the models in parallel, the longest first.
+flat sheet, in the viewer's studio. The paper keeps its thickness, and contact keeps
+its layers apart, so the film plays exactly as the simulator folded it. A model whose
+simulation strays from its states, or settles with paper through paper, stops the
+script. Worker processes simulate the models in parallel, the longest first.
 
 Writing a viewer needs no browser, so the docs workflow runs this script on a plain
 runner. The viewers are build output, left out of the repository. With
@@ -23,7 +22,6 @@ from its viewer, in Chromium; those images are committed.
 """
 
 import asyncio
-import math
 import os
 import re
 import sys
@@ -42,7 +40,6 @@ from origamy.render import BROWSER
 from origamy.result import Failure
 from origamy.service import run_script
 from origamy.viewer import THREE_PACKAGE, write_viewer
-from origamy_sim import Contact, Settings, Table
 
 ROOT: Final = Path(__file__).resolve().parent.parent
 EXAMPLES: Final = ROOT / "examples"
@@ -53,22 +50,19 @@ THREE: Final = Path(str(files("origamy").joinpath("assets", "three")))
 CARD: Final = re.compile(
     r"\*\*\[([^\]]+)\]\(gallery/([a-z0-9-]+)\.html\)\*\* · (\d+) steps?"
 )
-"""A card's title, such as ``**[Crane](gallery/crane.html)** · 33 steps``."""
-PHYSICS: Final = Physics(
-    settings=Settings(time_step=math.inf, table=Table(), contact=Contact(layers=False))
-)
-"""How the gallery simulates each model: quasi-static, on a table, without thickness."""
-STRAY: Final = 0.03
-"""The farthest, in meters, a simulated fold may leave paper from its state for the
-viewer to play the simulation."""
+"""A card's title, such as ``**[Cup](gallery/cup.html)** · 9 steps``."""
+PHYSICS: Final = Physics()
+"""How the gallery simulates each model: as origamy folds kami, with its thickness."""
+STRAY: Final = 0.005
+"""The farthest, in meters, a simulated fold may leave paper from its state."""
 CROSSING: Final = 1e-4
-"""The deepest, in meters, a settle step may leave paper through paper for the viewer
-to play the simulation: a few sheets of kami, as the viewer draws touching layers."""
+"""The deepest, in meters, a settle step may leave paper through paper: a few sheets
+of kami."""
 THUMBNAIL: Final = ViewportSize(width=800, height=600)
 """The size of every card image, in pixels: the 4:3 of a card's frame."""
 BARE: Final = "body, #origamy .stage.studio { background: none; }"
 """The style that leaves a card image without a backdrop."""
-LONGEST: Final = ("crane", "flapping-bird", "frog-base", "glider")
+LONGEST: Final = ("fortune-teller", "cup", "swell", "window")
 """The models whose simulations take longest, which start first."""
 
 
@@ -99,14 +93,14 @@ def write_gallery_viewer(name: str, heading: str, steps: int) -> tuple[Path, str
         stray = max(stage.offset for stage in folding.stages)
         settled = [stage.crossing for stage in folding.stages if stage.settled]
         crossed = max(settled, default=0.0)
-        faithful = stray <= STRAY and crossed <= CROSSING
-        write_viewer(
-            result, heading, path, studio=True, folding=folding if faithful else None
-        )
-    found = f"{len(folding.stages)} simulated folds, straying {stray * 1000:.1f} mm"
-    if crossed:
-        found += f", settling {crossed * 1000:.2f} mm through itself"
-    return path, found if faithful else found + ", shown rigid"
+        found = f"{len(folding.stages)} simulated folds, straying {stray * 1000:.1f} mm"
+        if crossed:
+            found += f", settling {crossed * 1000:.2f} mm through itself"
+        if stray > STRAY or crossed > CROSSING:
+            msg = f"the simulator cannot fold the {heading} yet: {found}"
+            raise SystemExit(msg)
+        write_viewer(result, heading, path, studio=True, folding=folding)
+    return path, found
 
 
 async def draw_thumbnails(names: list[str]) -> None:
