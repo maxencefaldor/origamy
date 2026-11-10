@@ -17,6 +17,7 @@ use nalgebra::{SMatrix, Vector3};
 
 use super::{Local, Point};
 use crate::generated::dihedral_angle;
+use crate::length::hypot;
 
 /// The dihedral angle of a stencil, with its gradient and Hessian.
 #[derive(Clone, Debug)]
@@ -99,7 +100,7 @@ impl RestPlate {
         let directions = [0, 1, 2].map(|i| {
             let (from, to) = (corners[(i + 1) % 3], corners[(i + 2) % 3]);
             let edge = [to[0] - from[0], to[1] - from[1]];
-            let length = edge[0].hypot(edge[1]);
+            let length = hypot(edge[0], edge[1]);
             // The outward normal of a counterclockwise triangle's edge turns the edge clockwise.
             let (tx, ty) = (edge[1] / length, -edge[0] / length);
             Vector3::new(tx * tx, ty * ty, 2.0 * tx * ty) * (length / area)

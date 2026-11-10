@@ -20,6 +20,7 @@ use crate::energy::bending::{self, Angle, BendingEdge};
 use crate::energy::crease;
 use crate::energy::membrane::{self, Stretching};
 use crate::energy::{Filter, Point, ProjectMoving};
+use crate::length::norm;
 use crate::parameter::{ParameterError, finite};
 use crate::settings::Settings;
 use crate::sheet::{Order, Sheet, SheetError};
@@ -1209,7 +1210,7 @@ impl Simulation {
             let mut direction = factor.solve(&negative);
             update = direction
                 .chunks_exact(3)
-                .map(|d| d[0].hypot(d[1]).hypot(d[2]))
+                .map(|d| norm(d[0], d[1], d[2]))
                 .fold(0.0, f64::max);
             // An update within the tolerance ends the time step. So does one that stops
             // shrinking while its predicted decrease is a sliver of the energy: soft motion, as

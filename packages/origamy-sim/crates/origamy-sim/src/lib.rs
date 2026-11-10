@@ -14,6 +14,7 @@ mod contact;
 mod energy;
 pub mod faces;
 mod generated;
+mod length;
 pub mod material;
 pub mod mesh;
 pub mod parameter;
