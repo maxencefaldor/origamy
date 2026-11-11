@@ -1,0 +1,27 @@
+name: Probe
+
+on:
+  pull_request:
+
+env:
+  OPENBLAS_CORETYPE: Haswell
+
+jobs:
+  fold:
+    name: Fold ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [arrowhead, bird_base, blintz_base, butterfly, cat_face, cicada, circular_pleat, crane, cup, cupboard_base, dodecagon, dog_face, envelope, equilateral_triangle, flapping_bird, fortune_teller, fox_face, frog_base, glider, heart, hexagon, hexagonal_hypar, house, hypar, kite_base, leaf, lotus, miura_ori, nakamura_lock, newspaper_hat, octagon, paper_plane, penguin, pentagon, pinwheel, preliminary_base, samurai_helmet, spiral_pleat, star, sunflower, swan, swell, tulip, waterbomb_base, whale, window, winglet_dart]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      - name: Install
+        run: uv sync
+      - name: Fold
+        run: uv run python probe/one.py examples/${{ matrix.model }}.py
