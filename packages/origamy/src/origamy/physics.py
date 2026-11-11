@@ -153,7 +153,7 @@ class Physics(BaseModel):
     crease would stop its fold short of flat, as the layers there meet.
     """
 
-    increments: Annotated[int, Field(gt=0)] = 30
+    increments: Annotated[int, Field(gt=0)] = 60
     """The quasi-static increments in which a fold turns its creases.
 
     The default keeps each increment's turn small enough that a collapse keeps to the
