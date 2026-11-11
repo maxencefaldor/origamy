@@ -7,11 +7,12 @@ state gives them, in quasi-static increments. Where the faces can fold as rigid
 origami, the creases follow that motion; elsewhere they turn at even rates. A hand
 holds down the paper the step leaves in place where it touches the table. Hands carry
 the weight of the paper that moves, as a folder's do, then let go, and the paper
-settles under its weight. A precrease folds
-to the paper it passes through, then unfolds. A step that moves all the paper rigidly,
-as turning it over or a tilt does, moves the simulated paper the same way, resting on
-the table where it rested. A step that shapes the paper in space turns its creases to
-the angles the step's form gives them.
+settles under its weight. A hand keeps pressing what it holds on the table, and lets
+go of paper left above it. A precrease folds to the paper it passes through, then
+unfolds. A step that moves all the paper rigidly, as turning it over or a tilt does,
+moves the simulated paper the same way, resting on the table where it rested. A step
+that shapes the paper in space turns its creases to the angles the step's form gives
+them.
 
 Paper on a table folds up from it, never down into it. A step that turns paper down
 folds with the sheet turned over, as a folder makes a mountain fold, then turns it back.
@@ -635,8 +636,13 @@ class _Folder:
             positions = sheet.positions(0)
             self._raise(-min(lift, positions[:, 2].min() - self.lying))
             frames.append(sheet.positions(0))
-        # The hands let go, and the paper settles under its weight.
+        # The hands let go, and the paper settles under its weight. A hand keeps
+        # pressing the paper it holds on the table, and lets go of paper a turn or a
+        # lift left above it.
         sheet.set_forces(0, moving, np.zeros((len(moving), 3)))
+        sheet.hold(
+            0, np.flatnonzero(sheet.positions(0)[:, 2] >= self.ground), held=False
+        )
         report = sheet.step()
         converged &= report.converged
         iterations += report.iterations
