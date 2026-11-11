@@ -177,7 +177,7 @@ class Physics(BaseModel):
     bands: Bands = Bands()
     """How creases that wrap other layers bend round them."""
 
-    material: Material = Material(compression=1e-3, strain_limit=StrainLimit(cap=0.02))
+    material: Material = Material(compression=1e-3, strain_limit=StrainLimit(cap=0.03))
     """The paper's material: kami, which wrinkles under compression, keeping a
     thousandth of its stiffness there, and stretches up to 2% before it tears.
 
