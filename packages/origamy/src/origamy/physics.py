@@ -5,10 +5,10 @@ The simulation meshes the last step's crease pattern once, and the sheet starts 
 a table, under gravity. Each step turns the creases it changes toward the angles its
 state gives them, in quasi-static increments. Where the faces can fold as rigid
 origami, the creases follow that motion; elsewhere they turn at even rates. A hand
-holds down the paper the step leaves in place where it touches the table. Hands carry
-the weight of the paper that moves, as a folder's do, then let go, and the paper
-settles under its weight. A hand keeps pressing what it holds on the table, and lets
-go of paper left above it. A precrease folds to the paper it passes through, then
+presses down the paper the step leaves in place where it lies in the stack on the
+table. Hands carry the weight of the paper that moves, as a folder's do, then let go,
+and the paper settles under its weight. A hand keeps pressing the stack, and lets go
+of paper left above it. A precrease folds to the paper it passes through, then
 unfolds. A step that moves all the paper rigidly, as turning it over or a tilt does,
 moves the simulated paper the same way, resting on the table where it rested. A step
 that shapes the paper in space turns its creases to the angles the step's form gives
@@ -365,6 +365,8 @@ class _Folder:
         self.last, self.scale, self.physics = last, scale, physics
         contact = physics.settings.contact
         layer = physics.material.thickness * contact.thickness_share + contact.gap
+        self.layer = layer
+        """How far apart contact keeps stacked layers, in meters."""
         # Without contact between layers, no layers lie inside a crease to bend round.
         extents = (
             _extents(folds, last, layer, physics.bands.slack) if contact.layers else {}
@@ -619,7 +621,7 @@ class _Folder:
             report = sheet.step()
             converged &= report.converged
             iterations += report.iterations
-        self._hold(staying)
+        self._hold(staying, before.state.thickest[0])
         # Paper that turns both up and down needs room below, so the hands lift the
         # model off the table by as far as paper reaches.
         lift = self.physics.size if len(sides) > 1 else 0.0
@@ -642,12 +644,10 @@ class _Folder:
             self._raise(-min(lift, positions[:, 2].min() - self.lying))
             frames.append(sheet.positions(0))
         # The hands let go, and the paper settles under its weight. A hand keeps
-        # pressing the paper it holds on the table, and lets go of paper a turn or a
-        # lift left above it.
+        # pressing the stack, and lets go of paper a turn or a lift left above it.
         sheet.set_forces(0, moving, np.zeros((len(moving), 3)))
-        sheet.hold(
-            0, np.flatnonzero(sheet.positions(0)[:, 2] >= self.ground), held=False
-        )
+        top = self._top(after.state.thickest[0])
+        sheet.hold(0, np.flatnonzero(sheet.positions(0)[:, 2] >= top), held=False)
         report = sheet.step()
         converged &= report.converged
         iterations += report.iterations
@@ -768,17 +768,28 @@ class _Folder:
             closed,
         )
 
-    def _hold(self, staying: NDArray[np.bool_]) -> None:
-        """Hold down the vertices ``staying`` where they lie on the table.
+    def _hold(self, staying: NDArray[np.bool_], layers: int) -> None:
+        """Hold down the vertices ``staying`` where they lie in the stack on the table.
 
-        A hand holds the paper beside the bands, which bend as they must. Where no paper
-        that stays touches the table, the hand holds all that stays.
+        A hand presses the paper beside the bands, which bend as they must. It presses
+        paper that lies in the stack, no higher than ``layers`` layers above the table,
+        and leaves paper raised out of the stack free. Where no paper that stays lies
+        in the stack, the hand holds all that stays.
         """
         staying = staying & ~self.banded
-        held = staying & (self.simulation.positions(0)[:, 2] < self.ground)
+        held = staying & (self.simulation.positions(0)[:, 2] < self._top(layers))
         if not held.any():
             held = staying
         self.simulation.hold(0, np.flatnonzero(held))
+
+    def _top(self, layers: int) -> float:
+        """The height under which paper lies in a stack of ``layers`` on the table.
+
+        Without a table, all paper lies under it.
+        """
+        if self.physics.settings.table is None:
+            return math.inf
+        return self.ground + layers * self.layer
 
     def _sides(
         self,
