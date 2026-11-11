@@ -1337,9 +1337,10 @@ class _Layout:
     Each crease of ``extents`` gets a band reaching as far into each of its faces, as
     the offset crease method thickens a crease pattern. Each band ends at a cap across
     it, where it clears every other band round that vertex. The method cuts away the
-    paper round the vertex, between the caps.
+    paper round the vertex, between the caps. A band that meets no other band at a
+    vertex has no cap there, and runs on to its face's sides.
 
-    Each band splits at stations, ``bands.edge`` apart at its caps, each piece
+    Each band splits at stations, ``bands.edge`` apart at its ends, each piece
     ``bands.growth`` times the one before, up to ``longest``. The band then gets
     ``bands.lines`` lines in each face it reaches into, or twice as many where it
     reaches into one face alone. The lines run parallel to the crease, evenly spaced,
@@ -1361,7 +1362,8 @@ class _Layout:
         for (edge, _), extent in extents.items():
             self.widths[edge] = self.widths.get(edge, 0.0) + extent
         self.stations: dict[Edge, list[float]] = {}
-        # Each crease's caps, by their distance from its first end along it.
+        # Each crease's caps, by their distance from its first end along it, infinite
+        # at an end without one.
         self.caps: dict[Edge, tuple[float, float]] = {}
         sides = _sides(last)
         reach = {
@@ -1375,9 +1377,13 @@ class _Layout:
             near, far = reach[edge], reach[edge[1], edge[0]]
             # Caps that would overlap meet in the crease's middle, and its bands' lines
             # cross the other bands' lines there.
-            share = min(1.0, 0.5 * length / (near + far))
+            share = min(1.0, 0.5 * length / (near + far)) if near + far > 0 else 1.0
             low, high = near * share, length - far * share
-            self.caps[edge] = (low, high)
+            # A band that meets no other band at an end runs on to its face's sides.
+            self.caps[edge] = (
+                low if near > 0 else -math.inf,
+                high if far > 0 else math.inf,
+            )
             self.stations[edge] = [
                 low + d
                 for d in _stations(high - low, bands.edge, bands.growth, longest)
@@ -1450,8 +1456,15 @@ class _Layout:
 
         The band's outer line toward another side meets that side's outer line toward
         it, unless the two sides run on straight through the vertex. A band reaches at
-        least half its width.
+        least half its width. A band that meets no other band reaches no distance, and
+        runs on to its face's sides, as a crease runs to the paper's edge.
         """
+        if not any(
+            (min(vertex, third), max(vertex, third)) in self.widths
+            for third in others
+            if third != other
+        ):
+            return 0.0
         along = self._direction(vertex, other)
         reach = max(self._extent(vertex, other, side) for side in (1.0, -1.0))
         for third in others:
@@ -1473,12 +1486,12 @@ class _Layout:
 
         The hole runs across each band at its cap, and crosses each other side where
         the bands round it clear that side, side by side round the vertex. A vertex on
-        the paper's edge is a corner of its hole. Returns an empty list where no band
-        meets the vertex.
+        the paper's edge is a corner of its hole. Returns an empty list where fewer than
+        two bands meet at the vertex.
         """
         key = {other: (min(vertex, other), max(vertex, other)) for other in others}
         banded = [other for other in others if key[other] in self.widths]
-        if not banded:
+        if len(banded) < _MEETING:
             return []
         origin = self.points.points[vertex]
         edges = [other for other in others if key[other] not in self.last.creases]
@@ -1612,6 +1625,9 @@ class _Layout:
             (high, self.points.add(origin + along * high, stop)),
         ]
 
+
+_MEETING: Final = 2
+"""The fewest bands that meet at a vertex where the paper is cut away."""
 
 _STRAIGHT: Final = 1e-6
 """The sine of the angle under which two sides at a vertex run straight on."""
