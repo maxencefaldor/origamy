@@ -470,11 +470,9 @@ class _Folder:
             if not turned:
                 continue
             bend = bends[lines]
-            # The lines at each station share the turn there.
-            totals = np.bincount(stations, weights=bend)[stations]
-            sizes = np.bincount(stations)[stations]
-            bent = totals > _FLAT * sizes
-            shares = np.divide(bend * sizes, totals, out=np.ones(len(band)), where=bent)
+            mean = float(bend.mean())
+            shares = bend / mean if mean > _FLAT else np.ones(len(band))
+            del stations
             turn = math.fsum(turned) / len(turned) / count
             for edge, share in zip(band, shares.tolist(), strict=True):
                 rest = sheet.rest_angle(edge) + turn * share
