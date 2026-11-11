@@ -613,6 +613,12 @@ class _Folder:
         frames: list[NDArray[np.float64]] = []
         sides = self._sides(made, goals, kept)
         mirror = self._turn_over() if sides == {-1} else None
+        converged, iterations = True, 0
+        if mirror is not None:
+            # The turned paper settles on the table before a hand holds it there.
+            report = sheet.step()
+            converged &= report.converged
+            iterations += report.iterations
         self._hold(staying)
         # Paper that turns both up and down needs room below, so the hands lift the
         # model off the table by as far as paper reaches.
@@ -620,7 +626,6 @@ class _Folder:
         self._raise(lift)
         if mirror is not None or lift:
             frames.append(sheet.positions(0))
-        converged, iterations = True, 0
         for angles in self._plan(before, after, pairs[made], goals):
             self._rest(dict(zip(made.tolist(), angles.tolist(), strict=True)))
             report = sheet.step()
