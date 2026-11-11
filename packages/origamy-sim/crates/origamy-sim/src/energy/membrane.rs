@@ -17,6 +17,7 @@
 use nalgebra::{Matrix3, SMatrix, Vector2, Vector3};
 
 use super::{Barrier, Local, Point};
+use crate::length::hypot;
 use crate::material::Material;
 
 /// What a triangle keeps of its rest shape.
@@ -155,7 +156,7 @@ type Derivatives = (Vector3<f64>, Matrix3<f64>);
 fn principal(strain: &Vector3<f64>) -> ([f64; 2], Option<Derivatives>) {
     let mean = 0.5 * (strain[0] + strain[1]);
     let (half, shear) = (0.5 * (strain[0] - strain[1]), 0.5 * strain[2]);
-    let radius = half.hypot(shear);
+    let radius = hypot(half, shear);
     let values = [mean + radius, mean - radius];
     if radius <= 0.0 {
         return (values, None);

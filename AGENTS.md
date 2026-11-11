@@ -116,6 +116,7 @@ The simulator knows nothing of origami: its interface speaks of meshes, material
   Hard ones are generated from SymPy expressions by `codegen/generate.py`, and CI checks the generated code is current.
 - **Determinism:** derived tables come out sorted, never in hash order, and parallel work sums in a fixed order.
   The kernel's parallel work keeps its items' order, and its choices match one core's.
+  The simulator takes lengths as square roots of sums of squares, never the C library's `hypot`, which rounds differently on different processors.
 - **Bindings stay thin:** they convert arrays and parameter models, call the core and convert back.
   Their doc comments are the Python docstrings, in Google style.
   A core error is a typed value naming the element at fault, and Python sees it as a `ValueError` with the same message.

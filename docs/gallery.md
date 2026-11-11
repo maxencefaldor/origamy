@@ -273,6 +273,15 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
     [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
 
+-   ![The dodecagon example](images/gallery-dodecagon.png)
+
+    **[Dodecagon](gallery/dodecagon.html)** · 8 steps
+
+    A regular dodecagon whose incircle touches the square's edges, four of its sides on them.
+    Two slanted sides cut each corner of the square, at 30° and 60°, and fold behind.
+
+    [Open in 3D](gallery/dodecagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dodecagon.py)
+
 </div>
 
 ## Bases

@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 use crate::energy::bending::RestPlate;
 use crate::energy::crease::Plastic;
 use crate::energy::membrane::RestTriangle;
+use crate::length::hypot;
 use crate::material::Material;
 use crate::mesh::{Mesh, Vertex};
 use crate::parameter::{ParameterError, finite, non_negative, positive, require};
@@ -251,7 +252,7 @@ impl Sheet {
             .iter()
             .map(|d| {
                 let [u, v] = d.edge.map(|v| mesh.rest()[v as usize]);
-                (v[0] - u[0]).hypot(v[1] - u[1])
+                hypot(v[0] - u[0], v[1] - u[1])
             })
             .collect();
         let stencils = mesh
@@ -485,7 +486,7 @@ impl Sheet {
         self.spans.push(Span {
             stencil,
             crease: None,
-            length: (b[0] - a[0]).hypot(b[1] - a[1]),
+            length: hypot(b[0] - a[0], b[1] - a[1]),
             plastic: Plastic {
                 rest: 0.0,
                 rotation: 0.0,

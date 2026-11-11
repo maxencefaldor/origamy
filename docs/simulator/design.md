@@ -938,6 +938,11 @@ Phase 6 adds these findings so far:
   The planner now opens such a crease to nearly flat, the other creases following, then folds the step's new creases to their ends.
   Each closure starts from the last, so the creases that follow move on from where they lie.
   A square folded on its diagonal, its corner reversed inside, now lands within 0.34 mm, every layer in order.
+- **Lengths that round the same everywhere.**
+  The cup folded within 1.6 mm on one machine and strayed 84 mm on a CI runner, with the same build.
+  The C library's `hypot` rounds differently on different processors, and the simulator took lengths with it.
+  Lengths now come from square roots of sums of squares, so a simulation rounds the same on every processor.
+  Simple scenes now give the same bits on AMD EPYC 7763 and 9V74 runners, an Intel Xeon runner and a local Intel Xeon.
 
 Phase 6 deletes most of origamy's rigid 3D layer.
 The layer comprises per-face rigid forms, the shape, flex and tilt mechanisms, layer lifts, drawn bends, rigid collapse paths and the viewer's animation modes.

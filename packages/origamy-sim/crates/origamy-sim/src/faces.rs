@@ -11,6 +11,7 @@
 //! strip with tiny ones. A point that only lines name and that lies on a face's edge splits the
 //! edge, so the refinement never grades its triangles down to the gaps between such points.
 
+use crate::length::hypot;
 use spade::handles::{FixedUndirectedEdgeHandle, FixedVertexHandle};
 use spade::{
     AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation,
@@ -251,7 +252,7 @@ fn sliver(cdt: &Cdt, face: spade::handles::FixedFaceHandle<spade::handles::Inner
     let area = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs();
     let longest = [(a, b), (b, c), (c, a)]
         .iter()
-        .map(|(p, q)| (q.x - p.x).hypot(q.y - p.y))
+        .map(|(p, q)| hypot(q.x - p.x, q.y - p.y))
         .fold(0.0, f64::max);
     area < ON_EDGE * longest
 }
@@ -415,7 +416,7 @@ fn edge_beside(
             let share = (((position.x - a.x) * dx + (position.y - a.y) * dy) / (dx * dx + dy * dy))
                 .clamp(0.0, 1.0);
             let onto = Point2::new(a.x + share * dx, a.y + share * dy);
-            let distance = (position.x - onto.x).hypot(position.y - onto.y);
+            let distance = hypot(position.x - onto.x, position.y - onto.y);
             (distance < ON_EDGE).then_some((distance, e.fix(), onto))
         })
         .min_by(|p, q| p.0.total_cmp(&q.0))
@@ -429,7 +430,7 @@ fn edge_beside(
 /// splits both at the crossing.
 fn join(cdt: &mut Cdt, from: FixedVertexHandle, to: FixedVertexHandle, length: f64) -> Vec<usize> {
     let [a, b] = [from, to].map(|v| cdt.vertex(v).position());
-    let span = (b.x - a.x).hypot(b.y - a.y);
+    let span = hypot(b.x - a.x, b.y - a.y);
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
@@ -598,7 +599,7 @@ mod tests {
             // Every triangle is small and well shaped.
             let sides: Vec<f64> = [[a, b], [b, c], [c, a]]
                 .iter()
-                .map(|[p, q]| (q[0] - p[0]).hypot(q[1] - p[1]))
+                .map(|[p, q]| hypot(q[0] - p[0], q[1] - p[1]))
                 .collect();
             let area = 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]));
             assert!(
@@ -658,7 +659,7 @@ mod tests {
                 let edge = [pair[0].min(pair[1]), pair[0].max(pair[1])];
                 assert!(edges.binary_search(&edge).is_ok(), "{edge:?} is no edge");
                 let [u, v] = [pair[0], pair[1]].map(|w| rest[w as usize]);
-                assert!((v[0] - u[0]).hypot(v[1] - u[1]) <= length * (1.0 + 1e-9));
+                assert!(hypot(v[0] - u[0], v[1] - u[1]) <= length * (1.0 + 1e-9));
                 let off = (q[0] - p[0]) * (v[1] - p[1]) - (q[1] - p[1]) * (v[0] - p[0]);
                 assert!(off.abs() < 1e-12, "vertex {v:?} lies off line {a}-{b}");
             }
@@ -797,7 +798,7 @@ mod tests {
             let doubled = ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs();
             let longest = [(a, b), (b, c), (c, a)]
                 .iter()
-                .map(|(p, q)| (q[0] - p[0]).hypot(q[1] - p[1]))
+                .map(|(p, q)| hypot(q[0] - p[0], q[1] - p[1]))
                 .fold(0.0, f64::max);
             assert!(doubled > ON_EDGE * longest, "triangle {t:?} is a sliver");
         }
@@ -900,7 +901,7 @@ mod tests {
         let meshed = Faces::new(&points, &faces, &[], Refinement::of_area(4e-5)).unwrap();
         let rest = meshed.mesh.rest();
         for (point, place) in points.iter().zip(rest) {
-            let moved = (point[0] - place[0]).hypot(point[1] - place[1]);
+            let moved = hypot(point[0] - place[0], point[1] - place[1]);
             assert!(moved < 1e-12, "{point:?} moved {moved} or dropped out");
         }
         let area: f64 = meshed
