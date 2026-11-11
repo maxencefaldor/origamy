@@ -920,8 +920,7 @@ Phase 6 adds these findings so far:
   The preliminary base took 15,940 iterations and 363 s to fold.
   Each line of a band now turns its rest angle by a share of the spans' turn, and keeps what it has yielded before.
   A line's share grows with how far it bends, as plastic flow under proportional loading does, and a flat band yields evenly.
-  The lines beside each span share the turn there, so every part of a band yields the whole turn.
-  Shares across the whole band left the paper plane 53 mm from its state, and shares by span fold it within 3.5 mm.
+  Shares span by span left the cup 88 mm from its state, the glider 53 mm and the winglet dart 33 mm, and shares across the band fold all three within 4.5 mm.
   A line rests a margin short of a half turn at most, as a drive does, so the bird base's bands never rest past flat.
   The preliminary base folds in 7,259 iterations and 110 s, every time step converged.
   Even shares stiffened the curls of layers nested in a paper plane's wing, and its last turn stopped 13 mm short.

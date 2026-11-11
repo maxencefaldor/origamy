@@ -110,6 +110,15 @@ Paper planes whose wings spread level from the body.
 
 <div class="grid cards origamy-cards origamy-gallery" markdown>
 
+-   ![The glider example](images/gallery-glider.png)
+
+    **[Glider](gallery/glider.html)** · 15 steps
+
+    A paper plane whose nose folds back onto the corners' feet, so its wings run wide.
+    The new corners fold to the keel again, and the wings spread level from the body.
+
+    [Open in 3D](gallery/glider.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/glider.py)
+
 -   ![The nakamura lock example](images/gallery-nakamura-lock.png)
 
     **[Nakamura lock](gallery/nakamura-lock.html)** · 9 steps
@@ -145,6 +154,15 @@ Traditional models folded step by step as diagrams teach them, with every crease
     The bottom edges fold up onto the axis as the heart's point, and the lobes' corners fold behind.
 
     [Open in 3D](gallery/heart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/heart.py)
+
+-   ![The cup example](images/gallery-cup.png)
+
+    **[Cup](gallery/cup.html)** · 9 steps
+
+    A traditional paper cup, from simple folds only.
+    Each side corner travels along its angle's bisector, found by a precrease.
+
+    [Open in 3D](gallery/cup.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cup.py)
 
 -   ![The fortune teller example](images/gallery-fortune-teller.png)
 
@@ -282,15 +300,6 @@ Regular shapes folded from a square, as Sundara Row's *Geometric Exercises in Pa
 
     [Open in 3D](gallery/octagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/octagon.py)
 
--   ![The dodecagon example](images/gallery-dodecagon.png)
-
-    **[Dodecagon](gallery/dodecagon.html)** · 8 steps
-
-    A regular dodecagon whose incircle touches the square's edges, four of its sides on them.
-    Two slanted sides cut each corner of the square, at 30° and 60°, and fold behind.
-
-    [Open in 3D](gallery/dodecagon.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/dodecagon.py)
-
 </div>
 
 ## Bases
@@ -324,6 +333,14 @@ The bases most traditional models start from: plain folds, collapses and petal f
 
     [Open in 3D](gallery/cupboard-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/cupboard_base.py)
 
+-   ![The preliminary base example](images/gallery-preliminary-base.png)
+
+    **[Preliminary base](gallery/preliminary-base.html)** · 5 steps
+
+    Four precreases through the center, collapsed in one step into a square of four flaps.
+
+    [Open in 3D](gallery/preliminary-base.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/preliminary_base.py)
+
 -   ![The waterbomb base example](images/gallery-waterbomb-base.png)
 
     **[Waterbomb base](gallery/waterbomb-base.html)** · 4 steps
@@ -356,5 +373,14 @@ Models designed with origamy, each a short composition of the same exact actions
     A preliminary base whose front and back flaps fold their edges to the center, as a bird base begins, and stop there.
 
     [Open in 3D](gallery/arrowhead.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/arrowhead.py)
+
+-   ![The winglet dart example](images/gallery-winglet-dart.png)
+
+    **[Winglet dart](gallery/winglet-dart.html)** · 16 steps
+
+    The classic dart, each wingtip turned up square as a winglet.
+    Each winglet's crease lies where the paper's edge folds onto the wing's crease.
+
+    [Open in 3D](gallery/winglet-dart.html) · [Script](https://github.com/maxencefaldor/origamy/blob/main/examples/winglet_dart.py)
 
 </div>
