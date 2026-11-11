@@ -27,8 +27,8 @@ the next. Spans turn the paper beyond one edge of a band against the paper beyon
 other, and the band bends as the layers inside let it. The band yields as the spans
 turn, each line in proportion to how far it bends. Round each vertex, the bands
 stop where they clear each other, and the paper between them is cut away, as the
-offset crease method for thick panels does. Hands hold the paper beside a band, never
-the band itself.
+offset crease method for thick panels does. Hands hold the paper clear of the bands,
+and the triangles that touch a band follow its curl.
 
 Without contact between layers, paper passes through paper as a sheet without
 thickness does, and creases fold sharp, with no bands. Orders then keep the layers in
@@ -387,6 +387,10 @@ class _Folder:
         self.banded = np.zeros(len(self.mesh.rest), dtype=bool)
         for band, _ in self.bands:
             self.banded[np.array(band, dtype=np.int64).ravel()] = True
+        triangles = self.mesh.triangles
+        self.touching = np.zeros(len(self.mesh.rest), dtype=bool)
+        """Whether each vertex is a corner of a triangle that touches a band."""
+        self.touching[triangles[self.banded[triangles].any(axis=1)]] = True
         table = physics.settings.table
         self.lying = 0.0 if table is None else table.height + 0.5 * layer
         # Paper below half a layer over the lying sheet touches the table.
@@ -760,10 +764,11 @@ class _Folder:
     def _hold(self, staying: NDArray[np.bool_]) -> None:
         """Hold down the vertices ``staying`` where they lie on the table.
 
-        A hand holds the paper beside the bands, which bend as they must. Where no paper
-        that stays touches the table, the hand holds all that stays.
+        A hand holds the paper clear of the bands, which bend as they must. The triangles
+        that touch a band follow its curl, so no hand pins the paper at a band's edge.
+        Where no paper that stays touches the table, the hand holds all that stays.
         """
-        staying = staying & ~self.banded
+        staying = staying & ~self.touching
         held = staying & (self.simulation.positions(0)[:, 2] < self.ground)
         if not held.any():
             held = staying
