@@ -15,6 +15,8 @@ concurrency:
 
 env:
   UV_LOCKED: "1"
+  # One set of OpenBLAS kernels on every runner, so numpy's linear algebra rounds alike.
+  OPENBLAS_CORETYPE: Haswell
 
 jobs:
   build:
